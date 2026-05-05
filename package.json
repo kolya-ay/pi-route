@@ -1,5 +1,5 @@
 {
-  "name": "bootstrap-template",
+  "name": "hono-router",
   "version": "0.1.0",
   "type": "module",
   "scripts": {
@@ -18,12 +18,18 @@
     "pre-push": "pnpm tsc --noEmit"
   },
   "lint-staged": {
-    "*.{ts,js}": ["prettier --write", "eslint --fix --max-warnings=0"],
-    "*.{json,md}": ["prettier --write"]
+    "*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix --max-warnings=0"
+    ],
+    "*.{json,md}": [
+      "prettier --write"
+    ]
   },
   "dependencies": {
     "@hono/node-server": "^2.0.0",
-    "hono": "^4.12.14"
+    "hono": "^4.12.14",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
