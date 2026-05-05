@@ -1,18 +1,18 @@
 // src/backends/passthrough-openai.ts
 
-import { resolveApiKey } from '../auth/credentials.js'
-import type { Account, Backend, BackendResponse, IncomingRequest } from '../types.js'
+import type { Account, Backend, BackendResponse, IncomingRequest } from '../types'
 
 export const createPassthroughOpenAIBackend = (
   name: string,
   baseUrl: string,
-  fetchFn: (req: Request) => Promise<Response> = (req) => globalThis.fetch(req),
+  fetchFn: (req: Request) => Promise<Response> = (req) => globalThis.fetch(req)
 ): Backend => ({
   name,
   type: 'passthrough-openai',
 
   async dispatch(request: IncomingRequest, account: Account): Promise<BackendResponse> {
-    const apiKey = resolveApiKey(account)
+    if (!account.resolveKey) throw new Error(`Account '${account.name}' has no resolveKey`)
+    const apiKey = await account.resolveKey()
     const start = Date.now()
 
     const headers = new Headers(request.rawRequest.headers)
@@ -25,7 +25,12 @@ export const createPassthroughOpenAIBackend = (
     const upstream = new Request(
       rewrittenUrl,
       // duplex: 'half' is required for streaming request bodies in Node.js
-      { method: request.rawRequest.method, headers, body: request.rawRequest.body, duplex: 'half' } as RequestInit,
+      {
+        method: request.rawRequest.method,
+        headers,
+        body: request.rawRequest.body,
+        duplex: 'half'
+      } as RequestInit
     )
 
     const response = await fetchFn(upstream)
@@ -45,8 +50,8 @@ export const createPassthroughOpenAIBackend = (
         backend: name,
         model: request.model,
         latencyMs,
-        account: account.name,
-      },
+        account: account.name
+      }
     }
-  },
+  }
 })

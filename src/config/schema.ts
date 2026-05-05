@@ -1,42 +1,24 @@
 import { z } from 'zod'
+
 import type { RouterOptions } from '../types'
 
-const AccountSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('api-key'), name: z.string(), key: z.string() }),
-  z.object({ type: z.literal('claude-cli'), name: z.string(), tokenPath: z.string() }),
-  z.object({
-    type: z.literal('anthropic-oauth'),
-    name: z.string(),
-    credentials: z
-      .object({ refresh: z.string(), access: z.string(), expires: z.number() })
-      .optional(),
-  }),
-  z.object({
-    type: z.literal('copilot-oauth'),
-    name: z.string(),
-    credentials: z
-      .object({ refresh: z.string(), access: z.string(), expires: z.number() })
-      .optional(),
-  }),
-  z.object({
-    type: z.literal('codex-oauth'),
-    name: z.string(),
-    credentials: z
-      .object({ refresh: z.string(), access: z.string(), expires: z.number() })
-      .optional(),
-  }),
-  z.object({
-    type: z.literal('antigravity-oauth'),
-    name: z.string(),
-    credentials: z
-      .object({ refresh: z.string(), access: z.string(), expires: z.number() })
-      .optional(),
-  }),
-])
+const AccountSchema = z
+  .object({
+    type: z.enum([
+      'api-key',
+      'claude-cli',
+      'anthropic-oauth',
+      'copilot-oauth',
+      'codex-oauth',
+      'antigravity-oauth'
+    ]),
+    name: z.string()
+  })
+  .passthrough()
 
 const BalancingSchema = z.object({
   strategy: z.enum(['round-robin', 'sticky', 'fill-first']),
-  rateLimitPerModel: z.boolean().optional(),
+  rateLimitPerModel: z.boolean().optional()
 })
 
 const BackendOptionsSchema = z.object({
@@ -44,31 +26,18 @@ const BackendOptionsSchema = z.object({
   baseUrl: z.string(),
   provider: z.string().optional(),
   accounts: z.array(AccountSchema),
-  balancing: BalancingSchema,
+  balancing: BalancingSchema
 })
 
-const RoutingRuleSchema = z.object({
-  match: z.string(),
-  backend: z.string(),
-})
+const RoutingRuleSchema = z.object({ match: z.string(), backend: z.string() })
 
-const ScenarioEntrySchema = z.object({
-  backend: z.string(),
-  model: z.string().optional(),
-})
+const ScenarioEntrySchema = z.object({ backend: z.string(), model: z.string().optional() })
 
 const RouterOptionsSchema = z.object({
   server: z
-    .object({
-      port: z.number().int().positive(),
-      host: z.string(),
-    })
+    .object({ port: z.number().int().positive(), host: z.string() })
     .default({ port: 3000, host: '127.0.0.1' }),
-  auth: z
-    .object({
-      apiKeys: z.array(z.string()),
-    })
-    .default({ apiKeys: [] }),
+  auth: z.object({ apiKeys: z.array(z.string()) }).default({ apiKeys: [] }),
   backends: z.record(z.string(), BackendOptionsSchema),
   routing: z.object({
     rules: z.array(RoutingRuleSchema).default([]),
@@ -76,16 +45,14 @@ const RouterOptionsSchema = z.object({
       .object({
         thinking: ScenarioEntrySchema.optional(),
         'long-context': ScenarioEntrySchema.optional(),
-        background: ScenarioEntrySchema.optional(),
+        background: ScenarioEntrySchema.optional()
       })
       .default({}),
-    default: z.object({ backend: z.string() }),
+    default: z.object({ backend: z.string() })
   }),
   telemetry: z
-    .object({
-      level: z.enum(['debug', 'info', 'warn', 'error']),
-    })
-    .default({ level: 'info' }),
+    .object({ level: z.enum(['debug', 'info', 'warn', 'error']) })
+    .default({ level: 'info' })
 })
 
 const validateBackendRefs = (opts: z.infer<typeof RouterOptionsSchema>): RouterOptions => {

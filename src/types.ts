@@ -4,13 +4,13 @@
 
 export type BackendType = 'passthrough-anthropic' | 'passthrough-openai' | 'pi-ai'
 
-export interface Backend {
+export type Backend = {
   readonly name: string
   readonly type: BackendType
   dispatch(request: IncomingRequest, account: Account): Promise<BackendResponse>
 }
 
-export interface IncomingRequest {
+export type IncomingRequest = {
   id: string
   format: 'anthropic' | 'openai'
   rawRequest: Request
@@ -18,14 +18,14 @@ export interface IncomingRequest {
   stream: boolean
 }
 
-export interface BackendResponse {
+export type BackendResponse = {
   status: number
   headers: Headers
   body: ReadableStream | Record<string, unknown>
   metadata: ResponseMetadata
 }
 
-export interface ResponseMetadata {
+export type ResponseMetadata = {
   requestId: string
   backend: string
   model: string
@@ -37,12 +37,12 @@ export interface ResponseMetadata {
 
 // === Routing ===
 
-export interface RoutingStrategy {
+export type RoutingStrategy = {
   readonly name: string
   resolve(context: RoutingContext): RoutingDecision | null
 }
 
-export interface RoutingContext {
+export type RoutingContext = {
   model: string
   format: 'anthropic' | 'openai'
   headers: Headers
@@ -50,20 +50,16 @@ export interface RoutingContext {
   options: RouterOptions
 }
 
-export interface RoutingDecision {
-  backend: string
-  model?: string | undefined
-  reason: string
-}
+export type RoutingDecision = { backend: string; model?: string | undefined; reason: string }
 
 // === Balancing ===
 
-export interface BalancingStrategy {
+export type BalancingStrategy = {
   readonly name: string
   pick(accounts: AccountState[]): AccountState | null
 }
 
-export interface AccountState {
+export type AccountState = {
   account: Account
   rateLimits: Map<string, number>
   lastUsed: number
@@ -74,30 +70,25 @@ export interface AccountState {
 
 // === Accounts ===
 
-export type Account =
-  | { type: 'api-key'; name: string; key: string }
-  | { type: 'claude-cli'; name: string; tokenPath: string }
-  | { type: 'anthropic-oauth'; name: string; credentials?: OAuthCredentials | undefined }
-  | { type: 'copilot-oauth'; name: string; credentials?: OAuthCredentials | undefined }
-  | { type: 'codex-oauth'; name: string; credentials?: OAuthCredentials | undefined }
-  | { type: 'antigravity-oauth'; name: string; credentials?: OAuthCredentials | undefined }
+export type AccountType =
+  | 'api-key'
+  | 'claude-cli'
+  | 'anthropic-oauth'
+  | 'copilot-oauth'
+  | 'codex-oauth'
+  | 'antigravity-oauth'
 
-export interface OAuthCredentials {
-  refresh: string
-  access: string
-  expires: number
+export type Account = {
+  type: AccountType
+  name: string
+  resolveKey?: (() => string | Promise<string>) | undefined
 }
 
 // === Telemetry ===
 
-export interface TelemetrySink {
-  emit(event: TelemetryEvent): void
-}
+export type TelemetrySink = { emit(event: TelemetryEvent): void }
 
-export interface TelemetryEmitter {
-  sinks: TelemetrySink[]
-  emit(event: TelemetryEvent): void
-}
+export type TelemetryEmitter = { sinks: TelemetrySink[]; emit(event: TelemetryEvent): void }
 
 export type TelemetryEvent =
   | RequestStartEvent
@@ -105,7 +96,7 @@ export type TelemetryEvent =
   | BackendErrorEvent
   | RateLimitEvent
 
-export interface RequestStartEvent {
+export type RequestStartEvent = {
   type: 'request_start'
   requestId: string
   timestamp: number
@@ -114,7 +105,7 @@ export interface RequestStartEvent {
   stream: boolean
 }
 
-export interface RequestEndEvent {
+export type RequestEndEvent = {
   type: 'request_end'
   requestId: string
   timestamp: number
@@ -128,7 +119,7 @@ export interface RequestEndEvent {
   error?: string | undefined
 }
 
-export interface BackendErrorEvent {
+export type BackendErrorEvent = {
   type: 'backend_error'
   requestId: string
   backend: string
@@ -137,7 +128,7 @@ export interface BackendErrorEvent {
   message: string
 }
 
-export interface RateLimitEvent {
+export type RateLimitEvent = {
   type: 'ratelimit_hit'
   backend: string
   account: string
@@ -147,7 +138,7 @@ export interface RateLimitEvent {
 
 // === Config ===
 
-export interface RouterOptions {
+export type RouterOptions = {
   server: { port: number; host: string }
   auth: { apiKeys: string[] }
   backends: Record<string, BackendOptions>
@@ -155,7 +146,7 @@ export interface RouterOptions {
   telemetry: TelemetryOptions
 }
 
-export interface BackendOptions {
+export type BackendOptions = {
   type: BackendType
   baseUrl: string
   provider?: string | undefined
@@ -163,12 +154,12 @@ export interface BackendOptions {
   balancing: BalancingOptions
 }
 
-export interface BalancingOptions {
+export type BalancingOptions = {
   strategy: 'round-robin' | 'sticky' | 'fill-first'
   rateLimitPerModel?: boolean | undefined
 }
 
-export interface RoutingOptions {
+export type RoutingOptions = {
   rules: RoutingRule[]
   scenarios: Partial<Record<ScenarioType, { backend: string; model?: string | undefined }>>
   default: { backend: string }
@@ -176,11 +167,6 @@ export interface RoutingOptions {
 
 export type ScenarioType = 'thinking' | 'long-context' | 'background'
 
-export interface RoutingRule {
-  match: string
-  backend: string
-}
+export type RoutingRule = { match: string; backend: string }
 
-export interface TelemetryOptions {
-  level: 'debug' | 'info' | 'warn' | 'error'
-}
+export type TelemetryOptions = { level: 'debug' | 'info' | 'warn' | 'error' }
