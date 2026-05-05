@@ -9,7 +9,7 @@ export default tseslint.config(
   { ignores: ['dist', 'node_modules'] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended, eslintConfigPrettier],
-    files: ['**/*.{ts,js}'],
+    files: ['**/*.ts'],
     languageOptions: {
       globals: globals.node
     },

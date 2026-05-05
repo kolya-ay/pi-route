@@ -2,3 +2,5 @@
 node_modules/
 dist/
 *.tsbuildinfo
+bun.lock
+bun.lockb

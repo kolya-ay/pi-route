@@ -6,7 +6,7 @@
     "noEmit": true,
     "rootDir": "./src",
 
-    "types": ["node"],
+    "types": ["bun"],
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
