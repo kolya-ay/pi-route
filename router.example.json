@@ -1,18 +1,16 @@
 {
-  "server": { "port": 3000, "host": "127.0.0.1" },
-  "auth": { "apiKeys": [] },
   "backends": {
     "claude-cli": {
       "type": "passthrough-anthropic",
       "baseUrl": "https://api.anthropic.com",
-      "accounts": [{ "name": "personal", "type": "claude-cli", "tokenPath": "~/.claude" }],
+      "accounts": [
+        { "type": "claude-cli", "name": "personal", "tokenPath": "~/.claude/credentials.json" }
+      ],
       "balancing": { "strategy": "sticky", "rateLimitPerModel": true }
     }
   },
   "routing": {
     "rules": [{ "match": "claude-*", "backend": "claude-cli" }],
-    "scenarios": {},
     "default": { "backend": "claude-cli" }
-  },
-  "telemetry": { "level": "info" }
+  }
 }
