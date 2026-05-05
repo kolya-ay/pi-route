@@ -1,6 +1,6 @@
 // src/balancing/strategies.ts
 
-import type { AccountState, BalancingStrategy } from '../types.js'
+import type { AccountState, BalancingStrategy } from '../types'
 
 export const createRoundRobinStrategy = (): BalancingStrategy => {
   let index = 0
@@ -11,7 +11,7 @@ export const createRoundRobinStrategy = (): BalancingStrategy => {
       const picked = accounts[index % accounts.length] ?? null
       index = (index + 1) % accounts.length
       return picked
-    },
+    }
   }
 }
 
@@ -29,7 +29,7 @@ export const createStickyStrategy = (): BalancingStrategy => {
       const picked = accounts[rrIndex % accounts.length] ?? null
       rrIndex = (rrIndex + 1) % accounts.length
       return picked
-    },
+    }
   }
 }
 
@@ -37,5 +37,5 @@ export const createFillFirstStrategy = (): BalancingStrategy => ({
   name: 'fill-first',
   pick(accounts: AccountState[]): AccountState | null {
     return accounts[0] ?? null
-  },
+  }
 })

@@ -1,6 +1,6 @@
 // src/backends/pi-ai/backend.ts
 
-import type { Backend } from '../../types.js'
+import type { Backend } from '../../types'
 
 export const createPiAiBackend = (name: string, _provider: string): Backend => ({
   name,
@@ -8,5 +8,5 @@ export const createPiAiBackend = (name: string, _provider: string): Backend => (
 
   async dispatch(): Promise<never> {
     throw new Error('not yet fully implemented')
-  },
+  }
 })

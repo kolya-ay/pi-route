@@ -1,8 +1,10 @@
 // src/routing/pipeline.test.ts
 
-import { describe, expect, it } from 'vitest'
-import type { RouterOptions, RoutingContext } from '../types.js'
-import { createRoutingPipeline } from './pipeline.js'
+import { describe, expect, it } from 'bun:test'
+
+import type { RouterOptions, RoutingContext } from '../types'
+
+import { createRoutingPipeline } from './pipeline'
 
 const baseOptions: RouterOptions = {
   server: { port: 4000, host: '127.0.0.1' },
@@ -12,26 +14,24 @@ const baseOptions: RouterOptions = {
       type: 'passthrough-anthropic',
       baseUrl: 'http://localhost:3000',
       accounts: [],
-      balancing: { strategy: 'round-robin' },
+      balancing: { strategy: 'round-robin' }
     },
     chutes: {
       type: 'passthrough-openai',
       baseUrl: 'http://chutes.example.com',
       accounts: [],
-      balancing: { strategy: 'round-robin' },
-    },
+      balancing: { strategy: 'round-robin' }
+    }
   },
   routing: {
     rules: [
       { match: 'claude-*', backend: 'claude-cli' },
-      { match: 'deepseek-*', backend: 'chutes' },
+      { match: 'deepseek-*', backend: 'chutes' }
     ],
-    scenarios: {
-      thinking: { backend: 'claude-cli' },
-    },
-    default: { backend: 'chutes' },
+    scenarios: { thinking: { backend: 'claude-cli' } },
+    default: { backend: 'chutes' }
   },
-  telemetry: { level: 'info' },
+  telemetry: { level: 'info' }
 }
 
 const makeContext = (overrides: Partial<RoutingContext> = {}): RoutingContext => ({
@@ -40,7 +40,7 @@ const makeContext = (overrides: Partial<RoutingContext> = {}): RoutingContext =>
   headers: new Headers(),
   body: {},
   options: baseOptions,
-  ...overrides,
+  ...overrides
 })
 
 describe('createRoutingPipeline', () => {
@@ -64,8 +64,8 @@ describe('createRoutingPipeline', () => {
       makeContext({
         model: 'some-unknown-model',
         format: 'anthropic',
-        body: { thinking: { type: 'enabled', budget_tokens: 1000 } },
-      }),
+        body: { thinking: { type: 'enabled', budget_tokens: 1000 } }
+      })
     )!
     expect(decision.backend).toBe('claude-cli')
     expect(decision.reason).toBe('scenario: thinking')
@@ -77,8 +77,8 @@ describe('createRoutingPipeline', () => {
       makeContext({
         model: 'some-unknown-model',
         format: 'openai',
-        body: { reasoning_effort: 'high' },
-      }),
+        body: { reasoning_effort: 'high' }
+      })
     )!
     expect(decision.backend).toBe('claude-cli')
     expect(decision.reason).toBe('scenario: thinking')
@@ -98,8 +98,8 @@ describe('createRoutingPipeline', () => {
       makeContext({
         model: 'claude-haiku-3-5',
         format: 'anthropic',
-        body: { thinking: { type: 'enabled', budget_tokens: 500 } },
-      }),
+        body: { thinking: { type: 'enabled', budget_tokens: 500 } }
+      })
     )!
     expect(decision.backend).toBe('claude-cli')
     expect(decision.reason).toBe('rule: claude-*')

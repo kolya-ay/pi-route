@@ -1,12 +1,12 @@
 // src/backends/pi-ai/to-context.ts
 
-export interface PiAiMessage {
+export type PiAiMessage = {
   role: 'user' | 'assistant' | 'tool'
   content: string | PiAiContentBlock[]
   toolCallId?: string | undefined
 }
 
-export interface PiAiContentBlock {
+export type PiAiContentBlock = {
   type: 'text' | 'tool_use' | 'tool_result'
   text?: string | undefined
   id?: string | undefined
@@ -16,13 +16,13 @@ export interface PiAiContentBlock {
   content?: string | undefined
 }
 
-export interface PiAiTool {
+export type PiAiTool = {
   name: string
   description?: string | undefined
   parameters: Record<string, unknown>
 }
 
-export interface PiAiContext {
+export type PiAiContext = {
   systemPrompt?: string | undefined
   messages: PiAiMessage[]
   tools?: PiAiTool[] | undefined
@@ -44,7 +44,7 @@ const extractAnthropicSystem = (system: unknown): string | undefined => {
 
 const extractAnthropicMessageContent = (
   content: unknown,
-  role: 'user' | 'assistant',
+  role: 'user' | 'assistant'
 ): PiAiMessage[] => {
   if (typeof content === 'string') {
     return [{ role, content }]
@@ -53,7 +53,7 @@ const extractAnthropicMessageContent = (
   if (!Array.isArray(content)) return []
 
   const blocks = content.filter(
-    (b): b is Record<string, unknown> => typeof b === 'object' && b !== null,
+    (b): b is Record<string, unknown> => typeof b === 'object' && b !== null
   )
 
   // Check for tool_result blocks — these become separate tool messages
@@ -75,7 +75,7 @@ const extractAnthropicMessageContent = (
           input:
             typeof b['input'] === 'object' && b['input'] !== null
               ? (b['input'] as Record<string, unknown>)
-              : {},
+              : {}
         }
       }
       return { type: 'text', text: String(b['text'] ?? '') }
@@ -95,16 +95,12 @@ const extractAnthropicMessageContent = (
       typeof tr['content'] === 'string'
         ? tr['content']
         : Array.isArray(tr['content'])
-          ? (tr['content'] as Record<string, unknown>[])
+          ? (tr['content'] as Array<Record<string, unknown>>)
               .filter((b) => b['type'] === 'text')
               .map((b) => String(b['text'] ?? ''))
               .join('\n')
           : ''
-    messages.push({
-      role: 'tool',
-      content: resultContent,
-      toolCallId: toolUseId,
-    })
+    messages.push({ role: 'tool', content: resultContent, toolCallId: toolUseId })
   }
 
   return messages
@@ -120,7 +116,7 @@ const convertAnthropicTools = (tools: unknown): PiAiTool[] | undefined => {
       parameters:
         typeof t['input_schema'] === 'object' && t['input_schema'] !== null
           ? (t['input_schema'] as Record<string, unknown>)
-          : {},
+          : {}
     }))
 }
 
@@ -139,7 +135,7 @@ export const anthropicToContext = (body: Record<string, unknown>): PiAiContext =
   return {
     ...(systemPrompt !== undefined ? { systemPrompt } : {}),
     messages,
-    ...(tools !== undefined ? { tools } : {}),
+    ...(tools !== undefined ? { tools } : {})
   }
 }
 
@@ -161,7 +157,7 @@ const convertOpenAiTools = (tools: unknown): PiAiTool[] | undefined => {
         parameters:
           typeof fn['parameters'] === 'object' && fn['parameters'] !== null
             ? (fn['parameters'] as Record<string, unknown>)
-            : {},
+            : {}
       }
     })
 }
@@ -175,7 +171,7 @@ const convertOpenAiMessage = (m: Record<string, unknown>): PiAiMessage | null =>
     return {
       role: 'tool',
       content: typeof m['content'] === 'string' ? m['content'] : '',
-      toolCallId: typeof m['tool_call_id'] === 'string' ? m['tool_call_id'] : undefined,
+      toolCallId: typeof m['tool_call_id'] === 'string' ? m['tool_call_id'] : undefined
     }
   }
 
@@ -189,18 +185,19 @@ const convertOpenAiMessage = (m: Record<string, unknown>): PiAiMessage | null =>
             typeof tc['function'] === 'object' && tc['function'] !== null
               ? (tc['function'] as Record<string, unknown>)
               : {}
-          let input: Record<string, unknown> = {}
-          try {
-            const args = fn['arguments']
-            input = typeof args === 'string' ? (JSON.parse(args) as Record<string, unknown>) : {}
-          } catch {
-            input = {}
-          }
+          const input = ((): Record<string, unknown> => {
+            try {
+              const args = fn['arguments']
+              return typeof args === 'string' ? (JSON.parse(args) as Record<string, unknown>) : {}
+            } catch {
+              return {}
+            }
+          })()
           return {
             type: 'tool_use' as const,
             id: typeof tc['id'] === 'string' ? tc['id'] : undefined,
             name: typeof fn['name'] === 'string' ? fn['name'] : undefined,
-            input,
+            input
           }
         })
       return { role: 'assistant', content: parts }
@@ -216,7 +213,7 @@ const convertOpenAiMessage = (m: Record<string, unknown>): PiAiMessage | null =>
     return { role: 'user', content }
   }
   if (Array.isArray(content)) {
-    const parts: PiAiContentBlock[] = (content as Record<string, unknown>[])
+    const parts: PiAiContentBlock[] = (content as Array<Record<string, unknown>>)
       .filter((b): b is Record<string, unknown> => typeof b === 'object' && b !== null)
       .map((b) => ({ type: 'text' as const, text: String(b['text'] ?? '') }))
     return { role: 'user', content: parts }
@@ -227,7 +224,7 @@ const convertOpenAiMessage = (m: Record<string, unknown>): PiAiMessage | null =>
 export const openaiToContext = (body: Record<string, unknown>): PiAiContext => {
   const rawMessages = Array.isArray(body['messages']) ? body['messages'] : []
   const typedMessages = rawMessages.filter(
-    (m): m is Record<string, unknown> => typeof m === 'object' && m !== null,
+    (m): m is Record<string, unknown> => typeof m === 'object' && m !== null
   )
 
   const systemMsg = typedMessages.find((m) => m['role'] === 'system')
@@ -245,6 +242,6 @@ export const openaiToContext = (body: Record<string, unknown>): PiAiContext => {
   return {
     ...(systemPrompt !== undefined ? { systemPrompt } : {}),
     messages,
-    ...(tools !== undefined ? { tools } : {}),
+    ...(tools !== undefined ? { tools } : {})
   }
 }

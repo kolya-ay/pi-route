@@ -3,15 +3,15 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 
-import { createAuthMiddleware } from './auth/middleware.js'
-import { createBackendRegistry } from './backends/registry.js'
-import { createRoutingPipeline } from './routing/pipeline.js'
-import { createChatCompletionsRoute } from './routes/chat-completions.js'
-import { createHealthRoute } from './routes/health.js'
-import { createMessagesRoute } from './routes/messages.js'
-import { createModelsRoute } from './routes/models.js'
-import { createConsoleSink, createTelemetryEmitter } from './telemetry/emitter.js'
-import type { RouterOptions } from './types.js'
+import { createAuthMiddleware } from './auth/middleware'
+import { createBackendRegistry } from './backends/registry'
+import { createRoutingPipeline } from './routing/pipeline'
+import { createChatCompletionsRoute } from './routes/chat-completions'
+import { createHealthRoute } from './routes/health'
+import { createMessagesRoute } from './routes/messages'
+import { createModelsRoute } from './routes/models'
+import { createConsoleSink, createTelemetryEmitter } from './telemetry/emitter'
+import type { RouterOptions } from './types'
 
 type Env = { Variables: { requestId: string } }
 
@@ -39,7 +39,7 @@ export const createApp = (options: RouterOptions) => {
   app.route('/v1/messages', createMessagesRoute(registry, routing, options, telemetry))
   app.route(
     '/v1/chat/completions',
-    createChatCompletionsRoute(registry, routing, options, telemetry),
+    createChatCompletionsRoute(registry, routing, options, telemetry)
   )
 
   return app

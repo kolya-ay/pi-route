@@ -1,13 +1,14 @@
 // src/backends/pi-ai/pi-ai.test.ts
 
-import { describe, expect, it } from 'vitest'
-import { anthropicToContext, openaiToContext } from './to-context.js'
+import { describe, expect, it } from 'bun:test'
+
+import { anthropicToContext, openaiToContext } from './to-context'
 
 describe('anthropicToContext', () => {
   it('converts basic anthropic message to systemPrompt and user message', () => {
     const body = {
       system: 'You are a helpful assistant.',
-      messages: [{ role: 'user', content: 'Hello!' }],
+      messages: [{ role: 'user', content: 'Hello!' }]
     }
     const ctx = anthropicToContext(body)
     expect(ctx.systemPrompt).toBe('You are a helpful assistant.')
@@ -21,18 +22,16 @@ describe('anthropicToContext', () => {
     const body = {
       system: [
         { type: 'text', text: 'You are an assistant.' },
-        { type: 'text', text: 'Be concise.' },
+        { type: 'text', text: 'Be concise.' }
       ],
-      messages: [{ role: 'user', content: 'Hi' }],
+      messages: [{ role: 'user', content: 'Hi' }]
     }
     const ctx = anthropicToContext(body)
     expect(ctx.systemPrompt).toBe('You are an assistant.\nBe concise.')
   })
 
   it('omits systemPrompt when no system provided', () => {
-    const body = {
-      messages: [{ role: 'user', content: 'Hello' }],
-    }
+    const body = { messages: [{ role: 'user', content: 'Hello' }] }
     const ctx = anthropicToContext(body)
     expect(ctx.systemPrompt).toBeUndefined()
   })
@@ -41,8 +40,8 @@ describe('anthropicToContext', () => {
     const body = {
       messages: [
         { role: 'user', content: 'What is 2+2?' },
-        { role: 'assistant', content: [{ type: 'text', text: 'It is 4.' }] },
-      ],
+        { role: 'assistant', content: [{ type: 'text', text: 'It is 4.' }] }
+      ]
     }
     const ctx = anthropicToContext(body)
     expect(ctx.messages).toHaveLength(2)
@@ -57,25 +56,14 @@ describe('anthropicToContext', () => {
         {
           role: 'assistant',
           content: [
-            {
-              type: 'tool_use',
-              id: 'call_1',
-              name: 'get_weather',
-              input: { location: 'NYC' },
-            },
-          ],
+            { type: 'tool_use', id: 'call_1', name: 'get_weather', input: { location: 'NYC' } }
+          ]
         },
         {
           role: 'user',
-          content: [
-            {
-              type: 'tool_result',
-              tool_use_id: 'call_1',
-              content: 'Sunny, 72°F',
-            },
-          ],
-        },
-      ],
+          content: [{ type: 'tool_result', tool_use_id: 'call_1', content: 'Sunny, 72°F' }]
+        }
+      ]
     }
     const ctx = anthropicToContext(body)
     // user, assistant (tool_use), tool (tool_result)
@@ -84,7 +72,9 @@ describe('anthropicToContext', () => {
     const assistantMsg = ctx.messages[1]
     expect(assistantMsg?.role).toBe('assistant')
     expect(Array.isArray(assistantMsg?.content)).toBe(true)
-    const toolUseBlock = (assistantMsg?.content as { type: string; name?: string; id?: string }[])[0]
+    const toolUseBlock = (
+      assistantMsg?.content as Array<{ type: string; name?: string; id?: string }>
+    )[0]
     expect(toolUseBlock?.type).toBe('tool_use')
     expect(toolUseBlock?.name).toBe('get_weather')
     expect(toolUseBlock?.id).toBe('call_1')
@@ -105,10 +95,10 @@ describe('anthropicToContext', () => {
           input_schema: {
             type: 'object',
             properties: { location: { type: 'string' } },
-            required: ['location'],
-          },
-        },
-      ],
+            required: ['location']
+          }
+        }
+      ]
     }
     const ctx = anthropicToContext(body)
     expect(ctx.tools).toHaveLength(1)
@@ -116,7 +106,7 @@ describe('anthropicToContext', () => {
     expect(ctx.tools?.[0]?.description).toBe('Get current weather')
     expect(ctx.tools?.[0]?.parameters).toMatchObject({
       type: 'object',
-      properties: { location: { type: 'string' } },
+      properties: { location: { type: 'string' } }
     })
   })
 })
@@ -126,8 +116,8 @@ describe('openaiToContext', () => {
     const body = {
       messages: [
         { role: 'system', content: 'You are helpful.' },
-        { role: 'user', content: 'Hello!' },
-      ],
+        { role: 'user', content: 'Hello!' }
+      ]
     }
     const ctx = openaiToContext(body)
     expect(ctx.systemPrompt).toBe('You are helpful.')
@@ -137,9 +127,7 @@ describe('openaiToContext', () => {
   })
 
   it('omits systemPrompt when no system message', () => {
-    const body = {
-      messages: [{ role: 'user', content: 'Hello' }],
-    }
+    const body = { messages: [{ role: 'user', content: 'Hello' }] }
     const ctx = openaiToContext(body)
     expect(ctx.systemPrompt).toBeUndefined()
   })
@@ -155,14 +143,11 @@ describe('openaiToContext', () => {
             {
               id: 'call_abc123',
               type: 'function',
-              function: {
-                name: 'get_weather',
-                arguments: JSON.stringify({ location: 'NYC' }),
-              },
-            },
-          ],
-        },
-      ],
+              function: { name: 'get_weather', arguments: JSON.stringify({ location: 'NYC' }) }
+            }
+          ]
+        }
+      ]
     }
     const ctx = openaiToContext(body)
     expect(ctx.messages).toHaveLength(2)
@@ -170,7 +155,9 @@ describe('openaiToContext', () => {
     const assistantMsg = ctx.messages[1]
     expect(assistantMsg?.role).toBe('assistant')
     expect(Array.isArray(assistantMsg?.content)).toBe(true)
-    const block = (assistantMsg?.content as { type: string; name?: string; id?: string; input?: unknown }[])[0]
+    const block = (
+      assistantMsg?.content as Array<{ type: string; name?: string; id?: string; input?: unknown }>
+    )[0]
     expect(block?.type).toBe('tool_use')
     expect(block?.name).toBe('get_weather')
     expect(block?.id).toBe('call_abc123')
@@ -181,12 +168,8 @@ describe('openaiToContext', () => {
     const body = {
       messages: [
         { role: 'user', content: 'Weather?' },
-        {
-          role: 'tool',
-          tool_call_id: 'call_abc123',
-          content: 'Sunny, 72°F',
-        },
-      ],
+        { role: 'tool', tool_call_id: 'call_abc123', content: 'Sunny, 72°F' }
+      ]
     }
     const ctx = openaiToContext(body)
     expect(ctx.messages).toHaveLength(2)
@@ -205,13 +188,10 @@ describe('openaiToContext', () => {
           function: {
             name: 'search',
             description: 'Search the web',
-            parameters: {
-              type: 'object',
-              properties: { query: { type: 'string' } },
-            },
-          },
-        },
-      ],
+            parameters: { type: 'object', properties: { query: { type: 'string' } } }
+          }
+        }
+      ]
     }
     const ctx = openaiToContext(body)
     expect(ctx.tools).toHaveLength(1)

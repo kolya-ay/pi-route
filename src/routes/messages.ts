@@ -2,19 +2,23 @@
 
 import { Hono } from 'hono'
 
-import type { BackendEntry } from '../backends/registry.js'
-import type { RouterOptions, RoutingStrategy, TelemetryEmitter } from '../types.js'
-import { createDispatchHandler } from './dispatch.js'
+import type { BackendEntry } from '../backends/registry'
+import type { RouterOptions, RoutingStrategy, TelemetryEmitter } from '../types'
+
+import { createDispatchHandler } from './dispatch'
 
 export const createMessagesRoute = (
   registry: Map<string, BackendEntry>,
   routing: RoutingStrategy,
   options: RouterOptions,
-  telemetry: TelemetryEmitter,
+  telemetry: TelemetryEmitter
 ): Hono => {
   const app = new Hono()
 
-  app.post('/', createDispatchHandler({ format: 'anthropic', registry, routing, options, telemetry }))
+  app.post(
+    '/',
+    createDispatchHandler({ format: 'anthropic', registry, routing, options, telemetry })
+  )
 
   return app
 }

@@ -2,7 +2,7 @@
 
 import { Hono } from 'hono'
 
-import type { RouterOptions } from '../types.js'
+import type { RouterOptions } from '../types'
 
 export const createModelsRoute = (options: RouterOptions): Hono => {
   const app = new Hono()
@@ -15,7 +15,8 @@ export const createModelsRoute = (options: RouterOptions): Hono => {
         id: m,
         object: 'model' as const,
         owned_by:
-          options.routing.rules.find((r) => r.match === m)?.backend ?? options.routing.default.backend,
+          options.routing.rules.find((r) => r.match === m)?.backend ??
+          options.routing.default.backend
       }))
 
     return c.json({ object: 'list', data })

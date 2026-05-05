@@ -1,13 +1,23 @@
 // src/balancing/account-pool.test.ts
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Account } from '../types.js'
-import { createAccountPool } from './account-pool.js'
-import { createFillFirstStrategy, createRoundRobinStrategy } from './strategies.js'
+import { afterEach, describe, expect, it, setSystemTime } from 'bun:test'
 
-const makeAccount = (name: string): Account => ({ type: 'api-key', name, key: `key-${name}` })
+import type { Account } from '../types'
+
+import { createAccountPool } from './account-pool'
+import { createFillFirstStrategy, createRoundRobinStrategy } from './strategies'
+
+const makeAccount = (name: string): Account => ({
+  type: 'api-key',
+  name,
+  resolveKey: () => 'key-' + name
+})
 
 describe('createAccountPool', () => {
+  afterEach(() => {
+    setSystemTime()
+  })
+
   it('selects an available account', () => {
     const pool = createAccountPool([makeAccount('a')], createFillFirstStrategy(), false)
     const result = pool.select('gpt-4')
@@ -25,7 +35,7 @@ describe('createAccountPool', () => {
     const pool = createAccountPool(
       [makeAccount('a'), makeAccount('b')],
       createFillFirstStrategy(),
-      true,
+      true
     )
     const stateA = pool.states[0]!
     pool.markRateLimited(stateA, 'gpt-4', 60_000)
@@ -45,7 +55,7 @@ describe('createAccountPool', () => {
     const pool = createAccountPool(
       [makeAccount('a'), makeAccount('b')],
       createFillFirstStrategy(),
-      false,
+      false
     )
     const stateA = pool.states[0]!
     pool.markRateLimited(stateA, 'gpt-4', 60_000)
@@ -57,7 +67,7 @@ describe('createAccountPool', () => {
     const pool = createAccountPool(
       [makeAccount('a'), makeAccount('b')],
       createFillFirstStrategy(),
-      false,
+      false
     )
     pool.markError(pool.states[0]!, { status: 401, message: 'Unauthorized' })
     expect(pool.select('gpt-4')?.account.name).toBe('b')
@@ -71,29 +81,22 @@ describe('createAccountPool', () => {
     expect(stateA.lastError?.message).toBe('Server Error')
   })
 
-  describe('expired rate limits', () => {
-    beforeEach(() => {
-      vi.useFakeTimers()
-    })
-    afterEach(() => {
-      vi.useRealTimers()
-    })
-
-    it('clears expired rate limits and makes account available again', () => {
-      const pool = createAccountPool([makeAccount('a')], createFillFirstStrategy(), true)
-      const stateA = pool.states[0]!
-      pool.markRateLimited(stateA, 'gpt-4', 1_000)
-      expect(pool.select('gpt-4')).toBeNull()
-      vi.advanceTimersByTime(2_000)
-      expect(pool.select('gpt-4')?.account.name).toBe('a')
-    })
+  it('clears expired rate limits and makes account available again', () => {
+    const now = Date.now()
+    setSystemTime(new Date(now))
+    const pool = createAccountPool([makeAccount('a')], createFillFirstStrategy(), true)
+    const stateA = pool.states[0]!
+    pool.markRateLimited(stateA, 'gpt-4', 1_000)
+    expect(pool.select('gpt-4')).toBeNull()
+    setSystemTime(new Date(now + 2000))
+    expect(pool.select('gpt-4')?.account.name).toBe('a')
   })
 
   it('returns health summary', () => {
     const pool = createAccountPool(
       [makeAccount('a'), makeAccount('b'), makeAccount('c')],
       createRoundRobinStrategy(),
-      false,
+      false
     )
     pool.markRateLimited(pool.states[0]!, 'gpt-4', 60_000)
     pool.markError(pool.states[1]!, { status: 403, message: 'Forbidden' })

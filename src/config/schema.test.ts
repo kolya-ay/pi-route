@@ -1,16 +1,17 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'bun:test'
+
 import { parseConfig } from './schema'
 
 const minimalBackend = {
   type: 'passthrough-anthropic',
   baseUrl: 'https://api.anthropic.com',
   accounts: [],
-  balancing: { strategy: 'round-robin' },
+  balancing: { strategy: 'round-robin' }
 }
 
 const minimalConfig = {
   backends: { primary: minimalBackend },
-  routing: { default: { backend: 'primary' } },
+  routing: { default: { backend: 'primary' } }
 }
 
 describe('parseConfig', () => {
@@ -31,10 +32,7 @@ describe('parseConfig', () => {
   })
 
   it('preserves explicit server config', () => {
-    const result = parseConfig({
-      ...minimalConfig,
-      server: { port: 8080, host: '0.0.0.0' },
-    })
+    const result = parseConfig({ ...minimalConfig, server: { port: 8080, host: '0.0.0.0' } })
     expect(result.server.port).toBe(8080)
     expect(result.server.host).toBe('0.0.0.0')
   })
@@ -51,19 +49,17 @@ describe('parseConfig', () => {
     expect(() =>
       parseConfig({
         backends: { primary: { ...minimalBackend, type: 'unknown-type' } },
-        routing: { default: { backend: 'primary' } },
-      }),
+        routing: { default: { backend: 'primary' } }
+      })
     ).toThrow()
   })
 
   it('rejects invalid balancing strategy', () => {
     expect(() =>
       parseConfig({
-        backends: {
-          primary: { ...minimalBackend, balancing: { strategy: 'random' } },
-        },
-        routing: { default: { backend: 'primary' } },
-      }),
+        backends: { primary: { ...minimalBackend, balancing: { strategy: 'random' } } },
+        routing: { default: { backend: 'primary' } }
+      })
     ).toThrow()
   })
 
@@ -71,8 +67,8 @@ describe('parseConfig', () => {
     expect(() =>
       parseConfig({
         backends: { primary: minimalBackend },
-        routing: { default: { backend: 'does-not-exist' } },
-      }),
+        routing: { default: { backend: 'does-not-exist' } }
+      })
     ).toThrow(/Unknown backend "does-not-exist"/)
   })
 
@@ -82,9 +78,9 @@ describe('parseConfig', () => {
         backends: { primary: minimalBackend },
         routing: {
           default: { backend: 'primary' },
-          rules: [{ match: 'claude-*', backend: 'ghost' }],
-        },
-      }),
+          rules: [{ match: 'claude-*', backend: 'ghost' }]
+        }
+      })
     ).toThrow(/Unknown backend "ghost"/)
   })
 
@@ -94,9 +90,9 @@ describe('parseConfig', () => {
         backends: { primary: minimalBackend },
         routing: {
           default: { backend: 'primary' },
-          scenarios: { thinking: { backend: 'nowhere' } },
-        },
-      }),
+          scenarios: { thinking: { backend: 'nowhere' } }
+        }
+      })
     ).toThrow(/Unknown backend "nowhere"/)
   })
 
@@ -109,19 +105,19 @@ describe('parseConfig', () => {
         secondary: {
           type: 'passthrough-openai',
           baseUrl: 'https://api.openai.com',
-          accounts: [{ type: 'api-key', name: 'main', key: 'sk-openai' }],
-          balancing: { strategy: 'fill-first', rateLimitPerModel: true },
-        },
+          accounts: [{ type: 'api-key', name: 'main' }],
+          balancing: { strategy: 'fill-first', rateLimitPerModel: true }
+        }
       },
       routing: {
         default: { backend: 'primary' },
         rules: [{ match: 'gpt-*', backend: 'secondary' }],
         scenarios: {
           thinking: { backend: 'primary', model: 'claude-3-5-sonnet' },
-          'long-context': { backend: 'secondary' },
-        },
+          'long-context': { backend: 'secondary' }
+        }
       },
-      telemetry: { level: 'debug' },
+      telemetry: { level: 'debug' }
     })
     expect(result.auth.apiKeys).toEqual(['sk-abc'])
     expect(result.routing.rules).toHaveLength(1)

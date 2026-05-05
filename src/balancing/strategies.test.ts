@@ -1,14 +1,16 @@
 // src/balancing/strategies.test.ts
 
-import { describe, expect, it } from 'vitest'
-import type { Account, AccountState } from '../types.js'
+import { describe, expect, it } from 'bun:test'
+
+import type { Account, AccountState } from '../types'
+
 import {
   createFillFirstStrategy,
   createRoundRobinStrategy,
-  createStickyStrategy,
-} from './strategies.js'
+  createStickyStrategy
+} from './strategies'
 
-const baseAccount: Account = { type: 'api-key', name: 'test', key: 'k' }
+const baseAccount: Account = { type: 'api-key', name: 'test', resolveKey: () => 'k' }
 
 const makeState = (name: string, overrides: Partial<AccountState> = {}): AccountState => ({
   account: { ...baseAccount, name },
@@ -16,7 +18,7 @@ const makeState = (name: string, overrides: Partial<AccountState> = {}): Account
   lastUsed: 0,
   isInvalid: false,
   requestCount: 0,
-  ...overrides,
+  ...overrides
 })
 
 describe('createRoundRobinStrategy', () => {

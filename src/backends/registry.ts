@@ -1,20 +1,18 @@
 // src/backends/registry.ts
 
-import { createAccountPool } from '../balancing/account-pool.js'
+import { createAccountPool } from '../balancing/account-pool'
 import {
   createFillFirstStrategy,
   createRoundRobinStrategy,
-  createStickyStrategy,
-} from '../balancing/strategies.js'
-import type { Backend, RouterOptions } from '../types.js'
-import { createPiAiBackend } from './pi-ai/backend.js'
-import { createPassthroughAnthropicBackend } from './passthrough-anthropic.js'
-import { createPassthroughOpenAIBackend } from './passthrough-openai.js'
+  createStickyStrategy
+} from '../balancing/strategies'
+import type { Backend, RouterOptions } from '../types'
 
-export interface BackendEntry {
-  backend: Backend
-  pool: ReturnType<typeof createAccountPool>
-}
+import { createPiAiBackend } from './pi-ai/backend'
+import { createPassthroughAnthropicBackend } from './passthrough-anthropic'
+import { createPassthroughOpenAIBackend } from './passthrough-openai'
+
+export type BackendEntry = { backend: Backend; pool: ReturnType<typeof createAccountPool> }
 
 export const createBackendRegistry = (options: RouterOptions): Map<string, BackendEntry> => {
   const registry = new Map<string, BackendEntry>()
@@ -41,7 +39,7 @@ export const createBackendRegistry = (options: RouterOptions): Map<string, Backe
     const pool = createAccountPool(
       config.accounts,
       strategy,
-      config.balancing.rateLimitPerModel ?? false,
+      config.balancing.rateLimitPerModel ?? false
     )
 
     registry.set(name, { backend, pool })

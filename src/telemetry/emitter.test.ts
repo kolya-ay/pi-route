@@ -1,8 +1,10 @@
 // src/telemetry/emitter.test.ts
 
-import { describe, expect, it, vi } from 'vitest'
-import type { TelemetryEvent, TelemetrySink } from '../types.js'
-import { createConsoleSink, createTelemetryEmitter } from './emitter.js'
+import { describe, expect, it, mock, spyOn } from 'bun:test'
+
+import type { TelemetryEvent, TelemetrySink } from '../types'
+
+import { createConsoleSink, createTelemetryEmitter } from './emitter'
 
 const event: TelemetryEvent = {
   type: 'request_start',
@@ -10,13 +12,13 @@ const event: TelemetryEvent = {
   timestamp: 1000,
   format: 'anthropic',
   model: 'claude-3',
-  stream: false,
+  stream: false
 }
 
 describe('createTelemetryEmitter', () => {
   it('fans out events to all sinks', () => {
-    const sink1: TelemetrySink = { emit: vi.fn() }
-    const sink2: TelemetrySink = { emit: vi.fn() }
+    const sink1: TelemetrySink = { emit: mock() }
+    const sink2: TelemetrySink = { emit: mock() }
     const emitter = createTelemetryEmitter([sink1, sink2])
     emitter.emit(event)
     expect(sink1.emit).toHaveBeenCalledWith(event)
@@ -32,9 +34,9 @@ describe('createTelemetryEmitter', () => {
     const badSink: TelemetrySink = {
       emit: () => {
         throw new Error('sink failure')
-      },
+      }
     }
-    const goodSink: TelemetrySink = { emit: vi.fn() }
+    const goodSink: TelemetrySink = { emit: mock() }
     const emitter = createTelemetryEmitter([badSink, goodSink])
     expect(() => emitter.emit(event)).not.toThrow()
     expect(goodSink.emit).toHaveBeenCalledWith(event)
@@ -43,7 +45,7 @@ describe('createTelemetryEmitter', () => {
 
 describe('createConsoleSink', () => {
   it('writes JSON to stdout', () => {
-    const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    const writeSpy = spyOn(process.stdout, 'write').mockImplementation(() => true)
     const sink = createConsoleSink()
     sink.emit(event)
     expect(writeSpy).toHaveBeenCalledWith(JSON.stringify(event) + '\n')

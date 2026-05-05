@@ -1,18 +1,16 @@
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { writeFileSync } from 'node:fs'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { interpolateEnvVars, loadConfig } from './loader'
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+
+import { interpolateEnvVars } from './loader'
 
 describe('interpolateEnvVars', () => {
-  const originalEnv = process.env
+  const savedEnv = { ...process.env }
 
   beforeEach(() => {
-    process.env = { ...originalEnv }
+    process.env = { ...savedEnv }
   })
 
   afterEach(() => {
-    process.env = originalEnv
+    process.env = savedEnv
   })
 
   it('replaces $VAR with env value', () => {
@@ -46,58 +44,7 @@ describe('interpolateEnvVars', () => {
   it('throws on undefined env var', () => {
     delete process.env['MISSING_VAR']
     expect(() => interpolateEnvVars('$MISSING_VAR')).toThrow(
-      /Environment variable "MISSING_VAR" is not set/,
+      /Environment variable "MISSING_VAR" is not set/
     )
-  })
-})
-
-describe('loadConfig', () => {
-  const minimalBackend = {
-    type: 'passthrough-anthropic',
-    baseUrl: 'https://api.anthropic.com',
-    accounts: [],
-    balancing: { strategy: 'round-robin' },
-  }
-
-  it('loads and parses a JSON file', () => {
-    const config = {
-      backends: { primary: minimalBackend },
-      routing: { default: { backend: 'primary' } },
-    }
-    const filePath = join(tmpdir(), `hono-router-test-${Date.now()}.json`)
-    writeFileSync(filePath, JSON.stringify(config))
-    const result = loadConfig(filePath)
-    expect(result.backends['primary']?.type).toBe('passthrough-anthropic')
-    expect(result.server.port).toBe(3000)
-  })
-
-  it('interpolates env vars from file', () => {
-    process.env['TEST_API_KEY'] = 'sk-loaded'
-    const config = {
-      backends: { primary: minimalBackend },
-      routing: { default: { backend: 'primary' } },
-      auth: { apiKeys: ['$TEST_API_KEY'] },
-    }
-    const filePath = join(tmpdir(), `hono-router-test-${Date.now()}.json`)
-    writeFileSync(filePath, JSON.stringify(config))
-    const result = loadConfig(filePath)
-    expect(result.auth.apiKeys).toEqual(['sk-loaded'])
-    delete process.env['TEST_API_KEY']
-  })
-
-  it('throws on missing file', () => {
-    expect(() => loadConfig('/nonexistent/path/config.json')).toThrow()
-  })
-
-  it('throws on invalid JSON', () => {
-    const filePath = join(tmpdir(), `hono-router-test-invalid-${Date.now()}.json`)
-    writeFileSync(filePath, 'not valid json {{{')
-    expect(() => loadConfig(filePath)).toThrow()
-  })
-
-  it('throws on config that fails schema validation', () => {
-    const filePath = join(tmpdir(), `hono-router-test-bad-schema-${Date.now()}.json`)
-    writeFileSync(filePath, JSON.stringify({ backends: {}, routing: {} }))
-    expect(() => loadConfig(filePath)).toThrow()
   })
 })

@@ -3,10 +3,10 @@
 import type { Context } from 'hono'
 import { stream as honoStream } from 'hono/streaming'
 
-import type { BackendEntry } from '../backends/registry.js'
-import type { RouterOptions, RoutingStrategy, TelemetryEmitter } from '../types.js'
+import type { BackendEntry } from '../backends/registry'
+import type { RouterOptions, RoutingStrategy, TelemetryEmitter } from '../types'
 
-export interface DispatchDeps {
+export type DispatchDeps = {
   format: 'anthropic' | 'openai'
   registry: Map<string, BackendEntry>
   routing: RoutingStrategy
@@ -27,7 +27,7 @@ export const createDispatchHandler = (deps: DispatchDeps) => async (c: Context) 
     timestamp: Date.now(),
     format: deps.format,
     model,
-    stream,
+    stream
   })
 
   const decision = deps.routing.resolve({
@@ -35,7 +35,7 @@ export const createDispatchHandler = (deps: DispatchDeps) => async (c: Context) 
     format: deps.format,
     headers: c.req.raw.headers,
     body: parsed,
-    options: deps.options,
+    options: deps.options
   })
 
   if (!decision) {
@@ -64,7 +64,7 @@ export const createDispatchHandler = (deps: DispatchDeps) => async (c: Context) 
     method: rawReq.method,
     headers: rawReq.headers,
     body: finalBody,
-    duplex: 'half',
+    duplex: 'half'
   } as RequestInit)
 
   try {
@@ -74,9 +74,9 @@ export const createDispatchHandler = (deps: DispatchDeps) => async (c: Context) 
         format: deps.format,
         rawRequest: outgoingRequest,
         model: finalModel,
-        stream,
+        stream
       },
-      accountState.account,
+      accountState.account
     )
 
     deps.telemetry.emit({
@@ -89,7 +89,7 @@ export const createDispatchHandler = (deps: DispatchDeps) => async (c: Context) 
       account: response.metadata.account,
       tokens: response.metadata.tokens,
       cost: response.metadata.cost,
-      latencyMs: response.metadata.latencyMs,
+      latencyMs: response.metadata.latencyMs
     })
 
     if (response.status === 429) {
@@ -101,7 +101,7 @@ export const createDispatchHandler = (deps: DispatchDeps) => async (c: Context) 
         backend: decision.backend,
         account: accountState.account.name,
         model: finalModel,
-        retryAfterMs: retryMs,
+        retryAfterMs: retryMs
       })
     }
 
@@ -123,7 +123,7 @@ export const createDispatchHandler = (deps: DispatchDeps) => async (c: Context) 
       requestId,
       backend: decision.backend,
       account: accountState.account.name,
-      message,
+      message
     })
     return c.json({ error: message }, 502)
   }

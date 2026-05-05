@@ -1,15 +1,17 @@
 // src/backends/passthrough.test.ts
 
 import { Hono } from 'hono'
-import { describe, expect, it } from 'vitest'
-import type { Account, IncomingRequest } from '../types.js'
-import { createPassthroughAnthropicBackend } from './passthrough-anthropic.js'
-import { createPassthroughOpenAIBackend } from './passthrough-openai.js'
+import { describe, expect, it } from 'bun:test'
+
+import type { Account, IncomingRequest } from '../types'
+
+import { createPassthroughAnthropicBackend } from './passthrough-anthropic'
+import { createPassthroughOpenAIBackend } from './passthrough-openai'
 
 const makeAccount = (name: string, key: string): Account => ({
   type: 'api-key',
   name,
-  key,
+  resolveKey: () => key
 })
 
 const makeRequest = (url: string, overrides?: Partial<IncomingRequest>): IncomingRequest => ({
@@ -18,11 +20,11 @@ const makeRequest = (url: string, overrides?: Partial<IncomingRequest>): Incomin
   rawRequest: new Request(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ model: 'claude-3-5-sonnet', messages: [] }),
+    body: JSON.stringify({ model: 'claude-3-5-sonnet', messages: [] })
   }),
   model: 'claude-3-5-sonnet',
   stream: false,
-  ...overrides,
+  ...overrides
 })
 
 // --- Mock Anthropic server ---
@@ -37,7 +39,7 @@ mockAnthropicApp.post('/v1/messages', (c) => {
     type: 'message',
     model: 'claude-3-5-sonnet',
     content: [{ type: 'text', text: 'hello' }],
-    apiKey: key,
+    apiKey: key
   })
 })
 
@@ -53,7 +55,7 @@ mockOpenAIApp.post('/v1/chat/completions', (c) => {
     object: 'chat.completion',
     model: 'gpt-4o',
     choices: [],
-    authHeader: auth,
+    authHeader: auth
   })
 })
 
@@ -61,9 +63,8 @@ mockOpenAIApp.post('/v1/chat/completions', (c) => {
 
 describe('createPassthroughAnthropicBackend', () => {
   it('forwards request and returns response with model in body', async () => {
-    const backend = createPassthroughAnthropicBackend(
-      'anthropic',
-      async (req: Request) => mockAnthropicApp.fetch(req),
+    const backend = createPassthroughAnthropicBackend('anthropic', async (req: Request) =>
+      mockAnthropicApp.fetch(req)
     )
     const account = makeAccount('test-account', 'sk-ant-test')
     const request = makeRequest('https://api.anthropic.com/v1/messages')
@@ -90,7 +91,7 @@ describe('createPassthroughAnthropicBackend', () => {
 
     await backend.dispatch(request, account)
 
-    expect(capturedKey).toBe('sk-ant-secret')
+    expect(capturedKey as unknown as string).toBe('sk-ant-secret')
   })
 
   it('removes authorization header when forwarding', async () => {
@@ -104,11 +105,8 @@ describe('createPassthroughAnthropicBackend', () => {
     const account = makeAccount('test-account', 'sk-ant-secret')
     const rawRequest = new Request('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: 'Bearer old-token',
-      },
-      body: JSON.stringify({ model: 'claude-3-5-sonnet', messages: [] }),
+      headers: { 'content-type': 'application/json', authorization: 'Bearer old-token' },
+      body: JSON.stringify({ model: 'claude-3-5-sonnet', messages: [] })
     })
     const request = makeRequest('https://api.anthropic.com/v1/messages', { rawRequest })
 
@@ -123,12 +121,12 @@ describe('createPassthroughOpenAIBackend', () => {
     const backend = createPassthroughOpenAIBackend(
       'openai',
       'https://api.openai.com',
-      async (req: Request) => mockOpenAIApp.fetch(req),
+      async (req: Request) => mockOpenAIApp.fetch(req)
     )
     const account = makeAccount('test-account', 'sk-openai-test')
     const request = makeRequest('https://my-router.example.com/v1/chat/completions', {
       format: 'openai',
-      model: 'gpt-4o',
+      model: 'gpt-4o'
     })
 
     const result = await backend.dispatch(request, account)
@@ -146,16 +144,20 @@ describe('createPassthroughOpenAIBackend', () => {
       return mockOpenAIApp.fetch(req)
     }
 
-    const backend = createPassthroughOpenAIBackend('openai', 'https://api.openai.com', capturingFetch)
+    const backend = createPassthroughOpenAIBackend(
+      'openai',
+      'https://api.openai.com',
+      capturingFetch
+    )
     const account = makeAccount('test-account', 'sk-openai-secret')
     const request = makeRequest('https://my-router.example.com/v1/chat/completions', {
       format: 'openai',
-      model: 'gpt-4o',
+      model: 'gpt-4o'
     })
 
     await backend.dispatch(request, account)
 
-    expect(capturedAuth).toBe('Bearer sk-openai-secret')
+    expect(capturedAuth as unknown as string).toBe('Bearer sk-openai-secret')
   })
 
   it('rewrites URL origin to baseUrl while keeping pathname', async () => {
@@ -168,16 +170,16 @@ describe('createPassthroughOpenAIBackend', () => {
     const backend = createPassthroughOpenAIBackend(
       'openai',
       'https://api.openai.com',
-      capturingFetch,
+      capturingFetch
     )
     const account = makeAccount('test-account', 'sk-openai-secret')
     const request = makeRequest('https://my-router.example.com/v1/chat/completions', {
       format: 'openai',
-      model: 'gpt-4o',
+      model: 'gpt-4o'
     })
 
     await backend.dispatch(request, account)
 
-    expect(capturedUrl).toBe('https://api.openai.com/v1/chat/completions')
+    expect(capturedUrl as unknown as string).toBe('https://api.openai.com/v1/chat/completions')
   })
 })

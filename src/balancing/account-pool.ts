@@ -1,13 +1,13 @@
 // src/balancing/account-pool.ts
 
-import type { Account, AccountState, BalancingStrategy } from '../types.js'
+import type { Account, AccountState, BalancingStrategy } from '../types'
 
 const makeState = (account: Account): AccountState => ({
   account,
   rateLimits: new Map(),
   lastUsed: 0,
   isInvalid: false,
-  requestCount: 0,
+  requestCount: 0
 })
 
 const isRateLimited = (state: AccountState, model: string, perModel: boolean): boolean => {
@@ -26,7 +26,7 @@ const isAvailable = (state: AccountState, model: string, perModel: boolean): boo
 export const createAccountPool = (
   accounts: Account[],
   strategy: BalancingStrategy,
-  rateLimitPerModel: boolean,
+  rateLimitPerModel: boolean
 ) => {
   const states = accounts.map(makeState)
 
@@ -48,10 +48,10 @@ export const createAccountPool = (
     },
 
     markError(state: AccountState, error: { status?: number; message: string }): void {
-      state.lastError = { message: error.message, at: Date.now() }
-      if (error.status === 401 || error.status === 403) {
-        state.isInvalid = true
-      }
+      Object.assign(state, {
+        lastError: { message: error.message, at: Date.now() },
+        ...(error.status === 401 || error.status === 403 ? { isInvalid: true } : {})
+      })
     },
 
     health(): { total: number; available: number; rateLimited: number; invalid: number } {
@@ -59,13 +59,12 @@ export const createAccountPool = (
       const total = states.length
       const invalid = states.filter((s) => s.isInvalid).length
       const rateLimited = states.filter(
-        (s) =>
-          !s.isInvalid && Array.from(s.rateLimits.values()).some((expiry) => expiry > now),
+        (s) => !s.isInvalid && Array.from(s.rateLimits.values()).some((expiry) => expiry > now)
       ).length
       const available = states.filter(
-        (s) => !s.isInvalid && !Array.from(s.rateLimits.values()).some((expiry) => expiry > now),
+        (s) => !s.isInvalid && !Array.from(s.rateLimits.values()).some((expiry) => expiry > now)
       ).length
       return { total, available, rateLimited, invalid }
-    },
+    }
   }
 }

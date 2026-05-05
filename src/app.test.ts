@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'bun:test'
 
 import { createApp } from './app'
 import type { RouterOptions } from './types'
@@ -10,25 +10,22 @@ const testOptions: RouterOptions = {
     'test-backend': {
       type: 'passthrough-anthropic',
       baseUrl: 'https://api.anthropic.com',
-      accounts: [{ type: 'api-key', name: 'test-account', key: 'sk-test-key' }],
-      balancing: { strategy: 'round-robin' },
-    },
+      accounts: [{ type: 'api-key', name: 'test-account', resolveKey: () => 'sk-test-key' }],
+      balancing: { strategy: 'round-robin' }
+    }
   },
   routing: {
     rules: [
       { match: 'claude-sonnet-4-20250514', backend: 'test-backend' },
-      { match: 'claude-*', backend: 'test-backend' },
+      { match: 'claude-*', backend: 'test-backend' }
     ],
     scenarios: {},
-    default: { backend: 'test-backend' },
+    default: { backend: 'test-backend' }
   },
-  telemetry: { level: 'info' },
+  telemetry: { level: 'info' }
 }
 
-const authedOptions: RouterOptions = {
-  ...testOptions,
-  auth: { apiKeys: ['test-secret-key'] },
-}
+const authedOptions: RouterOptions = { ...testOptions, auth: { apiKeys: ['test-secret-key'] } }
 
 describe('GET /', () => {
   it('returns 200 with name', async () => {
@@ -83,7 +80,7 @@ describe('/v1/* middleware', () => {
   it('allows with valid bearer key', async () => {
     const app = createApp(authedOptions)
     const res = await app.request('/v1/models', {
-      headers: { Authorization: 'Bearer test-secret-key' },
+      headers: { Authorization: 'Bearer test-secret-key' }
     })
     expect(res.status).toBe(200)
   })

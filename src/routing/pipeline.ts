@@ -1,8 +1,9 @@
 // src/routing/pipeline.ts
 
-import type { RoutingStrategy, RoutingContext, RoutingDecision } from '../types.js'
-import { ruleMatchStrategy } from './rule-match.js'
-import { scenarioStrategy } from './scenario.js'
+import type { RoutingStrategy, RoutingContext, RoutingDecision } from '../types'
+
+import { ruleMatchStrategy } from './rule-match'
+import { scenarioStrategy } from './scenario'
 
 export const createRoutingPipeline = (): RoutingStrategy => ({
   name: 'pipeline',
@@ -15,5 +16,5 @@ export const createRoutingPipeline = (): RoutingStrategy => ({
     }
 
     return { backend: context.options.routing.default.backend, reason: 'default' }
-  },
+  }
 })
