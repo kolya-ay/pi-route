@@ -1,4 +1,5 @@
 export { createApp } from './app'
+export { loginAntigravity } from './auth/antigravity-oauth'
 export { parseConfig } from './config/schema'
 export { interpolateEnvVars } from './config/loader'
 export type {

@@ -7,6 +7,20 @@
         { "type": "claude-cli", "name": "personal", "tokenPath": "~/.claude/credentials.json" }
       ],
       "balancing": { "strategy": "sticky", "rateLimitPerModel": true }
+    },
+    "antigravity": {
+      "type": "pi-ai",
+      "provider": "google-antigravity",
+      "baseUrl": "https://daily-cloudcode-pa.googleapis.com",
+      "accounts": [
+        {
+          "type": "antigravity-oauth",
+          "name": "google-1",
+          "refreshToken": "YOUR_REFRESH_TOKEN",
+          "projectId": "YOUR_PROJECT_ID"
+        }
+      ],
+      "balancing": { "strategy": "round-robin" }
     }
   },
   "routing": {

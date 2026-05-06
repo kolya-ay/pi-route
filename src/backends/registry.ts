@@ -7,8 +7,10 @@ import {
   createStickyStrategy
 } from '../balancing/strategies'
 import type { Backend, RouterOptions } from '../types'
+import { ensureAntigravityOAuthRegistered } from '../auth/antigravity-oauth'
 
 import { createPiAiBackend } from './pi-ai/backend'
+import { ensureAntigravityProviderRegistered } from './pi-ai/antigravity'
 import { createPassthroughAnthropicBackend } from './passthrough-anthropic'
 import { createPassthroughOpenAIBackend } from './passthrough-openai'
 
@@ -24,7 +26,13 @@ export const createBackendRegistry = (options: RouterOptions): Map<string, Backe
         : config.type === 'passthrough-openai'
           ? createPassthroughOpenAIBackend(name, config.baseUrl)
           : config.type === 'pi-ai'
-            ? createPiAiBackend(name, config.provider ?? '')
+            ? (() => {
+                if (config.provider === 'google-antigravity') {
+                  ensureAntigravityProviderRegistered()
+                  ensureAntigravityOAuthRegistered()
+                }
+                return createPiAiBackend(name, config.provider ?? '')
+              })()
             : (() => {
                 throw new Error(`Backend type '${config.type}' not yet implemented`)
               })()
