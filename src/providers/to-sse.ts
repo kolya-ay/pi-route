@@ -1,4 +1,4 @@
-// src/backends/pi-ai/to-sse.ts
+// src/providers/to-sse.ts
 
 import type { AssistantMessage, AssistantMessageEvent, ToolCall } from '@mariozechner/pi-ai'
 
@@ -292,7 +292,7 @@ export const createOpenAiSseStream = (
 
   return new ReadableStream({
     async pull(controller) {
-       
+
       while (true) {
         const { done, value } = await iterator.next()
         if (done) {

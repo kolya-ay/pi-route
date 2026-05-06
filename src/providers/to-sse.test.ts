@@ -1,4 +1,4 @@
-// src/backends/pi-ai/to-sse.test.ts
+// src/providers/to-sse.test.ts
 
 import { describe, expect, it } from 'bun:test'
 import type { AssistantMessage, AssistantMessageEvent } from '@mariozechner/pi-ai'
@@ -35,7 +35,7 @@ const collectSseLines = async (stream: ReadableStream<Uint8Array>): Promise<stri
   const reader = stream.getReader()
   const decoder = new TextDecoder()
   const chunks: string[] = []
-   
+
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
