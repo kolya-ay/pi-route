@@ -1,43 +1,46 @@
-// src/backends/passthrough-openai.ts
+// src/providers/passthrough.ts
 
-import type { Account, Backend, BackendResponse, IncomingRequest } from '../types'
+import type { Account, IncomingRequest, Provider, ProviderResponse } from '../types'
 
-export const createPassthroughOpenAIBackend = (
+export const createPassthroughProvider = (
   name: string,
+  type: Provider['type'],
   baseUrl: string,
   fetchFn: (req: Request) => Promise<Response> = (req) => globalThis.fetch(req)
-): Backend => ({
+): Provider => ({
   name,
-  type: 'passthrough-openai',
+  type,
 
-  async dispatch(request: IncomingRequest, account: Account): Promise<BackendResponse> {
+  async dispatch(request: IncomingRequest, account: Account): Promise<ProviderResponse> {
     if (!account.resolveKey) throw new Error(`Account '${account.name}' has no resolveKey`)
     const apiKey = await account.resolveKey()
     const start = Date.now()
 
     const headers = new Headers(request.rawRequest.headers)
-    headers.set('authorization', `Bearer ${apiKey}`)
-    headers.delete('x-api-key')
+
+    if (type === 'anthropic') {
+      headers.set('x-api-key', apiKey)
+      headers.delete('authorization')
+    } else {
+      headers.set('authorization', `Bearer ${apiKey}`)
+      headers.delete('x-api-key')
+    }
 
     const originalUrl = new URL(request.rawRequest.url)
     const rewrittenUrl = new URL(originalUrl.pathname, baseUrl).toString()
 
-    const upstream = new Request(
-      rewrittenUrl,
-      // duplex: 'half' is required for streaming request bodies in Node.js
-      {
-        method: request.rawRequest.method,
-        headers,
-        body: request.rawRequest.body,
-        duplex: 'half'
-      } as RequestInit
-    )
+    const upstream = new Request(rewrittenUrl, {
+      method: request.rawRequest.method,
+      headers,
+      body: request.rawRequest.body,
+      duplex: 'half'
+    } as RequestInit)
 
     const response = await fetchFn(upstream)
     const latencyMs = Date.now() - start
 
     const contentType = response.headers.get('content-type') ?? ''
-    const body: BackendResponse['body'] = contentType.includes('text/event-stream')
+    const body: ProviderResponse['body'] = contentType.includes('text/event-stream')
       ? (response.body as ReadableStream)
       : ((await response.json()) as Record<string, unknown>)
 
@@ -47,7 +50,7 @@ export const createPassthroughOpenAIBackend = (
       body,
       metadata: {
         requestId: request.id,
-        backend: name,
+        provider: name,
         model: request.model,
         latencyMs,
         account: account.name
