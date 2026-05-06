@@ -1,13 +1,13 @@
 // src/types.ts
 
-// === Backend ===
+// === Provider ===
 
-export type BackendType = 'passthrough-anthropic' | 'passthrough-openai' | 'pi-ai'
+export type ProviderType = 'anthropic' | 'openai' | 'antigravity'
 
-export type Backend = {
+export type Provider = {
   readonly name: string
-  readonly type: BackendType
-  dispatch(request: IncomingRequest, account: Account): Promise<BackendResponse>
+  readonly type: ProviderType
+  dispatch(request: IncomingRequest, account: Account): Promise<ProviderResponse>
 }
 
 export type IncomingRequest = {
@@ -18,7 +18,7 @@ export type IncomingRequest = {
   stream: boolean
 }
 
-export type BackendResponse = {
+export type ProviderResponse = {
   status: number
   headers: Headers
   body: ReadableStream | Record<string, unknown>
@@ -27,7 +27,7 @@ export type BackendResponse = {
 
 export type ResponseMetadata = {
   requestId: string
-  backend: string
+  provider: string
   model: string
   tokens?: { input: number; output: number; cacheRead?: number; cacheWrite?: number }
   cost?: { input: number; output: number; total: number }
@@ -50,7 +50,7 @@ export type RoutingContext = {
   options: RouterOptions
 }
 
-export type RoutingDecision = { backend: string; model?: string | undefined; reason: string }
+export type RoutingDecision = { provider: string; model?: string | undefined; reason: string }
 
 // === Balancing ===
 
@@ -93,7 +93,7 @@ export type TelemetryEmitter = { sinks: TelemetrySink[]; emit(event: TelemetryEv
 export type TelemetryEvent =
   | RequestStartEvent
   | RequestEndEvent
-  | BackendErrorEvent
+  | ProviderErrorEvent
   | RateLimitEvent
 
 export type RequestStartEvent = {
@@ -110,7 +110,7 @@ export type RequestEndEvent = {
   requestId: string
   timestamp: number
   status: number
-  backend: string
+  provider: string
   model: string
   account?: string | undefined
   tokens?: { input: number; output: number; cacheRead?: number; cacheWrite?: number } | undefined
@@ -119,10 +119,10 @@ export type RequestEndEvent = {
   error?: string | undefined
 }
 
-export type BackendErrorEvent = {
-  type: 'backend_error'
+export type ProviderErrorEvent = {
+  type: 'provider_error'
   requestId: string
-  backend: string
+  provider: string
   account?: string | undefined
   status?: number | undefined
   message: string
@@ -130,7 +130,7 @@ export type BackendErrorEvent = {
 
 export type RateLimitEvent = {
   type: 'ratelimit_hit'
-  backend: string
+  provider: string
   account: string
   model: string
   retryAfterMs: number
@@ -141,15 +141,15 @@ export type RateLimitEvent = {
 export type RouterOptions = {
   server: { port: number; host: string }
   auth: { apiKeys: string[] }
-  backends: Record<string, BackendOptions>
+  providers: Record<string, ProviderOptions>
+  authDir: string
   routing: RoutingOptions
   telemetry: TelemetryOptions
 }
 
-export type BackendOptions = {
-  type: BackendType
-  baseUrl: string
-  provider?: string | undefined
+export type ProviderOptions = {
+  type: ProviderType
+  baseUrl?: string | undefined
   accounts: Account[]
   balancing: BalancingOptions
 }
@@ -161,12 +161,12 @@ export type BalancingOptions = {
 
 export type RoutingOptions = {
   rules: RoutingRule[]
-  scenarios: Partial<Record<ScenarioType, { backend: string; model?: string | undefined }>>
-  default: { backend: string }
+  scenarios: Partial<Record<ScenarioType, { provider: string; model?: string | undefined }>>
+  default: { provider: string }
 }
 
 export type ScenarioType = 'thinking' | 'long-context' | 'background'
 
-export type RoutingRule = { match: string; backend: string }
+export type RoutingRule = { match: string; provider: string }
 
 export type TelemetryOptions = { level: 'debug' | 'info' | 'warn' | 'error' }
