@@ -1,6 +1,7 @@
 // src/backends/pi-ai/pi-ai.test.ts
 
 import { describe, expect, it } from 'bun:test'
+import type { TextContent, ToolCall, ToolResultMessage } from '@mariozechner/pi-ai'
 
 import { anthropicToContext, openaiToContext } from './to-context'
 
@@ -46,7 +47,8 @@ describe('anthropicToContext', () => {
     const ctx = anthropicToContext(body)
     expect(ctx.messages).toHaveLength(2)
     expect(ctx.messages[1]?.role).toBe('assistant')
-    expect(ctx.messages[1]?.content).toBe('It is 4.')
+    const content = ctx.messages[1]?.content as TextContent[]
+    expect(content[0]?.text).toBe('It is 4.')
   })
 
   it('converts tool_use and tool_result round-trip', () => {
@@ -66,23 +68,21 @@ describe('anthropicToContext', () => {
       ]
     }
     const ctx = anthropicToContext(body)
-    // user, assistant (tool_use), tool (tool_result)
+    // user, assistant (toolCall), toolResult
     expect(ctx.messages).toHaveLength(3)
 
     const assistantMsg = ctx.messages[1]
     expect(assistantMsg?.role).toBe('assistant')
     expect(Array.isArray(assistantMsg?.content)).toBe(true)
-    const toolUseBlock = (
-      assistantMsg?.content as Array<{ type: string; name?: string; id?: string }>
-    )[0]
-    expect(toolUseBlock?.type).toBe('tool_use')
-    expect(toolUseBlock?.name).toBe('get_weather')
-    expect(toolUseBlock?.id).toBe('call_1')
+    const toolCallBlock = (assistantMsg?.content as ToolCall[])[0]
+    expect(toolCallBlock?.type).toBe('toolCall')
+    expect(toolCallBlock?.name).toBe('get_weather')
+    expect(toolCallBlock?.id).toBe('call_1')
 
-    const toolMsg = ctx.messages[2]
-    expect(toolMsg?.role).toBe('tool')
-    expect(toolMsg?.content).toBe('Sunny, 72°F')
-    expect(toolMsg?.toolCallId).toBe('call_1')
+    const toolMsg = ctx.messages[2] as ToolResultMessage
+    expect(toolMsg?.role).toBe('toolResult')
+    expect((toolMsg.content[0] as TextContent).text).toBe('Sunny, 72°F')
+    expect(toolMsg.toolCallId).toBe('call_1')
   })
 
   it('converts tools array from input_schema', () => {
@@ -132,7 +132,7 @@ describe('openaiToContext', () => {
     expect(ctx.systemPrompt).toBeUndefined()
   })
 
-  it('converts assistant tool_calls to tool_use blocks', () => {
+  it('converts assistant tool_calls to toolCall blocks', () => {
     const body = {
       messages: [
         { role: 'user', content: 'What is the weather in NYC?' },
@@ -155,13 +155,11 @@ describe('openaiToContext', () => {
     const assistantMsg = ctx.messages[1]
     expect(assistantMsg?.role).toBe('assistant')
     expect(Array.isArray(assistantMsg?.content)).toBe(true)
-    const block = (
-      assistantMsg?.content as Array<{ type: string; name?: string; id?: string; input?: unknown }>
-    )[0]
-    expect(block?.type).toBe('tool_use')
+    const block = (assistantMsg?.content as ToolCall[])[0]
+    expect(block?.type).toBe('toolCall')
     expect(block?.name).toBe('get_weather')
     expect(block?.id).toBe('call_abc123')
-    expect(block?.input).toEqual({ location: 'NYC' })
+    expect(block?.arguments).toEqual({ location: 'NYC' })
   })
 
   it('converts tool response messages', () => {
@@ -173,10 +171,10 @@ describe('openaiToContext', () => {
     }
     const ctx = openaiToContext(body)
     expect(ctx.messages).toHaveLength(2)
-    const toolMsg = ctx.messages[1]
-    expect(toolMsg?.role).toBe('tool')
-    expect(toolMsg?.content).toBe('Sunny, 72°F')
-    expect(toolMsg?.toolCallId).toBe('call_abc123')
+    const toolMsg = ctx.messages[1] as ToolResultMessage
+    expect(toolMsg?.role).toBe('toolResult')
+    expect((toolMsg.content[0] as TextContent).text).toBe('Sunny, 72°F')
+    expect(toolMsg.toolCallId).toBe('call_abc123')
   })
 
   it('converts OpenAI tools array', () => {

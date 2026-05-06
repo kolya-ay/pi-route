@@ -1,34 +1,53 @@
 // src/backends/pi-ai/to-context.ts
 
-export type PiAiMessage = {
-  role: 'user' | 'assistant' | 'tool'
-  content: string | PiAiContentBlock[]
-  toolCallId?: string | undefined
-}
+import type {
+  Api,
+  AssistantMessage,
+  Context,
+  Message,
+  TextContent,
+  Tool,
+  ToolCall,
+  ToolResultMessage,
+  UserMessage
+} from '@mariozechner/pi-ai'
 
-export type PiAiContentBlock = {
-  type: 'text' | 'tool_use' | 'tool_result'
-  text?: string | undefined
-  id?: string | undefined
-  name?: string | undefined
-  input?: Record<string, unknown> | undefined
-  toolUseId?: string | undefined
-  content?: string | undefined
-}
+const defaultUsage = () => ({
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+})
 
-export type PiAiTool = {
-  name: string
-  description?: string | undefined
-  parameters: Record<string, unknown>
-}
+const makeUserMessage = (content: string | TextContent[]): UserMessage => ({
+  role: 'user',
+  content,
+  timestamp: Date.now()
+})
 
-export type PiAiContext = {
-  systemPrompt?: string | undefined
-  messages: PiAiMessage[]
-  tools?: PiAiTool[] | undefined
-}
+const makeAssistantMessage = (content: Array<TextContent | ToolCall>): AssistantMessage => ({
+  role: 'assistant',
+  content,
+  api: '' as Api,
+  provider: '',
+  model: '',
+  usage: defaultUsage(),
+  stopReason: 'stop',
+  timestamp: Date.now()
+})
 
-// --- Anthropic → PiAiContext ---
+const makeToolResult = (toolCallId: string, text: string): ToolResultMessage => ({
+  role: 'toolResult',
+  toolCallId,
+  toolName: '',
+  content: [{ type: 'text', text }],
+  isError: false,
+  timestamp: Date.now()
+})
+
+// --- Anthropic → Context ---
 
 const extractAnthropicSystem = (system: unknown): string | undefined => {
   if (typeof system === 'string') return system
@@ -45,9 +64,11 @@ const extractAnthropicSystem = (system: unknown): string | undefined => {
 const extractAnthropicMessageContent = (
   content: unknown,
   role: 'user' | 'assistant'
-): PiAiMessage[] => {
+): Message[] => {
   if (typeof content === 'string') {
-    return [{ role, content }]
+    return role === 'user'
+      ? [makeUserMessage(content)]
+      : [makeAssistantMessage([{ type: 'text', text: content }])]
   }
 
   if (!Array.isArray(content)) return []
@@ -56,41 +77,51 @@ const extractAnthropicMessageContent = (
     (b): b is Record<string, unknown> => typeof b === 'object' && b !== null
   )
 
-  // Check for tool_result blocks — these become separate tool messages
+  // Check for tool_result blocks — these become separate toolResult messages
   const toolResults = blocks.filter((b) => b['type'] === 'tool_result')
   const otherBlocks = blocks.filter((b) => b['type'] !== 'tool_result')
 
-  const messages: PiAiMessage[] = []
+  const messages: Message[] = []
 
   if (otherBlocks.length > 0) {
-    const parts: PiAiContentBlock[] = otherBlocks.map((b) => {
-      if (b['type'] === 'text') {
-        return { type: 'text', text: String(b['text'] ?? '') }
+    if (role === 'user') {
+      const parts: TextContent[] = otherBlocks.map((b) => ({
+        type: 'text',
+        text: String(b['text'] ?? '')
+      }))
+      // If single text block, simplify to string
+      if (parts.length === 1) {
+        messages.push(makeUserMessage(parts[0]!.text))
+      } else {
+        messages.push(makeUserMessage(parts))
       }
-      if (b['type'] === 'tool_use') {
-        return {
-          type: 'tool_use',
-          id: typeof b['id'] === 'string' ? b['id'] : undefined,
-          name: typeof b['name'] === 'string' ? b['name'] : undefined,
-          input:
-            typeof b['input'] === 'object' && b['input'] !== null
-              ? (b['input'] as Record<string, unknown>)
-              : {}
-        }
-      }
-      return { type: 'text', text: String(b['text'] ?? '') }
-    })
-
-    // If single text block, simplify to string
-    if (parts.length === 1 && parts[0]?.type === 'text') {
-      messages.push({ role, content: parts[0].text ?? '' })
     } else {
-      messages.push({ role, content: parts })
+      const parts: Array<TextContent | ToolCall> = otherBlocks.map((b) => {
+        if (b['type'] === 'tool_use') {
+          return {
+            type: 'toolCall' as const,
+            id: typeof b['id'] === 'string' ? b['id'] : '',
+            name: typeof b['name'] === 'string' ? b['name'] : '',
+            arguments:
+              typeof b['input'] === 'object' && b['input'] !== null
+                ? (b['input'] as Record<string, unknown>)
+                : {}
+          }
+        }
+        return { type: 'text' as const, text: String(b['text'] ?? '') }
+      })
+
+      // If single text block, simplify to string content in assistant message
+      if (parts.length === 1 && parts[0]?.type === 'text') {
+        messages.push(makeAssistantMessage([{ type: 'text', text: parts[0].text }]))
+      } else {
+        messages.push(makeAssistantMessage(parts))
+      }
     }
   }
 
-  for (const tr of toolResults) {
-    const toolUseId = typeof tr['tool_use_id'] === 'string' ? tr['tool_use_id'] : undefined
+  toolResults.forEach((tr) => {
+    const toolUseId = typeof tr['tool_use_id'] === 'string' ? tr['tool_use_id'] : ''
     const resultContent =
       typeof tr['content'] === 'string'
         ? tr['content']
@@ -100,19 +131,19 @@ const extractAnthropicMessageContent = (
               .map((b) => String(b['text'] ?? ''))
               .join('\n')
           : ''
-    messages.push({ role: 'tool', content: resultContent, toolCallId: toolUseId })
-  }
+    messages.push(makeToolResult(toolUseId, resultContent))
+  })
 
   return messages
 }
 
-const convertAnthropicTools = (tools: unknown): PiAiTool[] | undefined => {
+const convertAnthropicTools = (tools: unknown): Tool[] | undefined => {
   if (!Array.isArray(tools) || tools.length === 0) return undefined
   return tools
     .filter((t): t is Record<string, unknown> => typeof t === 'object' && t !== null)
     .map((t) => ({
       name: String(t['name'] ?? ''),
-      description: typeof t['description'] === 'string' ? t['description'] : undefined,
+      description: typeof t['description'] === 'string' ? t['description'] : '',
       parameters:
         typeof t['input_schema'] === 'object' && t['input_schema'] !== null
           ? (t['input_schema'] as Record<string, unknown>)
@@ -120,12 +151,12 @@ const convertAnthropicTools = (tools: unknown): PiAiTool[] | undefined => {
     }))
 }
 
-export const anthropicToContext = (body: Record<string, unknown>): PiAiContext => {
+export const anthropicToContext = (body: Record<string, unknown>): Context => {
   const systemPrompt = extractAnthropicSystem(body['system'])
   const tools = convertAnthropicTools(body['tools'])
 
   const rawMessages = Array.isArray(body['messages']) ? body['messages'] : []
-  const messages: PiAiMessage[] = rawMessages
+  const messages: Message[] = rawMessages
     .filter((m): m is Record<string, unknown> => typeof m === 'object' && m !== null)
     .flatMap((m) => {
       const role = m['role'] === 'assistant' ? 'assistant' : 'user'
@@ -139,9 +170,9 @@ export const anthropicToContext = (body: Record<string, unknown>): PiAiContext =
   }
 }
 
-// --- OpenAI → PiAiContext ---
+// --- OpenAI → Context ---
 
-const convertOpenAiTools = (tools: unknown): PiAiTool[] | undefined => {
+const convertOpenAiTools = (tools: unknown): Tool[] | undefined => {
   if (!Array.isArray(tools) || tools.length === 0) return undefined
   return tools
     .filter((t): t is Record<string, unknown> => typeof t === 'object' && t !== null)
@@ -153,7 +184,7 @@ const convertOpenAiTools = (tools: unknown): PiAiTool[] | undefined => {
           : {}
       return {
         name: String(fn['name'] ?? ''),
-        description: typeof fn['description'] === 'string' ? fn['description'] : undefined,
+        description: typeof fn['description'] === 'string' ? fn['description'] : '',
         parameters:
           typeof fn['parameters'] === 'object' && fn['parameters'] !== null
             ? (fn['parameters'] as Record<string, unknown>)
@@ -162,66 +193,66 @@ const convertOpenAiTools = (tools: unknown): PiAiTool[] | undefined => {
     })
 }
 
-const convertOpenAiMessage = (m: Record<string, unknown>): PiAiMessage | null => {
+const convertOpenAiMessage = (m: Record<string, unknown>): Message | null => {
   const role = m['role']
 
   if (role === 'system') return null
 
   if (role === 'tool') {
-    return {
-      role: 'tool',
-      content: typeof m['content'] === 'string' ? m['content'] : '',
-      toolCallId: typeof m['tool_call_id'] === 'string' ? m['tool_call_id'] : undefined
-    }
+    const toolCallId = typeof m['tool_call_id'] === 'string' ? m['tool_call_id'] : ''
+    const text = typeof m['content'] === 'string' ? m['content'] : ''
+    return makeToolResult(toolCallId, text)
   }
 
   if (role === 'assistant') {
     const toolCalls = m['tool_calls']
     if (Array.isArray(toolCalls) && toolCalls.length > 0) {
-      const parts: PiAiContentBlock[] = toolCalls
+      const parts: ToolCall[] = toolCalls
         .filter((tc): tc is Record<string, unknown> => typeof tc === 'object' && tc !== null)
         .map((tc) => {
           const fn =
             typeof tc['function'] === 'object' && tc['function'] !== null
               ? (tc['function'] as Record<string, unknown>)
               : {}
-          const input = ((): Record<string, unknown> => {
+          const args = ((): Record<string, unknown> => {
             try {
-              const args = fn['arguments']
-              return typeof args === 'string' ? (JSON.parse(args) as Record<string, unknown>) : {}
+              const raw = fn['arguments']
+              return typeof raw === 'string' ? (JSON.parse(raw) as Record<string, unknown>) : {}
             } catch {
               return {}
             }
           })()
           return {
-            type: 'tool_use' as const,
-            id: typeof tc['id'] === 'string' ? tc['id'] : undefined,
-            name: typeof fn['name'] === 'string' ? fn['name'] : undefined,
-            input
+            type: 'toolCall' as const,
+            id: typeof tc['id'] === 'string' ? tc['id'] : '',
+            name: typeof fn['name'] === 'string' ? fn['name'] : '',
+            arguments: args
           }
         })
-      return { role: 'assistant', content: parts }
+      return makeAssistantMessage(parts)
     }
 
     const content = m['content']
-    return { role: 'assistant', content: typeof content === 'string' ? content : '' }
+    return makeAssistantMessage([
+      { type: 'text', text: typeof content === 'string' ? content : '' }
+    ])
   }
 
   // user message
   const content = m['content']
   if (typeof content === 'string') {
-    return { role: 'user', content }
+    return makeUserMessage(content)
   }
   if (Array.isArray(content)) {
-    const parts: PiAiContentBlock[] = (content as Array<Record<string, unknown>>)
+    const parts: TextContent[] = (content as Array<Record<string, unknown>>)
       .filter((b): b is Record<string, unknown> => typeof b === 'object' && b !== null)
       .map((b) => ({ type: 'text' as const, text: String(b['text'] ?? '') }))
-    return { role: 'user', content: parts }
+    return makeUserMessage(parts)
   }
-  return { role: 'user', content: '' }
+  return makeUserMessage('')
 }
 
-export const openaiToContext = (body: Record<string, unknown>): PiAiContext => {
+export const openaiToContext = (body: Record<string, unknown>): Context => {
   const rawMessages = Array.isArray(body['messages']) ? body['messages'] : []
   const typedMessages = rawMessages.filter(
     (m): m is Record<string, unknown> => typeof m === 'object' && m !== null
@@ -233,9 +264,9 @@ export const openaiToContext = (body: Record<string, unknown>): PiAiContext => {
       ? systemMsg['content']
       : undefined
 
-  const messages: PiAiMessage[] = typedMessages
+  const messages: Message[] = typedMessages
     .map(convertOpenAiMessage)
-    .filter((m): m is PiAiMessage => m !== null)
+    .filter((m): m is Message => m !== null)
 
   const tools = convertOpenAiTools(body['tools'])
 
