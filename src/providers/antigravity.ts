@@ -1,4 +1,4 @@
-// src/backends/pi-ai/antigravity.ts
+// src/providers/antigravity.ts
 
 import { arch, platform } from 'node:os'
 
@@ -13,9 +13,18 @@ import {
   type TextContent,
   type Tool,
   type ToolCall,
-  createAssistantMessageEventStream,
-  registerApiProvider
+  createAssistantMessageEventStream
 } from '@mariozechner/pi-ai'
+
+import type { Account, IncomingRequest, Provider, ProviderResponse } from '../types'
+
+import { anthropicToContext, openaiToContext } from './to-context'
+import {
+  anthropicMessageToJson,
+  createAnthropicSseStream,
+  createOpenAiSseStream,
+  openaiMessageToJson
+} from './to-sse'
 
 // --- Google Content types (local, minimal) ---
 
@@ -471,16 +480,82 @@ export const streamAntigravity = (
   return eventStream
 }
 
-// --- Provider registration ---
+// --- Direct provider ---
 
-let registered = false
+export const createAntigravityProvider = (name: string, _baseUrl: string): Provider => ({
+  name,
+  type: 'antigravity',
 
-export const ensureAntigravityProviderRegistered = (): void => {
-  if (registered) return
-  registered = true
-  registerApiProvider({
-    api: 'google-antigravity' as Api,
-    stream: streamAntigravity as never,
-    streamSimple: streamAntigravity as never
-  })
-}
+  async dispatch(request: IncomingRequest, account: Account): Promise<ProviderResponse> {
+    if (!account.resolveKey) throw new Error(`Account '${account.name}' has no resolveKey`)
+    const apiKey = await account.resolveKey()
+    const start = Date.now()
+
+    const body = JSON.parse(await request.rawRequest.text()) as Record<string, unknown>
+    const context =
+      request.format === 'anthropic' ? anthropicToContext(body) : openaiToContext(body)
+
+    const model = {
+      id: request.model,
+      api: 'google-antigravity' as Api,
+      provider: 'google-antigravity',
+      maxTokens: (body.max_tokens as number) ?? 8192
+    } as Model<Api>
+
+    if (request.stream) {
+      const eventStream = streamAntigravity(model, context, { apiKey })
+      const sseBody =
+        request.format === 'anthropic'
+          ? createAnthropicSseStream(eventStream, request.id, request.model)
+          : createOpenAiSseStream(eventStream, request.id, request.model)
+
+      return {
+        status: 200,
+        headers: new Headers({
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+          connection: 'keep-alive'
+        }),
+        body: sseBody,
+        metadata: {
+          requestId: request.id,
+          provider: name,
+          model: request.model,
+          latencyMs: Date.now() - start,
+          account: account.name
+        }
+      }
+    }
+
+    const eventStream = streamAntigravity(model, context, { apiKey })
+    let message: AssistantMessage | undefined
+    for await (const event of eventStream) {
+      if (event.type === 'done') {
+        message = event.message
+      }
+      if (event.type === 'error') {
+        throw new Error(event.error.errorMessage ?? 'Antigravity stream error')
+      }
+    }
+
+    if (!message) throw new Error('No response from Antigravity stream')
+
+    const responseBody =
+      request.format === 'anthropic'
+        ? anthropicMessageToJson(message, request.id, request.model)
+        : openaiMessageToJson(message, request.id, request.model)
+
+    return {
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      body: responseBody,
+      metadata: {
+        requestId: request.id,
+        provider: name,
+        model: request.model,
+        latencyMs: Date.now() - start,
+        account: account.name
+      }
+    }
+  }
+})

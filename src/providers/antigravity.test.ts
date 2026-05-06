@@ -1,9 +1,14 @@
-// src/backends/pi-ai/antigravity.test.ts
+// src/providers/antigravity.test.ts
 
 import { describe, expect, it } from 'bun:test'
 import type { Context, Tool } from '@mariozechner/pi-ai'
 
-import { buildEnvelope, contextToContents, parseCloudCodeChunk } from './antigravity'
+import {
+  buildEnvelope,
+  contextToContents,
+  createAntigravityProvider,
+  parseCloudCodeChunk
+} from './antigravity'
 
 describe('contextToContents', () => {
   it('converts a simple user text message', () => {
@@ -315,5 +320,31 @@ describe('parseCloudCodeChunk', () => {
   it('returns empty array for empty candidates', () => {
     const chunk = { response: { candidates: [] } }
     expect(parseCloudCodeChunk(chunk)).toEqual([])
+  })
+})
+
+describe('createAntigravityProvider', () => {
+  it('returns a provider with correct name and type', () => {
+    const provider = createAntigravityProvider('ag', 'https://daily-cloudcode-pa.googleapis.com')
+    expect(provider.name).toBe('ag')
+    expect(provider.type).toBe('antigravity')
+  })
+
+  it('throws when account has no resolveKey', async () => {
+    const provider = createAntigravityProvider('ag', 'https://daily-cloudcode-pa.googleapis.com')
+    const account = { type: 'antigravity-oauth' as const, name: 'test' }
+    const request = {
+      id: 'req-1',
+      format: 'anthropic' as const,
+      rawRequest: new Request('http://localhost', {
+        method: 'POST',
+        body: JSON.stringify({ model: 'test', messages: [{ role: 'user', content: 'hi' }] })
+      }),
+      model: 'test',
+      stream: false
+    }
+    await expect(provider.dispatch(request, account)).rejects.toThrow(
+      "Account 'test' has no resolveKey"
+    )
   })
 })
