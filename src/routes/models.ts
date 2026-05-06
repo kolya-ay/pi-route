@@ -15,8 +15,8 @@ export const createModelsRoute = (options: RouterOptions): Hono => {
         id: m,
         object: 'model' as const,
         owned_by:
-          options.routing.rules.find((r) => r.match === m)?.backend ??
-          options.routing.default.backend
+          options.routing.rules.find((r) => r.match === m)?.provider ??
+          options.routing.default.provider
       }))
 
     return c.json({ object: 'list', data })

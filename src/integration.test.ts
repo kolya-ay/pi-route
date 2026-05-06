@@ -8,15 +8,16 @@ import type { RouterOptions } from './types'
 const baseOptions: RouterOptions = {
   server: { port: 3000, host: '127.0.0.1' },
   auth: { apiKeys: [] },
-  backends: {
-    'anthropic-backend': {
-      type: 'passthrough-anthropic',
+  authDir: '~/.config/hono-router/auth',
+  providers: {
+    'anthropic-provider': {
+      type: 'anthropic',
       baseUrl: 'https://api.anthropic.com',
       accounts: [{ type: 'api-key', name: 'account-1', resolveKey: () => 'sk-ant-test-key' }],
       balancing: { strategy: 'round-robin' }
     },
-    'openai-backend': {
-      type: 'passthrough-openai',
+    'openai-provider': {
+      type: 'openai',
       baseUrl: 'https://api.openai.com',
       accounts: [
         { type: 'api-key', name: 'account-a', resolveKey: () => 'sk-openai-key-a' },
@@ -27,17 +28,17 @@ const baseOptions: RouterOptions = {
   },
   routing: {
     rules: [
-      { match: 'claude-*', backend: 'anthropic-backend' },
-      { match: 'gpt-*', backend: 'openai-backend' }
+      { match: 'claude-*', provider: 'anthropic-provider' },
+      { match: 'gpt-*', provider: 'openai-provider' }
     ],
     scenarios: {},
-    default: { backend: 'anthropic-backend' }
+    default: { provider: 'anthropic-provider' }
   },
   telemetry: { level: 'info' }
 }
 
 describe('integration: health endpoint', () => {
-  it('shows both backends with account counts', async () => {
+  it('shows both providers with account counts', async () => {
     const app = createApp(baseOptions)
     const res = await app.request('/health')
 
@@ -45,15 +46,15 @@ describe('integration: health endpoint', () => {
     const body = (await res.json()) as Record<string, unknown>
     expect(body['status']).toBe('ok')
 
-    const backends = body['backends'] as Record<string, unknown>
-    expect(backends['anthropic-backend']).toBeDefined()
-    expect(backends['openai-backend']).toBeDefined()
+    const providers = body['providers'] as Record<string, unknown>
+    expect(providers['anthropic-provider']).toBeDefined()
+    expect(providers['openai-provider']).toBeDefined()
 
-    const anthropicEntry = backends['anthropic-backend'] as Record<string, unknown>
-    const openaiEntry = backends['openai-backend'] as Record<string, unknown>
+    const anthropicEntry = providers['anthropic-provider'] as Record<string, unknown>
+    const openaiEntry = providers['openai-provider'] as Record<string, unknown>
 
-    expect(anthropicEntry['type']).toBe('passthrough-anthropic')
-    expect(openaiEntry['type']).toBe('passthrough-openai')
+    expect(anthropicEntry['type']).toBe('anthropic')
+    expect(openaiEntry['type']).toBe('openai')
 
     const anthropicAccounts = anthropicEntry['accounts'] as { total: number }
     const openaiAccounts = openaiEntry['accounts'] as { total: number }
@@ -71,7 +72,7 @@ describe('integration: health endpoint', () => {
   })
 })
 
-describe('integration: routing claude models to anthropic backend', () => {
+describe('integration: routing claude models to anthropic provider', () => {
   it('routes claude-* model and gets 502 with no real upstream', async () => {
     const app = createApp(baseOptions)
 
@@ -109,9 +110,9 @@ describe('integration: 429 when all accounts are rate-limited', () => {
     // Use 0 accounts to force pool.select() to return null → 429
     const noAccountOptions: RouterOptions = {
       ...baseOptions,
-      backends: {
-        'anthropic-backend': {
-          type: 'passthrough-anthropic',
+      providers: {
+        'anthropic-provider': {
+          type: 'anthropic',
           baseUrl: 'https://api.anthropic.com',
           accounts: [],
           balancing: { strategy: 'round-robin' }

@@ -1,30 +1,21 @@
 {
-  "backends": {
-    "claude-cli": {
-      "type": "passthrough-anthropic",
-      "baseUrl": "https://api.anthropic.com",
+  "authDir": "~/.config/hono-router/auth",
+  "providers": {
+    "claude-direct": {
+      "type": "anthropic",
       "accounts": [
         { "type": "claude-cli", "name": "personal", "tokenPath": "~/.claude/credentials.json" }
       ],
       "balancing": { "strategy": "sticky", "rateLimitPerModel": true }
     },
     "antigravity": {
-      "type": "pi-ai",
-      "provider": "google-antigravity",
-      "baseUrl": "https://daily-cloudcode-pa.googleapis.com",
-      "accounts": [
-        {
-          "type": "antigravity-oauth",
-          "name": "google-1",
-          "refreshToken": "YOUR_REFRESH_TOKEN",
-          "projectId": "YOUR_PROJECT_ID"
-        }
-      ],
+      "type": "antigravity",
+      "accounts": [{ "type": "antigravity-oauth", "name": "user@gmail.com" }],
       "balancing": { "strategy": "round-robin" }
     }
   },
   "routing": {
-    "rules": [{ "match": "claude-*", "backend": "claude-cli" }],
-    "default": { "backend": "claude-cli" }
+    "rules": [{ "match": "claude-*", "provider": "claude-direct" }],
+    "default": { "provider": "claude-direct" }
   }
 }

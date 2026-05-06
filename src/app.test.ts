@@ -6,9 +6,10 @@ import type { RouterOptions } from './types'
 const testOptions: RouterOptions = {
   server: { port: 3000, host: 'localhost' },
   auth: { apiKeys: [] },
-  backends: {
-    'test-backend': {
-      type: 'passthrough-anthropic',
+  authDir: '~/.config/hono-router/auth',
+  providers: {
+    'test-provider': {
+      type: 'anthropic',
       baseUrl: 'https://api.anthropic.com',
       accounts: [{ type: 'api-key', name: 'test-account', resolveKey: () => 'sk-test-key' }],
       balancing: { strategy: 'round-robin' }
@@ -16,11 +17,11 @@ const testOptions: RouterOptions = {
   },
   routing: {
     rules: [
-      { match: 'claude-sonnet-4-20250514', backend: 'test-backend' },
-      { match: 'claude-*', backend: 'test-backend' }
+      { match: 'claude-sonnet-4-20250514', provider: 'test-provider' },
+      { match: 'claude-*', provider: 'test-provider' }
     ],
     scenarios: {},
-    default: { backend: 'test-backend' }
+    default: { provider: 'test-provider' }
   },
   telemetry: { level: 'info' }
 }
@@ -39,15 +40,15 @@ describe('GET /', () => {
 })
 
 describe('GET /health', () => {
-  it('returns 200 with status ok and backends', async () => {
+  it('returns 200 with status ok and providers', async () => {
     const app = createApp(testOptions)
     const res = await app.request('/health')
     expect(res.status).toBe(200)
     const body = (await res.json()) as Record<string, unknown>
     expect(body['status']).toBe('ok')
-    expect(body['backends']).toBeDefined()
-    const backends = body['backends'] as Record<string, unknown>
-    expect(backends['test-backend']).toBeDefined()
+    expect(body['providers']).toBeDefined()
+    const providers = body['providers'] as Record<string, unknown>
+    expect(providers['test-provider']).toBeDefined()
   })
 })
 

@@ -25,6 +25,6 @@ export const scenarioStrategy: RoutingStrategy = {
     const config = context.options.routing.scenarios[scenario]
     if (!config) return null
 
-    return { backend: config.backend, model: config.model, reason: `scenario: ${scenario}` }
+    return { provider: config.provider, model: config.model, reason: `scenario: ${scenario}` }
   }
 }

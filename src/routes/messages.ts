@@ -2,13 +2,13 @@
 
 import { Hono } from 'hono'
 
-import type { BackendEntry } from '../backends/registry'
+import type { ProviderEntry } from '../providers/registry'
 import type { RouterOptions, RoutingStrategy, TelemetryEmitter } from '../types'
 
 import { createDispatchHandler } from './dispatch'
 
 export const createMessagesRoute = (
-  registry: Map<string, BackendEntry>,
+  registry: Map<string, ProviderEntry>,
   routing: RoutingStrategy,
   options: RouterOptions,
   telemetry: TelemetryEmitter

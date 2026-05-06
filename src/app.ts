@@ -4,7 +4,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 
 import { createAuthMiddleware } from './auth/middleware'
-import { createBackendRegistry } from './backends/registry'
+import { createProviderRegistry } from './providers/registry'
 import { createRoutingPipeline } from './routing/pipeline'
 import { createChatCompletionsRoute } from './routes/chat-completions'
 import { createHealthRoute } from './routes/health'
@@ -20,7 +20,7 @@ export const createApp = (options: RouterOptions) => {
   const startTime = Date.now()
 
   const telemetry = createTelemetryEmitter([createConsoleSink()])
-  const registry = createBackendRegistry(options)
+  const registry = createProviderRegistry(options)
   const routing = createRoutingPipeline()
 
   // Middleware

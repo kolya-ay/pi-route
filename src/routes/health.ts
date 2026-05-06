@@ -2,23 +2,26 @@
 
 import { Hono } from 'hono'
 
-import type { BackendEntry } from '../backends/registry'
+import type { ProviderEntry } from '../providers/registry'
 
-export const createHealthRoute = (registry: Map<string, BackendEntry>, startTime: number): Hono => {
+export const createHealthRoute = (
+  registry: Map<string, ProviderEntry>,
+  startTime: number
+): Hono => {
   const app = new Hono()
 
   app.get('/', (c) => {
-    const backends: Record<
+    const providers: Record<
       string,
-      { type: string; accounts: ReturnType<BackendEntry['pool']['health']> }
+      { type: string; accounts: ReturnType<ProviderEntry['pool']['health']> }
     > = Object.fromEntries(
       Array.from(registry.entries()).map(([name, entry]) => [
         name,
-        { type: entry.backend.type, accounts: entry.pool.health() }
+        { type: entry.provider.type, accounts: entry.pool.health() }
       ])
     )
 
-    return c.json({ status: 'ok', backends, uptime: Math.floor((Date.now() - startTime) / 1000) })
+    return c.json({ status: 'ok', providers, uptime: Math.floor((Date.now() - startTime) / 1000) })
   })
 
   return app

@@ -1,6 +1,6 @@
-import { getOAuthApiKey } from '@mariozechner/pi-ai/oauth'
-
 import type { Account } from './types'
+import { createOAuthResolveKey } from './auth/credentials'
+import { refreshAccessToken } from './auth/antigravity-oauth'
 import { interpolateEnvVars } from './config/loader'
 import { parseConfig } from './config/schema'
 
@@ -24,23 +24,23 @@ const wireResolveKey = (account: Account): void => {
         return parsed.oauthToken
       }
     })
-  } else if (account.type === 'antigravity-oauth' && typeof extra['refreshToken'] === 'string') {
-    const refreshToken = extra['refreshToken'] as string
-    const projectId = (extra['projectId'] as string) ?? ''
+  } else if (account.type === 'antigravity-oauth') {
     Object.assign(account, {
-      resolveKey: async () => {
-        const result = await getOAuthApiKey('google-antigravity', {
-          'google-antigravity': { refresh: refreshToken, access: '', expires: 0, projectId }
-        })
-        if (!result) throw new Error(`Failed to get API key for account '${account.name}'`)
-        return result.apiKey
-      }
+      resolveKey: createOAuthResolveKey(options.authDir, account.name, async (refreshToken) => {
+        const refreshed = await refreshAccessToken(refreshToken)
+        return {
+          provider: 'google-antigravity',
+          refreshToken: refreshed.refresh,
+          accessToken: refreshed.access,
+          expires: refreshed.expires
+        }
+      })
     })
   }
 }
 
-for (const backend of Object.values(options.backends)) {
-  backend.accounts.forEach(wireResolveKey)
+for (const provider of Object.values(options.providers)) {
+  provider.accounts.forEach(wireResolveKey)
 }
 
 const { createApp } = await import('./app')

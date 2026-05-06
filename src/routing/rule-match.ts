@@ -13,7 +13,7 @@ export const ruleMatchStrategy: RoutingStrategy = {
     const { model, options } = context
     for (const rule of options.routing.rules) {
       if (globToRegex(rule.match).test(model)) {
-        return { backend: rule.backend, reason: `rule: ${rule.match}` }
+        return { provider: rule.provider, reason: `rule: ${rule.match}` }
       }
     }
     return null

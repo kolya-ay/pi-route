@@ -15,6 +15,6 @@ export const createRoutingPipeline = (): RoutingStrategy => ({
       if (decision !== null) return decision
     }
 
-    return { backend: context.options.routing.default.backend, reason: 'default' }
+    return { provider: context.options.routing.default.provider, reason: 'default' }
   }
 })

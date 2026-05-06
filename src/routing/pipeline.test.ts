@@ -9,15 +9,16 @@ import { createRoutingPipeline } from './pipeline'
 const baseOptions: RouterOptions = {
   server: { port: 4000, host: '127.0.0.1' },
   auth: { apiKeys: [] },
-  backends: {
+  authDir: '~/.config/hono-router/auth',
+  providers: {
     'claude-cli': {
-      type: 'passthrough-anthropic',
+      type: 'anthropic',
       baseUrl: 'http://localhost:3000',
       accounts: [],
       balancing: { strategy: 'round-robin' }
     },
     chutes: {
-      type: 'passthrough-openai',
+      type: 'openai',
       baseUrl: 'http://chutes.example.com',
       accounts: [],
       balancing: { strategy: 'round-robin' }
@@ -25,11 +26,11 @@ const baseOptions: RouterOptions = {
   },
   routing: {
     rules: [
-      { match: 'claude-*', backend: 'claude-cli' },
-      { match: 'deepseek-*', backend: 'chutes' }
+      { match: 'claude-*', provider: 'claude-cli' },
+      { match: 'deepseek-*', provider: 'chutes' }
     ],
-    scenarios: { thinking: { backend: 'claude-cli' } },
-    default: { backend: 'chutes' }
+    scenarios: { thinking: { provider: 'claude-cli' } },
+    default: { provider: 'chutes' }
   },
   telemetry: { level: 'info' }
 }
@@ -47,14 +48,14 @@ describe('createRoutingPipeline', () => {
   it('matches claude-* model to claude-cli via rule', () => {
     const pipeline = createRoutingPipeline()
     const decision = pipeline.resolve(makeContext({ model: 'claude-opus-4-5' }))!
-    expect(decision.backend).toBe('claude-cli')
+    expect(decision.provider).toBe('claude-cli')
     expect(decision.reason).toBe('rule: claude-*')
   })
 
   it('matches deepseek-* model to chutes via rule', () => {
     const pipeline = createRoutingPipeline()
     const decision = pipeline.resolve(makeContext({ model: 'deepseek-chat' }))!
-    expect(decision.backend).toBe('chutes')
+    expect(decision.provider).toBe('chutes')
     expect(decision.reason).toBe('rule: deepseek-*')
   })
 
@@ -67,7 +68,7 @@ describe('createRoutingPipeline', () => {
         body: { thinking: { type: 'enabled', budget_tokens: 1000 } }
       })
     )!
-    expect(decision.backend).toBe('claude-cli')
+    expect(decision.provider).toBe('claude-cli')
     expect(decision.reason).toBe('scenario: thinking')
   })
 
@@ -80,14 +81,14 @@ describe('createRoutingPipeline', () => {
         body: { reasoning_effort: 'high' }
       })
     )!
-    expect(decision.backend).toBe('claude-cli')
+    expect(decision.provider).toBe('claude-cli')
     expect(decision.reason).toBe('scenario: thinking')
   })
 
   it('falls through to default for unknown model', () => {
     const pipeline = createRoutingPipeline()
     const decision = pipeline.resolve(makeContext({ model: 'gpt-4o' }))!
-    expect(decision.backend).toBe('chutes')
+    expect(decision.provider).toBe('chutes')
     expect(decision.reason).toBe('default')
   })
 
@@ -101,7 +102,7 @@ describe('createRoutingPipeline', () => {
         body: { thinking: { type: 'enabled', budget_tokens: 500 } }
       })
     )!
-    expect(decision.backend).toBe('claude-cli')
+    expect(decision.provider).toBe('claude-cli')
     expect(decision.reason).toBe('rule: claude-*')
   })
 })

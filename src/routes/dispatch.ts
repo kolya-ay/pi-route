@@ -3,12 +3,12 @@
 import type { Context } from 'hono'
 import { stream as honoStream } from 'hono/streaming'
 
-import type { BackendEntry } from '../backends/registry'
+import type { ProviderEntry } from '../providers/registry'
 import type { RouterOptions, RoutingStrategy, TelemetryEmitter } from '../types'
 
 export type DispatchDeps = {
   format: 'anthropic' | 'openai'
-  registry: Map<string, BackendEntry>
+  registry: Map<string, ProviderEntry>
   routing: RoutingStrategy
   options: RouterOptions
   telemetry: TelemetryEmitter
@@ -42,9 +42,9 @@ export const createDispatchHandler = (deps: DispatchDeps) => async (c: Context) 
     return c.json({ error: 'No routing decision' }, 502)
   }
 
-  const entry = deps.registry.get(decision.backend)
+  const entry = deps.registry.get(decision.provider)
   if (!entry) {
-    return c.json({ error: `Backend "${decision.backend}" not found` }, 502)
+    return c.json({ error: `Provider "${decision.provider}" not found` }, 502)
   }
 
   const accountState = entry.pool.select(decision.model ?? model)
@@ -58,7 +58,7 @@ export const createDispatchHandler = (deps: DispatchDeps) => async (c: Context) 
       ? JSON.stringify({ ...parsed, model: decision.model })
       : bodyText
 
-  const upstreamUrl = deps.options.backends[decision.backend]?.baseUrl ?? ''
+  const upstreamUrl = deps.options.providers[decision.provider]?.baseUrl ?? ''
   const rawReq = c.req.raw
   const outgoingRequest = new Request(upstreamUrl, {
     method: rawReq.method,
@@ -68,7 +68,7 @@ export const createDispatchHandler = (deps: DispatchDeps) => async (c: Context) 
   } as RequestInit)
 
   try {
-    const response = await entry.backend.dispatch(
+    const response = await entry.provider.dispatch(
       {
         id: requestId,
         format: deps.format,
@@ -84,7 +84,7 @@ export const createDispatchHandler = (deps: DispatchDeps) => async (c: Context) 
       requestId,
       timestamp: Date.now(),
       status: response.status,
-      backend: decision.backend,
+      provider: decision.provider,
       model: finalModel,
       account: response.metadata.account,
       tokens: response.metadata.tokens,
@@ -98,7 +98,7 @@ export const createDispatchHandler = (deps: DispatchDeps) => async (c: Context) 
       entry.pool.markRateLimited(accountState, finalModel, retryMs)
       deps.telemetry.emit({
         type: 'ratelimit_hit',
-        backend: decision.backend,
+        provider: decision.provider,
         account: accountState.account.name,
         model: finalModel,
         retryAfterMs: retryMs
@@ -116,12 +116,12 @@ export const createDispatchHandler = (deps: DispatchDeps) => async (c: Context) 
 
     return c.json(response.body as Record<string, unknown>, response.status as 200)
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Unknown backend error'
+    const message = err instanceof Error ? err.message : 'Unknown provider error'
     entry.pool.markError(accountState, { message })
     deps.telemetry.emit({
-      type: 'backend_error',
+      type: 'provider_error',
       requestId,
-      backend: decision.backend,
+      provider: decision.provider,
       account: accountState.account.name,
       message
     })
