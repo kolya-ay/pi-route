@@ -328,16 +328,16 @@ describe('createOpenAiSseStream', () => {
     expect(firstChunk.id).toBe('req-1')
     expect(firstChunk.object).toBe('chat.completion.chunk')
     expect(firstChunk.model).toBe('gpt-4')
-    const firstChoice = (firstChunk.choices as Array<Record<string, unknown>>)[0]!
+    const firstChoice = (firstChunk.choices as Record<string, unknown>[])[0]!
     expect((firstChoice.delta as Record<string, unknown>).role).toBe('assistant')
 
     // Text deltas
-    const textChunks = (dataChunks as Array<Record<string, unknown>>).filter((c) => {
-      const choices = c.choices as Array<Record<string, unknown>> | undefined
+    const textChunks = (dataChunks as Record<string, unknown>[]).filter((c) => {
+      const choices = c.choices as Record<string, unknown>[] | undefined
       return choices?.[0]?.delta && 'content' in (choices[0].delta as Record<string, unknown>)
     })
     expect(textChunks).toHaveLength(2)
-    const tc1Choices = textChunks[0]!.choices as Array<Record<string, unknown>>
+    const tc1Choices = textChunks[0]!.choices as Record<string, unknown>[]
     expect((tc1Choices[0]!.delta as Record<string, unknown>).content).toBe('Hello')
 
     // Final chunk with finish_reason
@@ -373,8 +373,8 @@ describe('createOpenAiSseStream', () => {
     expect(allJson).not.toContain('thinking')
 
     // Should still have the text delta
-    const textChunks = (dataChunks as Array<Record<string, unknown>>).filter((c) => {
-      const choices = c.choices as Array<Record<string, unknown>> | undefined
+    const textChunks = (dataChunks as Record<string, unknown>[]).filter((c) => {
+      const choices = c.choices as Record<string, unknown>[] | undefined
       return choices?.[0]?.delta && 'content' in (choices[0].delta as Record<string, unknown>)
     })
     expect(textChunks).toHaveLength(1)
@@ -405,26 +405,26 @@ describe('createOpenAiSseStream', () => {
 
     const stream = createOpenAiSseStream(toAsyncIterable(events), 'req-tc', 'gpt-4')
     const lines = await collectSseLines(stream)
-    const dataChunks = parseDataLines(lines) as Array<Record<string, unknown>>
+    const dataChunks = parseDataLines(lines) as Record<string, unknown>[]
 
     // toolcall_start -> tool_calls array with id, name
     const toolStartChunk = dataChunks.find((c) => {
-      const choices = c.choices as Array<Record<string, unknown>>
+      const choices = c.choices as Record<string, unknown>[]
       const delta = choices?.[0]?.delta as Record<string, unknown> | undefined
       return delta?.tool_calls !== undefined
     })
     expect(toolStartChunk).toBeDefined()
-    const toolStartDelta = (toolStartChunk!.choices as Array<Record<string, unknown>>)[0]!
+    const toolStartDelta = (toolStartChunk!.choices as Record<string, unknown>[])[0]!
       .delta as Record<string, unknown>
-    const toolCalls = toolStartDelta.tool_calls as Array<Record<string, unknown>>
+    const toolCalls = toolStartDelta.tool_calls as Record<string, unknown>[]
     expect(toolCalls[0]!.id).toBe('call_1')
     expect((toolCalls[0]!.function as Record<string, unknown>).name).toBe('get_weather')
 
     // toolcall_delta -> arguments
     const toolDeltaChunks = dataChunks.filter((c) => {
-      const choices = c.choices as Array<Record<string, unknown>>
+      const choices = c.choices as Record<string, unknown>[]
       const delta = choices?.[0]?.delta as Record<string, unknown> | undefined
-      const tcs = delta?.tool_calls as Array<Record<string, unknown>> | undefined
+      const tcs = delta?.tool_calls as Record<string, unknown>[] | undefined
       return (
         tcs?.[0]?.function &&
         'arguments' in (tcs[0].function as Record<string, unknown>) &&
@@ -501,7 +501,7 @@ describe('anthropicMessageToJson', () => {
     expect(result.stop_reason).toBe('end_turn')
     expect(result.stop_sequence).toBeNull()
 
-    const content = result.content as Array<Record<string, unknown>>
+    const content = result.content as Record<string, unknown>[]
     expect(content).toHaveLength(1)
     expect(content[0]!.type).toBe('text')
     expect(content[0]!.text).toBe('Hello world')
@@ -522,7 +522,7 @@ describe('anthropicMessageToJson', () => {
     })
 
     const result = anthropicMessageToJson(message, 'req-2', 'model')
-    const content = result.content as Array<Record<string, unknown>>
+    const content = result.content as Record<string, unknown>[]
     expect(content).toHaveLength(2)
     expect(content[0]!.type).toBe('thinking')
     expect(content[0]!.thinking).toBe('Let me reason...')
@@ -541,7 +541,7 @@ describe('anthropicMessageToJson', () => {
     const result = anthropicMessageToJson(message, 'req-3', 'model')
     expect(result.stop_reason).toBe('tool_use')
 
-    const content = result.content as Array<Record<string, unknown>>
+    const content = result.content as Record<string, unknown>[]
     expect(content).toHaveLength(1)
     expect(content[0]!.type).toBe('tool_use')
     expect(content[0]!.id).toBe('tool_1')
@@ -569,7 +569,7 @@ describe('openaiMessageToJson', () => {
     expect(result.model).toBe('gpt-4')
     expect(typeof result.created).toBe('number')
 
-    const choices = result.choices as Array<Record<string, unknown>>
+    const choices = result.choices as Record<string, unknown>[]
     expect(choices).toHaveLength(1)
     const choice = choices[0]!
     expect(choice.index).toBe(0)
@@ -596,12 +596,12 @@ describe('openaiMessageToJson', () => {
     })
 
     const result = openaiMessageToJson(message, 'req-2', 'gpt-4')
-    const choices = result.choices as Array<Record<string, unknown>>
+    const choices = result.choices as Record<string, unknown>[]
     const msg = choices[0]!.message as Record<string, unknown>
     expect(msg.content).toBe('Using a tool')
     expect(choices[0]!.finish_reason).toBe('tool_calls')
 
-    const toolCalls = msg.tool_calls as Array<Record<string, unknown>>
+    const toolCalls = msg.tool_calls as Record<string, unknown>[]
     expect(toolCalls).toHaveLength(1)
     expect(toolCalls[0]!.id).toBe('call_1')
     expect(toolCalls[0]!.type).toBe('function')
@@ -617,10 +617,7 @@ describe('openaiMessageToJson', () => {
     })
 
     const result = openaiMessageToJson(message, 'req-3', 'gpt-4')
-    const msg = (result.choices as Array<Record<string, unknown>>)[0]!.message as Record<
-      string,
-      unknown
-    >
+    const msg = (result.choices as Record<string, unknown>[])[0]!.message as Record<string, unknown>
     expect(msg.content).toBeNull()
   })
 
@@ -633,10 +630,7 @@ describe('openaiMessageToJson', () => {
     })
 
     const result = openaiMessageToJson(message, 'req-4', 'gpt-4')
-    const msg = (result.choices as Array<Record<string, unknown>>)[0]!.message as Record<
-      string,
-      unknown
-    >
+    const msg = (result.choices as Record<string, unknown>[])[0]!.message as Record<string, unknown>
     expect(msg.content).toBe('Part 1Part 2')
   })
 
@@ -644,7 +638,7 @@ describe('openaiMessageToJson', () => {
     const test = (stopReason: 'stop' | 'length' | 'toolUse', expected: string) => {
       const message = makePartial({ stopReason })
       const result = openaiMessageToJson(message, 'r', 'm')
-      expect((result.choices as Array<Record<string, unknown>>)[0]!.finish_reason).toBe(expected)
+      expect((result.choices as Record<string, unknown>[])[0]!.finish_reason).toBe(expected)
     }
     test('stop', 'stop')
     test('toolUse', 'tool_calls')
@@ -660,10 +654,7 @@ describe('openaiMessageToJson', () => {
     })
 
     const result = openaiMessageToJson(message, 'req-5', 'gpt-4')
-    const msg = (result.choices as Array<Record<string, unknown>>)[0]!.message as Record<
-      string,
-      unknown
-    >
+    const msg = (result.choices as Record<string, unknown>[])[0]!.message as Record<string, unknown>
     expect(msg.content).toBe('visible')
   })
 })

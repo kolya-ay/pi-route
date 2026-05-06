@@ -48,7 +48,7 @@ describe('createConsoleSink', () => {
     const writeSpy = spyOn(process.stdout, 'write').mockImplementation(() => true)
     const sink = createConsoleSink()
     sink.emit(event)
-    expect(writeSpy).toHaveBeenCalledWith(JSON.stringify(event) + '\n')
+    expect(writeSpy).toHaveBeenCalledWith(`${JSON.stringify(event)}\n`)
     writeSpy.mockRestore()
   })
 })

@@ -44,20 +44,20 @@ describe('integration: health endpoint', () => {
 
     expect(res.status).toBe(200)
     const body = (await res.json()) as Record<string, unknown>
-    expect(body['status']).toBe('ok')
+    expect(body.status).toBe('ok')
 
-    const providers = body['providers'] as Record<string, unknown>
+    const providers = body.providers as Record<string, unknown>
     expect(providers['anthropic-provider']).toBeDefined()
     expect(providers['openai-provider']).toBeDefined()
 
     const anthropicEntry = providers['anthropic-provider'] as Record<string, unknown>
     const openaiEntry = providers['openai-provider'] as Record<string, unknown>
 
-    expect(anthropicEntry['type']).toBe('anthropic')
-    expect(openaiEntry['type']).toBe('openai')
+    expect(anthropicEntry.type).toBe('anthropic')
+    expect(openaiEntry.type).toBe('openai')
 
-    const anthropicAccounts = anthropicEntry['accounts'] as { total: number }
-    const openaiAccounts = openaiEntry['accounts'] as { total: number }
+    const anthropicAccounts = anthropicEntry.accounts as { total: number }
+    const openaiAccounts = openaiEntry.accounts as { total: number }
 
     expect(anthropicAccounts.total).toBe(1)
     expect(openaiAccounts.total).toBe(2)
@@ -67,8 +67,8 @@ describe('integration: health endpoint', () => {
     const app = createApp(baseOptions)
     const res = await app.request('/health')
     const body = (await res.json()) as Record<string, unknown>
-    expect(typeof body['uptime']).toBe('number')
-    expect(body['uptime'] as number).toBeGreaterThanOrEqual(0)
+    expect(typeof body.uptime).toBe('number')
+    expect(body.uptime as number).toBeGreaterThanOrEqual(0)
   })
 })
 
@@ -133,6 +133,6 @@ describe('integration: 429 when all accounts are rate-limited', () => {
 
     expect(res.status).toBe(429)
     const body = (await res.json()) as Record<string, unknown>
-    expect(body['error']).toContain('rate-limited')
+    expect(body.error).toContain('rate-limited')
   })
 })

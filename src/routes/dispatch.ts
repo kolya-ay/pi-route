@@ -18,8 +18,8 @@ export const createDispatchHandler = (deps: DispatchDeps) => async (c: Context) 
   const requestId = c.get('requestId') as string
   const bodyText = await c.req.raw.text()
   const parsed = JSON.parse(bodyText) as Record<string, unknown>
-  const model = String(parsed['model'] ?? '')
-  const stream = Boolean(parsed['stream'])
+  const model = String(parsed.model ?? '')
+  const stream = Boolean(parsed.stream)
 
   deps.telemetry.emit({
     type: 'request_start',

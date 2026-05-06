@@ -17,6 +17,6 @@ export const createTelemetryEmitter = (sinks: TelemetrySink[]): TelemetryEmitter
 
 export const createConsoleSink = (): TelemetrySink => ({
   emit(event: TelemetryEvent): void {
-    process.stdout.write(JSON.stringify(event) + '\n')
+    process.stdout.write(`${JSON.stringify(event)}\n`)
   }
 })

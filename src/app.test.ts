@@ -34,8 +34,8 @@ describe('GET /', () => {
     const res = await app.request('/')
     expect(res.status).toBe(200)
     const body = (await res.json()) as Record<string, unknown>
-    expect(body['name']).toBe('hono-router')
-    expect(body['status']).toBe('ok')
+    expect(body.name).toBe('hono-router')
+    expect(body.status).toBe('ok')
   })
 })
 
@@ -45,9 +45,9 @@ describe('GET /health', () => {
     const res = await app.request('/health')
     expect(res.status).toBe(200)
     const body = (await res.json()) as Record<string, unknown>
-    expect(body['status']).toBe('ok')
-    expect(body['providers']).toBeDefined()
-    const providers = body['providers'] as Record<string, unknown>
+    expect(body.status).toBe('ok')
+    expect(body.providers).toBeDefined()
+    const providers = body.providers as Record<string, unknown>
     expect(providers['test-provider']).toBeDefined()
   })
 })
@@ -58,10 +58,10 @@ describe('GET /v1/models', () => {
     const res = await app.request('/v1/models')
     expect(res.status).toBe(200)
     const body = (await res.json()) as Record<string, unknown>
-    expect(body['object']).toBe('list')
-    const data = body['data'] as Array<Record<string, unknown>>
+    expect(body.object).toBe('list')
+    const data = body.data as Record<string, unknown>[]
     expect(data.length).toBe(1)
-    expect(data[0]?.['id']).toBe('claude-sonnet-4-20250514')
+    expect(data[0]?.id).toBe('claude-sonnet-4-20250514')
   })
 })
 

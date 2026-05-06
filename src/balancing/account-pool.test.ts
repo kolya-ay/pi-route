@@ -10,7 +10,7 @@ import { createFillFirstStrategy, createRoundRobinStrategy } from './strategies'
 const makeAccount = (name: string): Account => ({
   type: 'api-key',
   name,
-  resolveKey: () => 'key-' + name
+  resolveKey: () => `key-${name}`
 })
 
 describe('createAccountPool', () => {

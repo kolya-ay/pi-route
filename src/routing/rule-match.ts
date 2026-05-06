@@ -1,6 +1,6 @@
 // src/routing/rule-match.ts
 
-import type { RoutingStrategy, RoutingContext, RoutingDecision } from '../types'
+import type { RoutingContext, RoutingDecision, RoutingStrategy } from '../types'
 
 const globToRegex = (pattern: string): RegExp => {
   const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')

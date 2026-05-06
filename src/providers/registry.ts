@@ -1,3 +1,4 @@
+import { ensureAntigravityOAuthRegistered } from '../auth/antigravity-oauth'
 import { createAccountPool } from '../balancing/account-pool'
 import {
   createFillFirstStrategy,
@@ -5,10 +6,8 @@ import {
   createStickyStrategy
 } from '../balancing/strategies'
 import type { Provider, RouterOptions } from '../types'
-import { ensureAntigravityOAuthRegistered } from '../auth/antigravity-oauth'
-
-import { createPassthroughProvider } from './passthrough'
 import { createAntigravityProvider } from './antigravity'
+import { createPassthroughProvider } from './passthrough'
 
 export type ProviderEntry = { provider: Provider; pool: ReturnType<typeof createAccountPool> }
 

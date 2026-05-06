@@ -7,13 +7,13 @@ import {
   type AssistantMessage,
   type AssistantMessageEventStream,
   type Context,
+  createAssistantMessageEventStream,
   type Message,
   type Model,
   type StreamOptions,
   type TextContent,
   type Tool,
-  type ToolCall,
-  createAssistantMessageEventStream
+  type ToolCall
 } from '@mariozechner/pi-ai'
 
 import type { Account, IncomingRequest, Provider, ProviderResponse } from '../types'
@@ -139,12 +139,12 @@ export const parseCloudCodeChunk = (chunk: Record<string, unknown>): ParsedPart[
   const response = chunk.response as Record<string, unknown> | undefined
   if (!response) return []
 
-  const candidates = response.candidates as Array<Record<string, unknown>> | undefined
+  const candidates = response.candidates as Record<string, unknown>[] | undefined
   if (!candidates || candidates.length === 0) return []
 
   const candidate = candidates[0]!
   const content = candidate.content as
-    | { role: string; parts: Array<Record<string, unknown>> }
+    | { role: string; parts: Record<string, unknown>[] }
     | undefined
   const rawParts = content?.parts ?? []
 

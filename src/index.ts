@@ -1,17 +1,17 @@
 export { createApp } from './app'
 export { loginAntigravity } from './auth/antigravity-oauth'
-export { parseConfig } from './config/schema'
 export { interpolateEnvVars } from './config/loader'
+export { parseConfig } from './config/schema'
 export type {
   Account,
   AccountType,
+  BalancingOptions,
+  BalancingStrategy,
+  IncomingRequest,
   Provider,
   ProviderOptions,
   ProviderResponse,
   ProviderType,
-  BalancingOptions,
-  BalancingStrategy,
-  IncomingRequest,
   ResponseMetadata,
   RouterOptions,
   RoutingContext,

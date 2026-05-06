@@ -1,6 +1,6 @@
 // src/routing/scenario.ts
 
-import type { RoutingStrategy, RoutingContext, RoutingDecision, ScenarioType } from '../types'
+import type { RoutingContext, RoutingDecision, RoutingStrategy, ScenarioType } from '../types'
 
 const detectScenario = (context: RoutingContext): ScenarioType | null => {
   const { model, body } = context

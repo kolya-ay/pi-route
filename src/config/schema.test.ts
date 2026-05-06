@@ -12,7 +12,7 @@ const minimalConfig = {
 describe('parseConfig', () => {
   it('parses a valid config', () => {
     const result = parseConfig(minimalConfig)
-    expect(result.providers['primary']?.type).toBe('anthropic')
+    expect(result.providers.primary?.type).toBe('anthropic')
     expect(result.routing.default.provider).toBe('primary')
   })
 
@@ -38,7 +38,7 @@ describe('parseConfig', () => {
 
   it('resolves baseUrl for anthropic when not specified', () => {
     const result = parseConfig(minimalConfig)
-    expect(result.providers['primary']?.baseUrl).toBe('https://api.anthropic.com')
+    expect(result.providers.primary?.baseUrl).toBe('https://api.anthropic.com')
   })
 
   it('resolves baseUrl for antigravity when not specified', () => {
@@ -48,7 +48,7 @@ describe('parseConfig', () => {
       },
       routing: { default: { provider: 'ag' } }
     })
-    expect(result.providers['ag']?.baseUrl).toBe('https://daily-cloudcode-pa.googleapis.com')
+    expect(result.providers.ag?.baseUrl).toBe('https://daily-cloudcode-pa.googleapis.com')
   })
 
   it('preserves explicit baseUrl over default', () => {
@@ -56,7 +56,7 @@ describe('parseConfig', () => {
       providers: { primary: { ...minimalProvider, baseUrl: 'https://custom.example.com' } },
       routing: { default: { provider: 'primary' } }
     })
-    expect(result.providers['primary']?.baseUrl).toBe('https://custom.example.com')
+    expect(result.providers.primary?.baseUrl).toBe('https://custom.example.com')
   })
 
   it('preserves explicit server config', () => {

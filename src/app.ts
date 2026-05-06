@@ -5,11 +5,11 @@ import { cors } from 'hono/cors'
 
 import { createAuthMiddleware } from './auth/middleware'
 import { createProviderRegistry } from './providers/registry'
-import { createRoutingPipeline } from './routing/pipeline'
 import { createChatCompletionsRoute } from './routes/chat-completions'
 import { createHealthRoute } from './routes/health'
 import { createMessagesRoute } from './routes/messages'
 import { createModelsRoute } from './routes/models'
+import { createRoutingPipeline } from './routing/pipeline'
 import { createConsoleSink, createTelemetryEmitter } from './telemetry/emitter'
 import type { RouterOptions } from './types'
 

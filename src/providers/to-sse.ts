@@ -292,7 +292,6 @@ export const createOpenAiSseStream = (
 
   return new ReadableStream({
     async pull(controller) {
-
       while (true) {
         const { done, value } = await iterator.next()
         if (done) {

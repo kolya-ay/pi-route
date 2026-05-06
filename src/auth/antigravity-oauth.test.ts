@@ -120,7 +120,7 @@ describe('discoverProject', () => {
     const [url, init] = mockFetch.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toBe('https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist')
     expect(init.method).toBe('POST')
-    expect((init.headers as Record<string, string>)['Authorization']).toBe('Bearer token-abc')
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer token-abc')
   })
 
   it('throws when cloudaicompanionProject is missing', async () => {
@@ -202,7 +202,7 @@ describe('loginAntigravity', () => {
     expect(authUrl).toContain('accounts.google.com')
     expect(creds.access).toBe('test-access')
     expect(creds.refresh).toBe('test-refresh')
-    expect(creds['projectId']).toBe('discovered-project')
+    expect(creds.projectId).toBe('discovered-project')
     expect(progressMessages).toEqual([
       'Exchanging auth code for tokens...',
       'Discovering Cloud Code project...'

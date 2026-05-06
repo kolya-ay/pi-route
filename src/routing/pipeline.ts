@@ -1,6 +1,6 @@
 // src/routing/pipeline.ts
 
-import type { RoutingStrategy, RoutingContext, RoutingDecision } from '../types'
+import type { RoutingContext, RoutingDecision, RoutingStrategy } from '../types'
 
 import { ruleMatchStrategy } from './rule-match'
 import { scenarioStrategy } from './scenario'

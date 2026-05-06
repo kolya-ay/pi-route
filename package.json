@@ -1,5 +1,5 @@
 {
-  "name": "hono-router",
+  "name": "pi-router",
   "version": "0.1.0",
   "type": "module",
   "exports": {
@@ -8,27 +8,19 @@
   },
   "scripts": {
     "dev": "bun --watch src/serve.ts",
-    "lint": "eslint src",
-    "lint:fix": "eslint src --fix",
-    "format": "prettier src --write",
-    "format:check": "prettier src --check",
-    "check": "bun run lint && bun run format:check && tsc --noEmit",
+    "lint": "biome check src",
+    "lint:fix": "biome check --write src",
+    "check": "bun run lint && tsgo --noEmit",
     "test": "bun test",
     "test:watch": "bun test --watch",
     "prepare": "simple-git-hooks"
   },
   "simple-git-hooks": {
     "pre-commit": "bun run lint-staged",
-    "pre-push": "tsc --noEmit"
+    "pre-push": "tsgo --noEmit"
   },
   "lint-staged": {
-    "*.{ts,js}": [
-      "prettier --write",
-      "eslint --fix --max-warnings=0"
-    ],
-    "*.{json,md}": [
-      "prettier --write"
-    ]
+    "*.{ts,json}": "biome check --write --no-errors-on-unmatched"
   },
   "dependencies": {
     "@mariozechner/pi-ai": "^0.73.0",
@@ -36,18 +28,10 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
+    "@biomejs/biome": "2.4.14",
     "@types/bun": "latest",
-    "eslint": "^10.2.1",
-    "eslint-config-prettier": "^10.1.8",
-    "eslint-import-resolver-typescript": "^4.4.4",
-    "eslint-plugin-import-x": "^4.16.2",
-    "globals": "^17.5.0",
-    "jiti": "^2.6.1",
+    "@typescript/native-preview": "7.0.0-dev.20260506.1",
     "lint-staged": "^16.4.0",
-    "prettier": "^3.8.3",
-    "simple-git-hooks": "^2.13.1",
-    "typescript": "^6.0.3",
-    "typescript-eslint": "^8.59.0"
+    "simple-git-hooks": "^2.13.1"
   }
 }

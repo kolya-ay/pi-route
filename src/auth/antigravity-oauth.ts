@@ -201,11 +201,11 @@ export const ensureAntigravityOAuthRegistered = (): void => {
 
     refreshToken: async (credentials) => {
       const refreshed = await refreshAccessToken(credentials.refresh)
-      return { ...refreshed, projectId: credentials['projectId'] }
+      return { ...refreshed, projectId: credentials.projectId }
     },
 
     getApiKey: (credentials) =>
-      JSON.stringify({ token: credentials.access, projectId: credentials['projectId'] })
+      JSON.stringify({ token: credentials.access, projectId: credentials.projectId })
   }
 
   registerOAuthProvider(provider)

@@ -50,6 +50,6 @@ export const createOAuthResolveKey = (
       cached = refreshed
     }
 
-    return JSON.stringify({ token: cached.accessToken, projectId: cached['projectId'] })
+    return JSON.stringify({ token: cached.accessToken, projectId: cached.projectId })
   }
 }

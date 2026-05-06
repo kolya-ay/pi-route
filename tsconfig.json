@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
+    "target": "ES2024",
     "module": "ESNext",
     "moduleResolution": "bundler",
     "noEmit": true,
@@ -12,8 +12,6 @@
     "resolveJsonModule": true,
     "moduleDetection": "force",
     "verbatimModuleSyntax": true,
-    "incremental": true,
-
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,

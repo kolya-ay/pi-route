@@ -1,13 +1,11 @@
 // src/auth/credentials.test.ts
 
-import { mkdirSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
-import { tmpdir } from 'node:os'
-
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-
-import { createOAuthResolveKey, readCredentials, writeCredentials } from './credentials'
+import { mkdirSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { CredentialFile } from './credentials'
+import { createOAuthResolveKey, readCredentials, writeCredentials } from './credentials'
 
 let testDir: string
 
@@ -36,7 +34,7 @@ describe('readCredentials', () => {
     expect(result.refreshToken).toBe('ref-token')
     expect(result.accessToken).toBe('acc-token')
     expect(result.expires).toBe(9999999999999)
-    expect(result['projectId']).toBe('my-project')
+    expect(result.projectId).toBe('my-project')
   })
 
   it('throws when file does not exist', async () => {

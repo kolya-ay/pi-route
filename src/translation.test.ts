@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test'
+
 import { needsTranslation, providerWireFormat } from './translation'
 
 describe('providerWireFormat', () => {
