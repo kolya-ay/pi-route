@@ -102,6 +102,33 @@ export type TelemetryEvent =
   | RequestEndEvent
   | ProviderErrorEvent
   | RateLimitEvent
+  | AccountRefreshedEvent
+  | AccountRefreshFailedEvent
+  | AccountRefreshGivenUpEvent
+  | AdminPersistFailedEvent
+
+export type AccountRefreshedEvent = {
+  type: 'account.refreshed'
+  account: string
+  expires: number
+}
+
+export type AccountRefreshFailedEvent = {
+  type: 'account.refresh-failed'
+  account: string
+  error: string
+}
+
+export type AccountRefreshGivenUpEvent = {
+  type: 'account.refresh-given-up'
+  account: string
+  attempts: number
+}
+
+export type AdminPersistFailedEvent = {
+  type: 'admin.persist-failed'
+  error: string
+}
 
 export type RequestStartEvent = {
   type: 'request_start'

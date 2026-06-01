@@ -125,19 +125,32 @@ export const discoverProject = async (
   return projectId
 }
 
+export class LoginTimeoutError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'LoginTimeoutError'
+  }
+}
+
 export const loginAntigravity = async (
   callbacks: OAuthLoginCallbacks,
-  fetchFn: FetchFn = globalThis.fetch
+  fetchFn: FetchFn = globalThis.fetch,
+  signal?: AbortSignal
 ): Promise<OAuthCredentials> => {
+  if (signal?.aborted) throw new LoginTimeoutError('OAuth login aborted')
+
   const state = crypto.randomUUID()
   const authUrl = buildAuthUrl(state)
 
   const { promise, resolve, reject } = Promise.withResolvers<string>()
 
   const timeout = setTimeout(
-    () => reject(new Error(`OAuth login timed out after ${LOGIN_TIMEOUT_MS / 1000}s`)),
+    () => reject(new LoginTimeoutError(`OAuth login timed out after ${LOGIN_TIMEOUT_MS / 1000}s`)),
     LOGIN_TIMEOUT_MS
   )
+
+  const onAbort = () => reject(new LoginTimeoutError('OAuth login aborted'))
+  signal?.addEventListener('abort', onAbort, { once: true })
 
   const server = Bun.serve({
     port: CALLBACK_PORT,
@@ -183,6 +196,7 @@ export const loginAntigravity = async (
     return { ...credentials, projectId }
   } finally {
     clearTimeout(timeout)
+    signal?.removeEventListener('abort', onAbort)
     server.stop()
   }
 }

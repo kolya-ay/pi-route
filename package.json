@@ -6,6 +6,9 @@
     ".": "./src/index.ts",
     "./serve": "./src/serve.ts"
   },
+  "bin": {
+    "pi-route": "./src/cli.ts"
+  },
   "scripts": {
     "dev": "bun --watch src/serve.ts",
     "lint": "biome check src",
