@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 
-import { createApp } from './app'
+import { createRouter } from './app'
 import type { RouterOptions } from './types'
 
 const testOptions: RouterOptions = {
@@ -11,7 +11,7 @@ const testOptions: RouterOptions = {
     'test-provider': {
       type: 'anthropic',
       baseUrl: 'https://api.anthropic.com',
-      accounts: [{ type: 'api-key', name: 'test-account', resolveKey: () => 'sk-test-key' }],
+      accounts: [{ type: 'api-key', name: 'test-account', key: 'sk-test-key' }],
       balancing: { strategy: 'round-robin' }
     }
   },
@@ -28,21 +28,33 @@ const testOptions: RouterOptions = {
 
 const authedOptions: RouterOptions = { ...testOptions, auth: { apiKeys: ['test-secret-key'] } }
 
+describe('createRouter', () => {
+  it('returns an object whose .options is the live RouterState.options reference', async () => {
+    // Contract: admin mutators reassign state.options; the returned router must
+    // observe those reassignments via the same identity, otherwise CRUD changes
+    // would be invisible to callers.
+    const router = createRouter(testOptions)
+    const next = { ...router.options, authDir: '/different' }
+    router.options = next
+    expect(router.options).toBe(next)
+  })
+})
+
 describe('GET /', () => {
   it('returns 200 with name', async () => {
-    const app = createApp(testOptions)
-    const res = await app.request('/')
+    const router = createRouter(testOptions)
+    const res = await router.app.request('/')
     expect(res.status).toBe(200)
     const body = (await res.json()) as Record<string, unknown>
-    expect(body.name).toBe('hono-router')
+    expect(body.name).toBe('pi-route')
     expect(body.status).toBe('ok')
   })
 })
 
 describe('GET /health', () => {
   it('returns 200 with status ok and providers', async () => {
-    const app = createApp(testOptions)
-    const res = await app.request('/health')
+    const router = createRouter(testOptions)
+    const res = await router.app.request('/health')
     expect(res.status).toBe(200)
     const body = (await res.json()) as Record<string, unknown>
     expect(body.status).toBe('ok')
@@ -54,8 +66,8 @@ describe('GET /health', () => {
 
 describe('GET /v1/models', () => {
   it('returns 200 with list object', async () => {
-    const app = createApp(testOptions)
-    const res = await app.request('/v1/models')
+    const router = createRouter(testOptions)
+    const res = await router.app.request('/v1/models')
     expect(res.status).toBe(200)
     const body = (await res.json()) as Record<string, unknown>
     expect(body.object).toBe('list')
@@ -67,20 +79,20 @@ describe('GET /v1/models', () => {
 
 describe('/v1/* middleware', () => {
   it('sets x-request-id header', async () => {
-    const app = createApp(testOptions)
-    const res = await app.request('/v1/models')
+    const router = createRouter(testOptions)
+    const res = await router.app.request('/v1/models')
     expect(res.headers.get('x-request-id')).toBeTruthy()
   })
 
   it('rejects with 401 when auth configured and no key', async () => {
-    const app = createApp(authedOptions)
-    const res = await app.request('/v1/models')
+    const router = createRouter(authedOptions)
+    const res = await router.app.request('/v1/models')
     expect(res.status).toBe(401)
   })
 
   it('allows with valid bearer key', async () => {
-    const app = createApp(authedOptions)
-    const res = await app.request('/v1/models', {
+    const router = createRouter(authedOptions)
+    const res = await router.app.request('/v1/models', {
       headers: { Authorization: 'Bearer test-secret-key' }
     })
     expect(res.status).toBe(200)

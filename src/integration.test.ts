@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'bun:test'
 
-import { createApp } from './app'
+import { createRouter } from './app'
 import type { RouterOptions } from './types'
 
 const baseOptions: RouterOptions = {
@@ -13,15 +13,15 @@ const baseOptions: RouterOptions = {
     'anthropic-provider': {
       type: 'anthropic',
       baseUrl: 'https://api.anthropic.com',
-      accounts: [{ type: 'api-key', name: 'account-1', resolveKey: () => 'sk-ant-test-key' }],
+      accounts: [{ type: 'api-key', name: 'account-1', key: 'sk-ant-test-key' }],
       balancing: { strategy: 'round-robin' }
     },
     'openai-provider': {
       type: 'openai',
       baseUrl: 'https://api.openai.com',
       accounts: [
-        { type: 'api-key', name: 'account-a', resolveKey: () => 'sk-openai-key-a' },
-        { type: 'api-key', name: 'account-b', resolveKey: () => 'sk-openai-key-b' }
+        { type: 'api-key', name: 'account-a', key: 'sk-openai-key-a' },
+        { type: 'api-key', name: 'account-b', key: 'sk-openai-key-b' }
       ],
       balancing: { strategy: 'round-robin' }
     }
@@ -39,8 +39,8 @@ const baseOptions: RouterOptions = {
 
 describe('integration: health endpoint', () => {
   it('shows both providers with account counts', async () => {
-    const app = createApp(baseOptions)
-    const res = await app.request('/health')
+    const router = createRouter(baseOptions)
+    const res = await router.app.request('/health')
 
     expect(res.status).toBe(200)
     const body = (await res.json()) as Record<string, unknown>
@@ -64,8 +64,8 @@ describe('integration: health endpoint', () => {
   })
 
   it('shows uptime as a non-negative number', async () => {
-    const app = createApp(baseOptions)
-    const res = await app.request('/health')
+    const router = createRouter(baseOptions)
+    const res = await router.app.request('/health')
     const body = (await res.json()) as Record<string, unknown>
     expect(typeof body.uptime).toBe('number')
     expect(body.uptime as number).toBeGreaterThanOrEqual(0)
@@ -74,9 +74,9 @@ describe('integration: health endpoint', () => {
 
 describe('integration: routing claude models to anthropic provider', () => {
   it('routes claude-* model and gets 502 with no real upstream', async () => {
-    const app = createApp(baseOptions)
+    const router = createRouter(baseOptions)
 
-    const res = await app.request('/v1/messages', {
+    const res = await router.app.request('/v1/messages', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -91,9 +91,9 @@ describe('integration: routing claude models to anthropic provider', () => {
   })
 
   it('routes gpt-* model and gets an error response with no real upstream', async () => {
-    const app = createApp(baseOptions)
+    const router = createRouter(baseOptions)
 
-    const res = await app.request('/v1/chat/completions', {
+    const res = await router.app.request('/v1/chat/completions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model: 'gpt-4o', messages: [{ role: 'user', content: 'Hello' }] })
@@ -120,8 +120,8 @@ describe('integration: 429 when all accounts are rate-limited', () => {
       }
     }
 
-    const appNoAccounts = createApp(noAccountOptions)
-    const res = await appNoAccounts.request('/v1/messages', {
+    const router = createRouter(noAccountOptions)
+    const res = await router.app.request('/v1/messages', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({

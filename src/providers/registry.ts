@@ -5,16 +5,17 @@ import {
   createRoundRobinStrategy,
   createStickyStrategy
 } from '../balancing/strategies'
-import type { Provider, RouterOptions } from '../types'
+import type { RouterState } from '../state'
+import type { Provider } from '../types'
 import { createAntigravityProvider } from './antigravity'
 import { createPassthroughProvider } from './passthrough'
 
 export type ProviderEntry = { provider: Provider; pool: ReturnType<typeof createAccountPool> }
 
-export const createProviderRegistry = (options: RouterOptions): Map<string, ProviderEntry> => {
+export const createProviderRegistry = (state: RouterState): Map<string, ProviderEntry> => {
   const registry = new Map<string, ProviderEntry>()
 
-  for (const [name, config] of Object.entries(options.providers)) {
+  for (const [name, config] of Object.entries(state.options.providers)) {
     const provider =
       config.type === 'antigravity'
         ? (() => {
@@ -34,7 +35,7 @@ export const createProviderRegistry = (options: RouterOptions): Map<string, Prov
           : createFillFirstStrategy()
 
     const pool = createAccountPool(
-      config.accounts,
+      () => state.options.providers[name]?.accounts ?? [],
       strategy,
       config.balancing.rateLimitPerModel ?? false
     )

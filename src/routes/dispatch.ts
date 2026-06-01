@@ -3,14 +3,16 @@
 import type { Context } from 'hono'
 import { stream as honoStream } from 'hono/streaming'
 
+import { resolveKey } from '../auth/resolve'
 import type { ProviderEntry } from '../providers/registry'
-import type { RouterOptions, RoutingStrategy, TelemetryEmitter } from '../types'
+import type { RouterState } from '../state'
+import type { RoutingStrategy, TelemetryEmitter } from '../types'
 
 export type DispatchDeps = {
   format: 'anthropic' | 'openai'
   registry: Map<string, ProviderEntry>
   routing: RoutingStrategy
-  options: RouterOptions
+  state: RouterState
   telemetry: TelemetryEmitter
 }
 
@@ -35,7 +37,7 @@ export const createDispatchHandler = (deps: DispatchDeps) => async (c: Context) 
     format: deps.format,
     headers: c.req.raw.headers,
     body: parsed,
-    options: deps.options
+    options: deps.state.options
   })
 
   if (!decision) {
@@ -58,7 +60,7 @@ export const createDispatchHandler = (deps: DispatchDeps) => async (c: Context) 
       ? JSON.stringify({ ...parsed, model: decision.model })
       : bodyText
 
-  const upstreamUrl = deps.options.providers[decision.provider]?.baseUrl ?? ''
+  const upstreamUrl = deps.state.options.providers[decision.provider]?.baseUrl ?? ''
   const rawReq = c.req.raw
   const outgoingRequest = new Request(upstreamUrl, {
     method: rawReq.method,
@@ -68,6 +70,7 @@ export const createDispatchHandler = (deps: DispatchDeps) => async (c: Context) 
   } as RequestInit)
 
   try {
+    const apiKey = await resolveKey(deps.state, accountState.account)
     const response = await entry.provider.dispatch(
       {
         id: requestId,
@@ -76,7 +79,8 @@ export const createDispatchHandler = (deps: DispatchDeps) => async (c: Context) 
         model: finalModel,
         stream
       },
-      accountState.account
+      accountState.account,
+      apiKey
     )
 
     deps.telemetry.emit({

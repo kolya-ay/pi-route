@@ -10,31 +10,50 @@ const makeState = (account: Account): AccountState => ({
   requestCount: 0
 })
 
-const isRateLimited = (state: AccountState, model: string, perModel: boolean): boolean => {
+const hasAnyActiveRateLimit = (state: AccountState): boolean => {
   const now = Date.now()
-  if (perModel) {
-    const expiry = state.rateLimits.get(model)
-    return expiry !== undefined && expiry > now
-  }
-  // any active rate limit blocks the account for all models
   return Array.from(state.rateLimits.values()).some((expiry) => expiry > now)
 }
 
+const isRateLimited = (state: AccountState, model: string, perModel: boolean): boolean => {
+  if (perModel) {
+    const expiry = state.rateLimits.get(model)
+    return expiry !== undefined && expiry > Date.now()
+  }
+  return hasAnyActiveRateLimit(state)
+}
+
 const isAvailable = (state: AccountState, model: string, perModel: boolean): boolean =>
-  !state.isInvalid && !isRateLimited(state, model, perModel)
+  !state.account.disabled && !state.isInvalid && !isRateLimited(state, model, perModel)
 
 export const createAccountPool = (
-  accounts: Account[],
+  getAccounts: () => Account[],
   strategy: BalancingStrategy,
   rateLimitPerModel: boolean
 ) => {
-  const states = accounts.map(makeState)
+  // Map<accountName, AccountState> — created lazily as accounts appear
+  const stateByName = new Map<string, AccountState>()
+
+  const currentStates = (): AccountState[] =>
+    getAccounts().map((account) => {
+      const existing = stateByName.get(account.name)
+      if (existing) {
+        // Refresh the account reference (may have new `disabled` value)
+        existing.account = account
+        return existing
+      }
+      const fresh = makeState(account)
+      stateByName.set(account.name, fresh)
+      return fresh
+    })
 
   return {
-    states,
+    get states() {
+      return currentStates()
+    },
 
     select(model: string): AccountState | null {
-      const available = states.filter((s) => isAvailable(s, model, rateLimitPerModel))
+      const available = currentStates().filter((s) => isAvailable(s, model, rateLimitPerModel))
       const picked = strategy.pick(available)
       if (picked) {
         picked.lastUsed = Date.now()
@@ -55,14 +74,12 @@ export const createAccountPool = (
     },
 
     health(): { total: number; available: number; rateLimited: number; invalid: number } {
-      const now = Date.now()
+      const states = currentStates()
       const total = states.length
       const invalid = states.filter((s) => s.isInvalid).length
-      const rateLimited = states.filter(
-        (s) => !s.isInvalid && Array.from(s.rateLimits.values()).some((expiry) => expiry > now)
-      ).length
+      const rateLimited = states.filter((s) => !s.isInvalid && hasAnyActiveRateLimit(s)).length
       const available = states.filter(
-        (s) => !s.isInvalid && !Array.from(s.rateLimits.values()).some((expiry) => expiry > now)
+        (s) => !s.account.disabled && !s.isInvalid && !hasAnyActiveRateLimit(s)
       ).length
       return { total, available, rateLimited, invalid }
     }
