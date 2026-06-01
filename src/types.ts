@@ -87,7 +87,10 @@ type AccountBase = {
 
 export type ApiKeyAccount = AccountBase & { type: 'api-key'; key: string }
 export type ClaudeCliAccount = AccountBase & { type: 'claude-cli'; tokenPath: string }
-export type AntigravityOAuthAccount = AccountBase & { type: 'antigravity-oauth' }
+export type AntigravityOAuthAccount = AccountBase & {
+  type: 'antigravity-oauth'
+  projectId?: string | undefined
+}
 
 export type Account = ApiKeyAccount | ClaudeCliAccount | AntigravityOAuthAccount
 

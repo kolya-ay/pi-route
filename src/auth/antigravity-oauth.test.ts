@@ -111,28 +111,93 @@ describe('refreshAccessToken', () => {
 })
 
 describe('discoverProject', () => {
-  it('extracts projectId from loadCodeAssist response', async () => {
+  it('returns projectId directly when loadCodeAssist response contains it', async () => {
     const mockFetch = mock(async () => Response.json({ cloudaicompanionProject: 'my-project-123' }))
 
     const projectId = await discoverProject('token-abc', asFetch(mockFetch))
 
     expect(projectId).toBe('my-project-123')
+    expect(mockFetch).toHaveBeenCalledTimes(1)
     const [url, init] = mockFetch.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toBe('https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist')
     expect(init.method).toBe('POST')
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer token-abc')
+    // Body must include the metadata block (was previously '{}' — see spec §1 step 9)
+    const body = JSON.parse(init.body as string) as { metadata?: Record<string, string> }
+    expect(body.metadata?.ideType).toBe('ANTIGRAVITY')
+    expect(body.metadata?.platform).toBe('PLATFORM_UNSPECIFIED')
+    expect(body.metadata?.pluginType).toBe('GEMINI')
   })
 
-  it('throws when cloudaicompanionProject is missing', async () => {
-    const mockFetch = mock(async () => Response.json({}))
+  it('accepts cloudaicompanionProject as an object with id', async () => {
+    const mockFetch = mock(async () =>
+      Response.json({ cloudaicompanionProject: { id: 'wrapped-proj' } })
+    )
+    const projectId = await discoverProject('token', asFetch(mockFetch))
+    expect(projectId).toBe('wrapped-proj')
+  })
+
+  it('falls back to onboardUser when loadCodeAssist returns no project', async () => {
+    const responses = [
+      // 1) loadCodeAssist: no project, with default tier
+      Response.json({ allowedTiers: [{ id: 'paid-tier', isDefault: true }] }),
+      // 2) onboardUser: immediately done
+      Response.json({
+        name: 'operations/op-xyz',
+        done: true,
+        response: { cloudaicompanionProject: { id: 'fresh-project-abc' } }
+      })
+    ]
+    const mockFetch = mock(async () => responses.shift()!)
+
+    const projectId = await discoverProject('token', asFetch(mockFetch))
+    expect(projectId).toBe('fresh-project-abc')
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+
+    const [, onboardInit] = mockFetch.mock.calls[1] as unknown as [string, RequestInit]
+    const onboardBody = JSON.parse(onboardInit.body as string) as Record<string, unknown>
+    expect(onboardBody.tierId).toBe('paid-tier')
+    expect((onboardBody.metadata as Record<string, string>).ideType).toBe('ANTIGRAVITY')
+  })
+
+  it('defaults tierId to free-tier when allowedTiers absent', async () => {
+    const responses = [
+      Response.json({}),
+      Response.json({
+        name: 'operations/o',
+        done: true,
+        response: { cloudaicompanionProject: 'p' }
+      })
+    ]
+    const mockFetch = mock(async () => responses.shift()!)
+    await discoverProject('token', asFetch(mockFetch))
+    const [, onboardInit] = mockFetch.mock.calls[1] as unknown as [string, RequestInit]
+    expect((JSON.parse(onboardInit.body as string) as { tierId: string }).tierId).toBe('free-tier')
+  })
+
+  it('throws when onboardUser succeeds but response has no project', async () => {
+    const responses = [
+      Response.json({}),
+      Response.json({ name: 'operations/o', done: true, response: {} })
+    ]
+    const mockFetch = mock(async () => responses.shift()!)
     await expect(discoverProject('token', asFetch(mockFetch))).rejects.toThrow(
       'cloudaicompanionProject'
     )
   })
 
-  it('throws on non-ok response', async () => {
+  it('surfaces operation.error.message when onboarding fails', async () => {
+    const responses = [
+      Response.json({}),
+      Response.json({ name: 'operations/o', done: true, error: { message: 'ineligible' } })
+    ]
+    const mockFetch = mock(async () => responses.shift()!)
+    await expect(discoverProject('token', asFetch(mockFetch))).rejects.toThrow('ineligible')
+  })
+
+  it('throws on non-ok loadCodeAssist response', async () => {
     const mockFetch = mock(async () => Response.json({ error: 'forbidden' }, { status: 403 }))
-    await expect(discoverProject('token', asFetch(mockFetch))).rejects.toThrow()
+    await expect(discoverProject('token', asFetch(mockFetch))).rejects.toThrow('403')
   })
 })
 

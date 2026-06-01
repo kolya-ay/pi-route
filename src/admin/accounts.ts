@@ -138,14 +138,17 @@ export const loginAccount = async (
     throw new Error(`Login not supported for account type '${account.type}'`)
   }
 
-  const credentials = await loginAntigravity(callbacks, undefined, opts?.signal).catch(
-    (err: unknown) => {
-      if (err instanceof LoginTimeoutError) {
-        throw new AdminError('login_timeout', err.message, { account: accountName })
-      }
-      throw err
+  const credentials = await loginAntigravity(
+    callbacks,
+    undefined,
+    opts?.signal,
+    account.projectId
+  ).catch((err: unknown) => {
+    if (err instanceof LoginTimeoutError) {
+      throw new AdminError('login_timeout', err.message, { account: accountName })
     }
-  )
+    throw err
+  })
 
   const cred: CredentialFile = {
     provider: 'google-antigravity',

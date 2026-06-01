@@ -98,31 +98,122 @@ export const refreshAccessToken = async (
   }
 }
 
-export const discoverProject = async (
-  accessToken: string,
-  fetchFn: FetchFn = globalThis.fetch
-): Promise<string> => {
-  const response = await fetchFn('https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-    body: '{}'
-  })
+const CODE_ASSIST_ENDPOINT = 'https://cloudcode-pa.googleapis.com'
+const DISCOVERY_METADATA = {
+  ideType: 'ANTIGRAVITY',
+  platform: 'PLATFORM_UNSPECIFIED',
+  pluginType: 'GEMINI'
+} as const
 
+const ONBOARD_POLL_INTERVAL_MS = 5000
+const ONBOARD_POLL_MAX_ATTEMPTS = 10
+const DEFAULT_TIER_ID = 'free-tier'
+
+type AllowedTier = { id?: string; isDefault?: boolean }
+type CloudCompanionProject = string | { id?: string } | undefined
+type LoadCodeAssistResponse = {
+  cloudaicompanionProject?: CloudCompanionProject
+  allowedTiers?: AllowedTier[]
+}
+type LroOperation = {
+  name?: string
+  done?: boolean
+  response?: { cloudaicompanionProject?: CloudCompanionProject }
+  error?: { message?: string }
+}
+
+const extractProjectId = (raw: CloudCompanionProject): string | undefined => {
+  if (typeof raw === 'string') return raw
+  if (raw && typeof raw === 'object' && typeof raw.id === 'string') return raw.id
+  return undefined
+}
+
+const callCloudCode = async (
+  fetchFn: FetchFn,
+  url: string,
+  accessToken: string,
+  init: { method: 'POST' | 'GET'; body?: unknown }
+): Promise<Record<string, unknown>> => {
+  const response = await fetchFn(url, {
+    method: init.method,
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {})
+  })
   if (!response.ok) {
     const text = await response.text()
-    throw new Error(`Project discovery failed (${response.status}): ${text}`)
+    throw new Error(`Cloud Code call ${init.method} ${url} failed (${response.status}): ${text}`)
   }
+  return (await response.json()) as Record<string, unknown>
+}
 
-  const data = (await response.json()) as Record<string, unknown>
-  const projectId = data.cloudaicompanionProject as string | undefined
+const loadCodeAssist = (accessToken: string, fetchFn: FetchFn): Promise<LoadCodeAssistResponse> =>
+  callCloudCode(fetchFn, `${CODE_ASSIST_ENDPOINT}/v1internal:loadCodeAssist`, accessToken, {
+    method: 'POST',
+    body: { metadata: DISCOVERY_METADATA }
+  }) as Promise<LoadCodeAssistResponse>
 
-  if (!projectId) {
+const onboardUser = (
+  accessToken: string,
+  tierId: string,
+  fetchFn: FetchFn
+): Promise<LroOperation> =>
+  callCloudCode(fetchFn, `${CODE_ASSIST_ENDPOINT}/v1internal:onboardUser`, accessToken, {
+    method: 'POST',
+    body: { tierId, metadata: DISCOVERY_METADATA }
+  }) as Promise<LroOperation>
+
+const pollOperation = (
+  accessToken: string,
+  operationName: string,
+  fetchFn: FetchFn
+): Promise<LroOperation> =>
+  callCloudCode(fetchFn, `${CODE_ASSIST_ENDPOINT}/v1internal/${operationName}`, accessToken, {
+    method: 'GET'
+  }) as Promise<LroOperation>
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+const pickTierId = (load: LoadCodeAssistResponse): string =>
+  load.allowedTiers?.find((t) => t.isDefault === true)?.id ?? DEFAULT_TIER_ID
+
+const pollUntilDone = async (
+  accessToken: string,
+  op: LroOperation,
+  fetchFn: FetchFn,
+  attempt: number,
+  onProgress?: (msg: string) => void
+): Promise<LroOperation> => {
+  if (op.done === true) return op
+  if (attempt > ONBOARD_POLL_MAX_ATTEMPTS) {
     throw new Error(
-      'Project discovery failed: no cloudaicompanionProject in loadCodeAssist response'
+      `Onboarding timed out after ${(ONBOARD_POLL_MAX_ATTEMPTS * ONBOARD_POLL_INTERVAL_MS) / 1000}s; rerun pi-route login to retry`
     )
   }
+  if (!op.name) throw new Error('onboardUser response missing operation name')
+  onProgress?.(`Waiting for onboarding (${attempt}/${ONBOARD_POLL_MAX_ATTEMPTS})...`)
+  await sleep(ONBOARD_POLL_INTERVAL_MS)
+  const next = await pollOperation(accessToken, op.name, fetchFn)
+  return pollUntilDone(accessToken, next, fetchFn, attempt + 1, onProgress)
+}
 
-  return projectId
+export const discoverProject = async (
+  accessToken: string,
+  fetchFn: FetchFn = globalThis.fetch,
+  onProgress?: (msg: string) => void
+): Promise<string> => {
+  const load = await loadCodeAssist(accessToken, fetchFn)
+  const direct = extractProjectId(load.cloudaicompanionProject)
+  if (direct) return direct
+
+  onProgress?.('Onboarding account...')
+  const initial = await onboardUser(accessToken, pickTierId(load), fetchFn)
+  const final = await pollUntilDone(accessToken, initial, fetchFn, 1, onProgress)
+
+  if (final.error?.message) throw new Error(`Onboarding failed: ${final.error.message}`)
+
+  const onboarded = extractProjectId(final.response?.cloudaicompanionProject)
+  if (!onboarded) throw new Error('Onboarding completed but no cloudaicompanionProject in response')
+  return onboarded
 }
 
 export class LoginTimeoutError extends Error {
@@ -135,7 +226,8 @@ export class LoginTimeoutError extends Error {
 export const loginAntigravity = async (
   callbacks: OAuthLoginCallbacks,
   fetchFn: FetchFn = globalThis.fetch,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  configuredProjectId?: string
 ): Promise<OAuthCredentials> => {
   if (signal?.aborted) throw new LoginTimeoutError('OAuth login aborted')
 
@@ -191,8 +283,12 @@ export const loginAntigravity = async (
     const code = await promise
     callbacks.onProgress?.('Exchanging auth code for tokens...')
     const credentials = await exchangeCode(code, fetchFn)
+    if (configuredProjectId) {
+      callbacks.onProgress?.(`Using configured projectId: ${configuredProjectId}`)
+      return { ...credentials, projectId: configuredProjectId }
+    }
     callbacks.onProgress?.('Discovering Cloud Code project...')
-    const projectId = await discoverProject(credentials.access, fetchFn)
+    const projectId = await discoverProject(credentials.access, fetchFn, callbacks.onProgress)
     return { ...credentials, projectId }
   } finally {
     clearTimeout(timeout)

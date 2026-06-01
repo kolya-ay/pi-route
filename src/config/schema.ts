@@ -23,6 +23,7 @@ export const AccountSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('antigravity-oauth'),
     name: z.string(),
+    projectId: z.string().optional(),
     disabled: z.boolean().optional()
   })
 ])
