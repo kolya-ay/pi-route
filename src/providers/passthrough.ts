@@ -11,9 +11,11 @@ export const createPassthroughProvider = (
   name,
   type,
 
-  async dispatch(request: IncomingRequest, account: Account): Promise<ProviderResponse> {
-    if (!account.resolveKey) throw new Error(`Account '${account.name}' has no resolveKey`)
-    const apiKey = await account.resolveKey()
+  async dispatch(
+    request: IncomingRequest,
+    account: Account,
+    apiKey: string
+  ): Promise<ProviderResponse> {
     const start = Date.now()
 
     const headers = new Headers(request.rawRequest.headers)

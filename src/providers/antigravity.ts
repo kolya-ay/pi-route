@@ -486,9 +486,11 @@ export const createAntigravityProvider = (name: string, _baseUrl: string): Provi
   name,
   type: 'antigravity',
 
-  async dispatch(request: IncomingRequest, account: Account): Promise<ProviderResponse> {
-    if (!account.resolveKey) throw new Error(`Account '${account.name}' has no resolveKey`)
-    const apiKey = await account.resolveKey()
+  async dispatch(
+    request: IncomingRequest,
+    account: Account,
+    apiKey: string
+  ): Promise<ProviderResponse> {
     const start = Date.now()
 
     const body = JSON.parse(await request.rawRequest.text()) as Record<string, unknown>

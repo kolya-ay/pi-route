@@ -1,15 +1,11 @@
 // src/auth/credentials.ts
 
-import { mkdirSync } from 'node:fs'
+import { chmodSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import type { RouterState } from '../state'
+import type { Account, CredentialFile } from '../types'
 
-export type CredentialFile = {
-  provider: string
-  refreshToken: string
-  accessToken: string
-  expires: number
-  [key: string]: unknown
-}
+export type { CredentialFile } from '../types'
 
 export const readCredentials = async (
   authDir: string,
@@ -29,27 +25,47 @@ export const writeCredentials = async (
 ): Promise<void> => {
   mkdirSync(authDir, { recursive: true, mode: 0o700 })
   const path = join(authDir, `${accountName}.json`)
-  await Bun.write(path, JSON.stringify(credentials, null, 2), { mode: 0o600 })
+  await Bun.write(path, JSON.stringify(credentials, null, 2))
+  chmodSync(path, 0o600)
 }
 
-export const createOAuthResolveKey = (
-  authDir: string,
-  accountName: string,
-  refreshFn: (refreshToken: string) => Promise<CredentialFile>
-): (() => Promise<string>) => {
-  let cached: CredentialFile | null = null
+export const refreshAndStore = async (
+  state: RouterState,
+  account: Account
+): Promise<CredentialFile> => {
+  if (account.type !== 'antigravity-oauth') {
+    throw new Error(`Cannot refresh account of type '${account.type}'`)
+  }
+  const current =
+    state.credentials.get(account.name) ??
+    (await readCredentials(state.options.authDir, account.name))
+  state.credentials.set(account.name, current)
 
-  return async () => {
-    if (!cached) {
-      cached = await readCredentials(authDir, accountName)
+  try {
+    const { refreshAccessToken } = await import('./antigravity-oauth')
+    const refreshed = await refreshAccessToken(current.refreshToken)
+    // Preserve fields refresh() doesn't set (e.g. projectId).
+    const merged: CredentialFile = {
+      ...current,
+      provider: 'google-antigravity',
+      refreshToken: refreshed.refresh,
+      accessToken: refreshed.access,
+      expires: refreshed.expires
     }
-
-    if (Date.now() >= cached.expires) {
-      const refreshed = await refreshFn(cached.refreshToken)
-      await writeCredentials(authDir, accountName, refreshed)
-      cached = refreshed
-    }
-
-    return JSON.stringify({ token: cached.accessToken, projectId: cached.projectId })
+    await writeCredentials(state.options.authDir, account.name, merged)
+    state.credentials.set(account.name, merged)
+    state.telemetry.emit({
+      type: 'account.refreshed',
+      account: account.name,
+      expires: merged.expires
+    })
+    return merged
+  } catch (err) {
+    state.telemetry.emit({
+      type: 'account.refresh-failed',
+      account: account.name,
+      error: err instanceof Error ? err.message : String(err)
+    })
+    throw err
   }
 }

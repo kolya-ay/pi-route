@@ -133,7 +133,7 @@ describe('parseConfig', () => {
         secondary: {
           type: 'openai',
           baseUrl: 'https://api.openai.com',
-          accounts: [{ type: 'api-key', name: 'main' }],
+          accounts: [{ type: 'api-key', name: 'main', key: 'sk-main' }],
           balancing: { strategy: 'fill-first', rateLimitPerModel: true }
         }
       },

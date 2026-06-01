@@ -7,19 +7,25 @@ const DEFAULT_BASE_URLS: Partial<Record<string, string>> = {
   antigravity: 'https://daily-cloudcode-pa.googleapis.com'
 }
 
-const AccountSchema = z
-  .object({
-    type: z.enum([
-      'api-key',
-      'claude-cli',
-      'anthropic-oauth',
-      'copilot-oauth',
-      'codex-oauth',
-      'antigravity-oauth'
-    ]),
-    name: z.string()
+export const AccountSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('api-key'),
+    name: z.string(),
+    key: z.string(),
+    disabled: z.boolean().optional()
+  }),
+  z.object({
+    type: z.literal('claude-cli'),
+    name: z.string(),
+    tokenPath: z.string(),
+    disabled: z.boolean().optional()
+  }),
+  z.object({
+    type: z.literal('antigravity-oauth'),
+    name: z.string(),
+    disabled: z.boolean().optional()
   })
-  .passthrough()
+])
 
 const BalancingSchema = z.object({
   strategy: z.enum(['round-robin', 'sticky', 'fill-first']),

@@ -10,7 +10,7 @@ import {
   createStickyStrategy
 } from './strategies'
 
-const baseAccount: Account = { type: 'api-key', name: 'test', resolveKey: () => 'k' }
+const baseAccount: Account = { type: 'api-key', name: 'test', key: 'k' }
 
 const makeState = (name: string, overrides: Partial<AccountState> = {}): AccountState => ({
   account: { ...baseAccount, name },

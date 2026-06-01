@@ -15,10 +15,10 @@ const makeRequest = (url: string, headers: Record<string, string> = {}): Incomin
   stream: false
 })
 
-const makeAccount = (key: string): Account => ({
+const makeAccount = (): Account => ({
   type: 'api-key',
   name: 'test-account',
-  resolveKey: () => key
+  key: 'k'
 })
 
 const startMockServer = (app: Hono): { baseUrl: string; close: () => void } => {
@@ -44,9 +44,9 @@ describe('createPassthroughProvider: anthropic', () => {
         authorization: 'Bearer old-token',
         'content-type': 'application/json'
       })
-      const account = makeAccount('sk-ant-test-key')
+      const account = makeAccount()
 
-      const response = await provider.dispatch(request, account)
+      const response = await provider.dispatch(request, account, 'sk-ant-test-key')
 
       expect(response.status).toBe(200)
       expect(capturedHeaders?.get('x-api-key')).toBe('sk-ant-test-key')
@@ -77,9 +77,9 @@ describe('createPassthroughProvider: anthropic', () => {
     try {
       const provider = createPassthroughProvider('test-anthropic', 'anthropic', baseUrl)
       const request = makeRequest(`${baseUrl}/v1/messages`)
-      const account = makeAccount('sk-ant-key')
+      const account = makeAccount()
 
-      const response = await provider.dispatch(request, account)
+      const response = await provider.dispatch(request, account, 'sk-ant-key')
 
       expect(response.body).toBeInstanceOf(ReadableStream)
     } finally {
@@ -108,9 +108,9 @@ describe('createPassthroughProvider: openai', () => {
         'x-api-key': 'should-be-removed',
         'content-type': 'application/json'
       })
-      const account = makeAccount('sk-openai-test-key')
+      const account = makeAccount()
 
-      const response = await provider.dispatch(request, account)
+      const response = await provider.dispatch(request, account, 'sk-openai-test-key')
 
       expect(response.status).toBe(200)
       expect(capturedHeaders?.get('authorization')).toBe('Bearer sk-openai-test-key')
@@ -138,9 +138,9 @@ describe('createPassthroughProvider: openai', () => {
       customFetch
     )
     const request = makeRequest('http://router.internal/v1/chat/completions')
-    const account = makeAccount('sk-key')
+    const account = makeAccount()
 
-    await provider.dispatch(request, account)
+    await provider.dispatch(request, account, 'sk-key')
 
     expect(fetchCalled).toBe(true)
   })

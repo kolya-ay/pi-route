@@ -4,8 +4,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { CredentialFile } from './credentials'
-import { createOAuthResolveKey, readCredentials, writeCredentials } from './credentials'
+import { createState } from '../state'
+import { createTelemetryEmitter } from '../telemetry/emitter'
+import type { CredentialFile, RouterOptions, TelemetryEvent } from '../types'
+import { readCredentials, refreshAndStore, writeCredentials } from './credentials'
+
+const mkState = (authDir: string, events: TelemetryEvent[] = []) => {
+  const telemetry = createTelemetryEmitter([{ emit: (e) => events.push(e) }])
+  return createState({ authDir } as RouterOptions, null, telemetry)
+}
 
 let testDir: string
 
@@ -70,66 +77,78 @@ describe('writeCredentials', () => {
   })
 })
 
-describe('createOAuthResolveKey', () => {
-  it('returns cached token when not expired', async () => {
-    const cred: CredentialFile = {
+describe('refreshAndStore', () => {
+  it('reads existing credentials, calls refresh, writes back, updates cache', async () => {
+    const testDir = `${require('node:os').tmpdir()}/refresh-${crypto.randomUUID()}`
+    await writeCredentials(testDir, 'acct', {
       provider: 'google-antigravity',
       refreshToken: 'old-refresh',
-      accessToken: 'fresh-access',
-      expires: Date.now() + 60_000,
+      accessToken: 'old-access',
+      expires: Date.now() - 1000,
       projectId: 'proj-123'
+    })
+
+    const events: TelemetryEvent[] = []
+    const state = mkState(testDir, events)
+    const credentials = state.credentials
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (_url, init) => {
+      const body = (init as RequestInit).body as string
+      if (body.includes('grant_type=refresh_token')) {
+        return new Response(
+          JSON.stringify({
+            access_token: 'new-access',
+            refresh_token: 'new-refresh',
+            expires_in: 3600
+          }),
+          { status: 200 }
+        )
+      }
+      throw new Error(`unexpected fetch: ${_url}`)
+    }) as typeof fetch
+
+    try {
+      const result = await refreshAndStore(state, { type: 'antigravity-oauth', name: 'acct' })
+      expect(result.accessToken).toBe('new-access')
+      expect(result.refreshToken).toBe('new-refresh')
+      expect(result.projectId).toBe('proj-123') // preserved
+      expect(credentials.get('acct')?.accessToken).toBe('new-access')
+      expect(events).toHaveLength(1)
+      expect(events[0]?.type).toBe('account.refreshed')
+
+      const onDisk = await readCredentials(testDir, 'acct')
+      expect(onDisk.accessToken).toBe('new-access')
+    } finally {
+      globalThis.fetch = originalFetch
     }
-    await writeCredentials(testDir, 'acct', cred)
-
-    let refreshCalled = 0
-    const refreshFn = async (_refreshToken: string): Promise<CredentialFile> => {
-      refreshCalled++
-      return { ...cred, accessToken: 'new-access', expires: Date.now() + 3600_000 }
-    }
-
-    const resolveKey = createOAuthResolveKey(testDir, 'acct', refreshFn)
-    const key1 = await resolveKey()
-    const key2 = await resolveKey()
-
-    expect(refreshCalled).toBe(0)
-    const parsed = JSON.parse(key1)
-    expect(parsed.token).toBe('fresh-access')
-    expect(parsed.projectId).toBe('proj-123')
-    expect(key1).toBe(key2)
   })
 
-  it('refreshes and writes back when token is expired', async () => {
-    const cred: CredentialFile = {
+  it('emits account.refresh-failed and rethrows on refresh error', async () => {
+    const testDir = `${require('node:os').tmpdir()}/refresh-${crypto.randomUUID()}`
+    await writeCredentials(testDir, 'acct', {
       provider: 'google-antigravity',
-      refreshToken: 'stale-refresh',
-      accessToken: 'stale-access',
-      expires: Date.now() - 1000,
-      projectId: 'proj-456'
+      refreshToken: 'bad',
+      accessToken: 'old',
+      expires: 0
+    })
+
+    const events: TelemetryEvent[] = []
+    const state = mkState(testDir, events)
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: 'invalid_grant' }), {
+        status: 400
+      })) as unknown as typeof fetch
+
+    try {
+      await expect(
+        refreshAndStore(state, { type: 'antigravity-oauth', name: 'acct' })
+      ).rejects.toThrow()
+      expect(events[0]?.type).toBe('account.refresh-failed')
+    } finally {
+      globalThis.fetch = originalFetch
     }
-    await writeCredentials(testDir, 'acct', cred)
-
-    const newExpires = Date.now() + 3600_000
-    const refreshFn = async (refreshToken: string): Promise<CredentialFile> => {
-      expect(refreshToken).toBe('stale-refresh')
-      return {
-        ...cred,
-        accessToken: 'refreshed-access',
-        refreshToken: 'new-refresh',
-        expires: newExpires
-      }
-    }
-
-    const resolveKey = createOAuthResolveKey(testDir, 'acct', refreshFn)
-    const key = await resolveKey()
-
-    const parsed = JSON.parse(key)
-    expect(parsed.token).toBe('refreshed-access')
-    expect(parsed.projectId).toBe('proj-456')
-
-    // verify written back to disk
-    const saved = await readCredentials(testDir, 'acct')
-    expect(saved.accessToken).toBe('refreshed-access')
-    expect(saved.refreshToken).toBe('new-refresh')
-    expect(saved.expires).toBe(newExpires)
   })
 })

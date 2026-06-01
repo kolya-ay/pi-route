@@ -7,7 +7,7 @@ export type ProviderType = 'anthropic' | 'openai' | 'antigravity'
 export type Provider = {
   readonly name: string
   readonly type: ProviderType
-  dispatch(request: IncomingRequest, account: Account): Promise<ProviderResponse>
+  dispatch(request: IncomingRequest, account: Account, apiKey: string): Promise<ProviderResponse>
 }
 
 export type IncomingRequest = {
@@ -70,19 +70,26 @@ export type AccountState = {
 
 // === Accounts ===
 
-export type AccountType =
-  | 'api-key'
-  | 'claude-cli'
-  | 'anthropic-oauth'
-  | 'copilot-oauth'
-  | 'codex-oauth'
-  | 'antigravity-oauth'
-
-export type Account = {
-  type: AccountType
-  name: string
-  resolveKey?: (() => string | Promise<string>) | undefined
+export type CredentialFile = {
+  provider: string
+  refreshToken: string
+  accessToken: string
+  expires: number
+  [key: string]: unknown
 }
+
+export type AccountType = 'api-key' | 'claude-cli' | 'antigravity-oauth'
+
+type AccountBase = {
+  name: string
+  disabled?: boolean | undefined
+}
+
+export type ApiKeyAccount = AccountBase & { type: 'api-key'; key: string }
+export type ClaudeCliAccount = AccountBase & { type: 'claude-cli'; tokenPath: string }
+export type AntigravityOAuthAccount = AccountBase & { type: 'antigravity-oauth' }
+
+export type Account = ApiKeyAccount | ClaudeCliAccount | AntigravityOAuthAccount
 
 // === Telemetry ===
 
