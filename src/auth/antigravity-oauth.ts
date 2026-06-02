@@ -211,9 +211,17 @@ export const discoverProject = async (
 
   if (final.error?.message) throw new Error(`Onboarding failed: ${final.error.message}`)
 
-  const onboarded = extractProjectId(final.response?.cloudaicompanionProject)
-  if (!onboarded) throw new Error('Onboarding completed but no cloudaicompanionProject in response')
-  return onboarded
+  const fromLro = extractProjectId(final.response?.cloudaicompanionProject)
+  if (fromLro) return fromLro
+
+  onProgress?.('Fetching newly provisioned project...')
+  const reload = await loadCodeAssist(accessToken, fetchFn)
+  const reloaded = extractProjectId(reload.cloudaicompanionProject)
+  if (reloaded) return reloaded
+
+  throw new Error(
+    `Onboarding completed but no project found in LRO response or post-onboarding loadCodeAssist. LRO response: ${JSON.stringify(final.response ?? null)}`
+  )
 }
 
 export class LoginTimeoutError extends Error {

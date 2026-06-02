@@ -175,14 +175,29 @@ describe('discoverProject', () => {
     expect((JSON.parse(onboardInit.body as string) as { tierId: string }).tierId).toBe('free-tier')
   })
 
-  it('throws when onboardUser succeeds but response has no project', async () => {
+  it('re-calls loadCodeAssist when onboardUser LRO response is empty', async () => {
     const responses = [
       Response.json({}),
-      Response.json({ name: 'operations/o', done: true, response: {} })
+      Response.json({ name: 'operations/o', done: true, response: {} }),
+      Response.json({ cloudaicompanionProject: 'late-project' })
+    ]
+    const mockFetch = mock(async () => responses.shift()!)
+    const projectId = await discoverProject('token', asFetch(mockFetch))
+    expect(projectId).toBe('late-project')
+    expect(mockFetch).toHaveBeenCalledTimes(3)
+    const [url] = mockFetch.mock.calls[2] as unknown as [string]
+    expect(url).toBe('https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist')
+  })
+
+  it('throws with LRO response dump when both onboardUser and re-fetch yield no project', async () => {
+    const responses = [
+      Response.json({}),
+      Response.json({ name: 'operations/o', done: true, response: { someField: 'unknown' } }),
+      Response.json({})
     ]
     const mockFetch = mock(async () => responses.shift()!)
     await expect(discoverProject('token', asFetch(mockFetch))).rejects.toThrow(
-      'cloudaicompanionProject'
+      /LRO response: \{"someField":"unknown"\}/
     )
   })
 
