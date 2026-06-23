@@ -152,3 +152,21 @@ describe('parseConfig', () => {
     expect(result.telemetry.level).toBe('debug')
   })
 })
+
+describe('parseConfig: openai-codex provider', () => {
+  it('accepts a provider of type openai-codex with an openai-codex-oauth account', () => {
+    const raw = {
+      providers: {
+        codex: {
+          type: 'openai-codex',
+          accounts: [{ type: 'openai-codex-oauth', name: 'me@example.com' }],
+          balancing: { strategy: 'fill-first' }
+        }
+      },
+      routing: { default: { provider: 'codex' } }
+    }
+    const parsed = parseConfig(raw)
+    expect(parsed.providers.codex?.type).toBe('openai-codex')
+    expect(parsed.providers.codex?.accounts[0]?.type).toBe('openai-codex-oauth')
+  })
+})

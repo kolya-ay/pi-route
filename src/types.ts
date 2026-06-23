@@ -2,7 +2,7 @@
 
 // === Provider ===
 
-export type ProviderType = 'anthropic' | 'openai' | 'antigravity'
+export type ProviderType = 'anthropic' | 'openai' | 'antigravity' | 'openai-codex'
 
 export type Provider = {
   readonly name: string
@@ -78,7 +78,7 @@ export type CredentialFile = {
   [key: string]: unknown
 }
 
-export type AccountType = 'api-key' | 'claude-cli' | 'antigravity-oauth'
+export type AccountType = 'api-key' | 'claude-cli' | 'antigravity-oauth' | 'openai-codex-oauth'
 
 type AccountBase = {
   name: string
@@ -92,7 +92,15 @@ export type AntigravityOAuthAccount = AccountBase & {
   projectId?: string | undefined
 }
 
-export type Account = ApiKeyAccount | ClaudeCliAccount | AntigravityOAuthAccount
+export type OpenAICodexOAuthAccount = AccountBase & {
+  type: 'openai-codex-oauth'
+}
+
+export type Account =
+  | ApiKeyAccount
+  | ClaudeCliAccount
+  | AntigravityOAuthAccount
+  | OpenAICodexOAuthAccount
 
 // === Telemetry ===
 

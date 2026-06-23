@@ -25,6 +25,11 @@ export const AccountSchema = z.discriminatedUnion('type', [
     name: z.string(),
     projectId: z.string().optional(),
     disabled: z.boolean().optional()
+  }),
+  z.object({
+    type: z.literal('openai-codex-oauth'),
+    name: z.string(),
+    disabled: z.boolean().optional()
   })
 ])
 
@@ -34,7 +39,7 @@ const BalancingSchema = z.object({
 })
 
 const ProviderOptionsSchema = z.object({
-  type: z.enum(['anthropic', 'openai', 'antigravity']),
+  type: z.enum(['anthropic', 'openai', 'antigravity', 'openai-codex']),
   baseUrl: z.string().optional(),
   accounts: z.array(AccountSchema),
   balancing: BalancingSchema

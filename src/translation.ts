@@ -3,6 +3,7 @@ import type { ProviderType } from './types'
 const WIRE_FORMATS: Record<ProviderType, 'anthropic' | 'openai' | null> = {
   anthropic: 'anthropic',
   openai: 'openai',
+  'openai-codex': 'openai',
   antigravity: null // always translates via pi-ai Context
 }
 
