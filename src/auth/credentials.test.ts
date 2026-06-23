@@ -152,3 +152,54 @@ describe('refreshAndStore', () => {
     }
   })
 })
+
+// Build a fake JWT with the accountId claim that pi-ai's refreshOpenAICodexToken expects.
+// The claim path is https://api.openai.com/auth → chatgpt_account_id.
+const makeCodexJwt = (accountId: string): string => {
+  const payload = { 'https://api.openai.com/auth': { chatgpt_account_id: accountId } }
+  const enc = (v: unknown) => btoa(JSON.stringify(v))
+  return `${enc({ alg: 'none' })}.${enc(payload)}.sig`
+}
+
+describe('refreshAndStore: openai-codex-oauth', () => {
+  it('refreshes via pi-ai for an openai-codex-oauth account', async () => {
+    const account: import('../types').Account = {
+      type: 'openai-codex-oauth',
+      name: 'me@example.com'
+    }
+    const state = mkState(testDir)
+    const existing: CredentialFile = {
+      provider: 'openai-codex',
+      refreshToken: 'old-refresh',
+      accessToken: 'old-access',
+      expires: Date.now() - 1000
+    }
+    state.credentials.set(account.name, existing)
+
+    const newAccess = makeCodexJwt('acct-123')
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (_url, init) => {
+      const body = (init as RequestInit).body?.toString() ?? ''
+      if (body.includes('grant_type=refresh_token') && body.includes('old-refresh')) {
+        return new Response(
+          JSON.stringify({
+            access_token: newAccess,
+            refresh_token: 'new-refresh',
+            expires_in: 3600
+          }),
+          { status: 200 }
+        )
+      }
+      throw new Error(`unexpected fetch: ${_url}`)
+    }) as typeof fetch
+
+    try {
+      const merged = await refreshAndStore(state, account)
+      expect(merged.refreshToken).toBe('new-refresh')
+      expect(merged.accessToken).toBe(newAccess)
+      expect(merged.provider).toBe('openai-codex')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+})

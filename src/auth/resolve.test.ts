@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, mock } from 'bun:test'
 import type { RouterState } from '../state'
 import { createState } from '../state'
 import { createTelemetryEmitter } from '../telemetry/emitter'
@@ -47,5 +47,47 @@ describe('resolveKey', () => {
     const account: Account = { type: 'antigravity-oauth', name: 'acct' }
     const json = await resolveKey(state, account)
     expect(JSON.parse(json)).toEqual({ token: 'access-abc', projectId: 'proj-xyz' })
+  })
+
+  it('openai-codex-oauth account returns raw accessToken (not JSON-wrapped) for fresh credentials', async () => {
+    const dir = `/tmp/resolve-${crypto.randomUUID()}`
+    await writeCredentials(dir, 'acct', {
+      provider: 'openai-codex',
+      refreshToken: 'r',
+      accessToken: 'raw-access-tok',
+      expires: Date.now() + 60_000
+    })
+    const state = mkState(dir)
+    const account: Account = { type: 'openai-codex-oauth', name: 'acct' }
+    const result = await resolveKey(state, account)
+    expect(result).toBe('raw-access-tok')
+  })
+
+  it('openai-codex-oauth account calls refreshOpenAICodexToken and returns refreshed token when credentials are expired', async () => {
+    const dir = `/tmp/resolve-${crypto.randomUUID()}`
+    await writeCredentials(dir, 'acct', {
+      provider: 'openai-codex',
+      refreshToken: 'old-r',
+      accessToken: 'old-access',
+      expires: Date.now() - 1
+    })
+
+    const realModule = await import('./openai-codex-oauth')
+    const stub = mock(async () => ({
+      refresh: 'new-r',
+      access: 'new-access',
+      expires: Date.now() + 3600_000
+    }))
+    mock.module('./openai-codex-oauth', () => ({ ...realModule, refreshOpenAICodexToken: stub }))
+
+    try {
+      const state = mkState(dir)
+      const account: Account = { type: 'openai-codex-oauth', name: 'acct' }
+      const result = await resolveKey(state, account)
+      expect(stub).toHaveBeenCalledTimes(1)
+      expect(result).toBe('new-access')
+    } finally {
+      mock.module('./openai-codex-oauth', () => realModule)
+    }
   })
 })

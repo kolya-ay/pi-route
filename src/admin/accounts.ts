@@ -125,6 +125,28 @@ export const disableAccount = async (
   await persistOrEmit(state)
 }
 
+export const persistLoginCredentials = async (
+  state: RouterState,
+  providerName: string,
+  account: Account,
+  raw: { access: string; refresh: string; expires: number; projectId?: string },
+  providerLabel: string
+): Promise<void> => {
+  const cred: CredentialFile = {
+    provider: providerLabel,
+    refreshToken: raw.refresh,
+    accessToken: raw.access,
+    expires: raw.expires,
+    ...(raw.projectId !== undefined ? { projectId: raw.projectId } : {})
+  }
+  await writeCredentials(state.options.authDir, account.name, cred)
+  state.credentials.set(account.name, cred)
+  // scheduleRefresh internally cancels any existing timer; explicit cancel here
+  // also resets the failure counter so a previously given-up account starts fresh.
+  cancelRefresh(state, account.name)
+  scheduleRefresh(state, providerName, account)
+}
+
 export const loginAccount = async (
   state: RouterState,
   providerName: string,
@@ -134,33 +156,29 @@ export const loginAccount = async (
 ): Promise<void> => {
   const account = findAccount(state, providerName, accountName)
 
-  if (account.type !== 'antigravity-oauth') {
+  let credentials: { access: string; refresh: string; expires: number; projectId?: string }
+  let providerLabel: string
+
+  if (account.type === 'antigravity-oauth') {
+    credentials = await loginAntigravity(
+      callbacks,
+      undefined,
+      opts?.signal,
+      account.projectId
+    ).catch((err: unknown) => {
+      if (err instanceof LoginTimeoutError) {
+        throw new AdminError('login_timeout', err.message, { account: accountName })
+      }
+      throw err
+    })
+    providerLabel = 'google-antigravity'
+  } else if (account.type === 'openai-codex-oauth') {
+    const { loginOpenAICodex } = await import('../auth/openai-codex-oauth')
+    credentials = await loginOpenAICodex({ ...callbacks })
+    providerLabel = 'openai-codex'
+  } else {
     throw new Error(`Login not supported for account type '${account.type}'`)
   }
 
-  const credentials = await loginAntigravity(
-    callbacks,
-    undefined,
-    opts?.signal,
-    account.projectId
-  ).catch((err: unknown) => {
-    if (err instanceof LoginTimeoutError) {
-      throw new AdminError('login_timeout', err.message, { account: accountName })
-    }
-    throw err
-  })
-
-  const cred: CredentialFile = {
-    provider: 'google-antigravity',
-    refreshToken: credentials.refresh,
-    accessToken: credentials.access,
-    expires: credentials.expires,
-    ...(credentials.projectId !== undefined ? { projectId: credentials.projectId } : {})
-  }
-  await writeCredentials(state.options.authDir, accountName, cred)
-  state.credentials.set(accountName, cred)
-  // scheduleRefresh internally cancels any existing timer; explicit cancel here
-  // also resets the failure counter so a previously given-up account starts fresh.
-  cancelRefresh(state, accountName)
-  scheduleRefresh(state, providerName, account)
+  await persistLoginCredentials(state, providerName, account, credentials, providerLabel)
 }

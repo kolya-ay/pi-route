@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, mock } from 'bun:test'
 import type { RouterState } from '../state'
 import { createState } from '../state'
 import { createTelemetryEmitter } from '../telemetry/emitter'
-import type { Account, RouterOptions } from '../types'
+import type { Account, CredentialFile, RouterOptions } from '../types'
 import { addAccount, disableAccount, listAccounts, loginAccount, removeAccount } from './accounts'
 import { AdminError } from './errors'
 
@@ -127,6 +127,68 @@ describe('disableAccount', () => {
     expect(state.options.providers.p1?.accounts[0]?.disabled).toBe(true)
     await disableAccount(state, 'p1', 'existing', false)
     expect(state.options.providers.p1?.accounts[0]?.disabled).toBe(false)
+  })
+})
+
+const codexBaseOptions = (): RouterOptions =>
+  ({
+    server: { port: 0, host: '127.0.0.1' },
+    auth: { apiKeys: [] },
+    authDir: `/tmp/pi-route-test-${crypto.randomUUID()}`,
+    providers: {
+      codex: {
+        type: 'openai-codex',
+        accounts: [],
+        balancing: { strategy: 'fill-first' }
+      }
+    },
+    routing: { rules: [], scenarios: {}, default: { provider: 'codex' } },
+    telemetry: { level: 'info' }
+  }) as RouterOptions
+
+const fakeState = (): RouterState =>
+  ({
+    options: codexBaseOptions(),
+    credentials: new Map<string, CredentialFile>(),
+    timers: new Map(),
+    refreshFailures: new Map(),
+    persist: null,
+    telemetry: { sinks: [], emit: () => {} }
+  }) as RouterState
+
+describe('loginAccount: openai-codex-oauth', () => {
+  it('dispatches login to pi-ai loginOpenAICodex and persists credentials', async () => {
+    const realModule = await import('../auth/openai-codex-oauth')
+
+    const fakeCreds = {
+      refresh: 'rt',
+      access: 'at',
+      expires: Date.now() + 3600_000
+    }
+    const stub = mock(async () => fakeCreds)
+
+    mock.module('../auth/openai-codex-oauth', () => ({
+      loginOpenAICodex: stub
+    }))
+
+    try {
+      const state = fakeState()
+      await addAccount(state, 'codex', { type: 'openai-codex-oauth', name: 'me@example.com' })
+
+      await loginAccount(state, 'codex', 'me@example.com', {
+        onAuth: () => {},
+        onPrompt: async () => '',
+        onProgress: () => {}
+      })
+
+      expect(stub).toHaveBeenCalledTimes(1)
+      const stored = state.credentials.get('me@example.com')
+      expect(stored?.provider).toBe('openai-codex')
+      expect(stored?.accessToken).toBe('at')
+      expect(stored?.refreshToken).toBe('rt')
+    } finally {
+      mock.module('../auth/openai-codex-oauth', () => realModule)
+    }
   })
 })
 

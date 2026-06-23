@@ -33,7 +33,7 @@ export const refreshAndStore = async (
   state: RouterState,
   account: Account
 ): Promise<CredentialFile> => {
-  if (account.type !== 'antigravity-oauth') {
+  if (account.type !== 'antigravity-oauth' && account.type !== 'openai-codex-oauth') {
     throw new Error(`Cannot refresh account of type '${account.type}'`)
   }
   const current =
@@ -42,15 +42,13 @@ export const refreshAndStore = async (
   state.credentials.set(account.name, current)
 
   try {
-    const { refreshAccessToken } = await import('./antigravity-oauth')
-    const refreshed = await refreshAccessToken(current.refreshToken)
-    // Preserve fields refresh() doesn't set (e.g. projectId).
+    const { refresh, access, expires, providerLabel } = await dispatchRefresh(account, current)
     const merged: CredentialFile = {
       ...current,
-      provider: 'google-antigravity',
-      refreshToken: refreshed.refresh,
-      accessToken: refreshed.access,
-      expires: refreshed.expires
+      provider: providerLabel,
+      refreshToken: refresh,
+      accessToken: access,
+      expires
     }
     await writeCredentials(state.options.authDir, account.name, merged)
     state.credentials.set(account.name, merged)
@@ -68,4 +66,33 @@ export const refreshAndStore = async (
     })
     throw err
   }
+}
+
+type RefreshResult = { refresh: string; access: string; expires: number; providerLabel: string }
+
+const dispatchRefresh = async (
+  account: Account,
+  current: CredentialFile
+): Promise<RefreshResult> => {
+  if (account.type === 'antigravity-oauth') {
+    const { refreshAccessToken } = await import('./antigravity-oauth')
+    const r = await refreshAccessToken(current.refreshToken)
+    return {
+      refresh: r.refresh,
+      access: r.access,
+      expires: r.expires,
+      providerLabel: 'google-antigravity'
+    }
+  }
+  if (account.type === 'openai-codex-oauth') {
+    const { refreshOpenAICodexToken } = await import('./openai-codex-oauth')
+    const r = await refreshOpenAICodexToken(current.refreshToken)
+    return {
+      refresh: r.refresh,
+      access: r.access,
+      expires: r.expires,
+      providerLabel: 'openai-codex'
+    }
+  }
+  throw new Error(`Cannot dispatch refresh for account type '${account.type}'`)
 }

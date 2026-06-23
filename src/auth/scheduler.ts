@@ -23,7 +23,7 @@ export const scheduleRefresh = (
   providerName: string,
   account: Account
 ): void => {
-  if (account.type !== 'antigravity-oauth') return
+  if (account.type !== 'antigravity-oauth' && account.type !== 'openai-codex-oauth') return
   if (account.disabled === true) return
 
   const existing = state.timers.get(account.name)
