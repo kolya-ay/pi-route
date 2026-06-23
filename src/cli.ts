@@ -1,15 +1,15 @@
 #!/usr/bin/env bun
 // src/cli.ts
 
-import { addAccount, loginAccount } from './admin/accounts'
+import { addAccount, loginAccount, persistLoginCredentials } from './admin/accounts'
 import { loadRouter } from './app'
 
 const verb = Bun.argv[2]
 const providerName = Bun.argv[3]
-const accountName = Bun.argv[4]
+const accountNameArg = Bun.argv[4]
 
-if (verb !== 'login' || !providerName || !accountName) {
-  console.error('Usage: pi-route login <provider> <account-name>')
+if (verb !== 'login' || !providerName) {
+  console.error('Usage: pi-route login <provider> [<account-name>]')
   process.exit(1)
 }
 
@@ -81,31 +81,84 @@ const loginViaHttp = async (
   }
 }
 
-const loginInProcess = async (path: string, provider: string, name: string): Promise<void> => {
+const accountTypeFor = (providerType: string): 'antigravity-oauth' | 'openai-codex-oauth' => {
+  if (providerType === 'antigravity') return 'antigravity-oauth'
+  if (providerType === 'openai-codex') return 'openai-codex-oauth'
+  throw new Error(`Login not supported for provider type '${providerType}'`)
+}
+
+const onProgress = (msg: string) => console.error(`… ${msg}`)
+const onAuth = ({ url }: { url: string }) => {
+  console.error(`Open in browser: ${url}`)
+  tryOpen(url)
+}
+
+const loginInProcess = async (
+  path: string,
+  provider: string,
+  nameArg: string | undefined
+): Promise<string> => {
   const router = await loadRouter(path)
   const providerCfg = router.options.providers[provider]
   if (!providerCfg) {
     console.error(`Unknown provider: ${provider}`)
     process.exit(1)
   }
-  if (!providerCfg.accounts.some((a) => a.name === name)) {
-    await addAccount(router, provider, { type: 'antigravity-oauth', name })
+
+  if (nameArg !== undefined) {
+    if (!providerCfg.accounts.some((a) => a.name === nameArg)) {
+      await addAccount(router, provider, {
+        type: accountTypeFor(providerCfg.type),
+        name: nameArg
+      })
+    }
+    await loginAccount(router, provider, nameArg, {
+      onAuth,
+      onPrompt: async () => '',
+      onProgress
+    })
+    return nameArg
   }
-  await loginAccount(router, provider, name, {
-    onAuth: ({ url }) => {
-      console.error(`Open in browser: ${url}`)
-      tryOpen(url)
-    },
+
+  if (providerCfg.type !== 'openai-codex') {
+    console.error(
+      `Auto-discover login requires provider type 'openai-codex' (got '${providerCfg.type}'). Pass an account name.`
+    )
+    process.exit(1)
+  }
+
+  const { loginOpenAICodex, discoverEmail, ensureOpenAICodexOAuthRegistered } = await import(
+    './auth/openai-codex-oauth'
+  )
+  ensureOpenAICodexOAuthRegistered()
+  const creds = await loginOpenAICodex({
+    onAuth,
     onPrompt: async () => '',
-    onProgress: (msg) => console.error(`… ${msg}`)
+    onProgress
   })
+  const email = discoverEmail(creds.access)
+
+  if (!providerCfg.accounts.some((a) => a.name === email)) {
+    await addAccount(router, provider, { type: 'openai-codex-oauth', name: email })
+  }
+  const account = router.options.providers[provider]?.accounts.find((a) => a.name === email)
+  if (account !== undefined) {
+    await persistLoginCredentials(router, provider, account, creds, 'openai-codex')
+  }
+  return email
 }
 
+let finalAccountName: string
 if (adminUrl && adminKey) {
-  await loginViaHttp(adminUrl, adminKey, providerName, accountName)
+  if (!accountNameArg) {
+    console.error('Account name is required when using the admin HTTP endpoint.')
+    process.exit(1)
+  }
+  await loginViaHttp(adminUrl, adminKey, providerName, accountNameArg)
+  finalAccountName = accountNameArg
 } else {
-  await loginInProcess(configPath, providerName, accountName)
+  finalAccountName = await loginInProcess(configPath, providerName, accountNameArg)
 }
 
-console.error(`Logged in: ${providerName}/${accountName}`)
+console.error(`Logged in: ${providerName}/${finalAccountName}`)
 process.exit(0)
