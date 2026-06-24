@@ -2,7 +2,15 @@
 
 // === Provider ===
 
-export type ProviderType = 'anthropic' | 'openai' | 'antigravity' | 'openai-codex'
+export type ProviderType =
+  | 'anthropic'
+  | 'openai'
+  | 'openai-compatible'
+  | 'antigravity'
+  | 'openai-codex'
+  | 'cerebras'
+  | 'openrouter'
+  | (string & {}) // accept any string; the `& {}` preserves the literal-completion hints
 
 export type Provider = {
   readonly name: string
@@ -35,39 +43,6 @@ export type ResponseMetadata = {
   account?: string
 }
 
-// === Routing ===
-
-export type RoutingStrategy = {
-  readonly name: string
-  resolve(context: RoutingContext): RoutingDecision | null
-}
-
-export type RoutingContext = {
-  model: string
-  format: 'anthropic' | 'openai'
-  headers: Headers
-  body: Record<string, unknown>
-  options: RouterOptions
-}
-
-export type RoutingDecision = { provider: string; model?: string | undefined; reason: string }
-
-// === Balancing ===
-
-export type BalancingStrategy = {
-  readonly name: string
-  pick(accounts: AccountState[]): AccountState | null
-}
-
-export type AccountState = {
-  account: Account
-  rateLimits: Map<string, number>
-  lastUsed: number
-  lastError?: { message: string; at: number } | undefined
-  isInvalid: boolean
-  requestCount: number
-}
-
 // === Accounts ===
 
 export type CredentialFile = {
@@ -78,29 +53,11 @@ export type CredentialFile = {
   [key: string]: unknown
 }
 
-export type AccountType = 'api-key' | 'claude-cli' | 'antigravity-oauth' | 'openai-codex-oauth'
-
-type AccountBase = {
-  name: string
-  disabled?: boolean | undefined
-}
-
-export type ApiKeyAccount = AccountBase & { type: 'api-key'; key: string }
-export type ClaudeCliAccount = AccountBase & { type: 'claude-cli'; tokenPath: string }
-export type AntigravityOAuthAccount = AccountBase & {
-  type: 'antigravity-oauth'
-  projectId?: string | undefined
-}
-
-export type OpenAICodexOAuthAccount = AccountBase & {
-  type: 'openai-codex-oauth'
-}
-
-export type Account =
-  | ApiKeyAccount
-  | ClaudeCliAccount
-  | AntigravityOAuthAccount
-  | OpenAICodexOAuthAccount
+export type Account = { disabled?: boolean | undefined } & (
+  | { credential: 'key'; key: string }
+  | { credential: 'file'; path: string }
+  | { credential: 'oauth'; name: string; projectId?: string | undefined }
+)
 
 // === Telemetry ===
 
@@ -116,7 +73,6 @@ export type TelemetryEvent =
   | AccountRefreshedEvent
   | AccountRefreshFailedEvent
   | AccountRefreshGivenUpEvent
-  | AdminPersistFailedEvent
 
 export type AccountRefreshedEvent = {
   type: 'account.refreshed'
@@ -134,11 +90,6 @@ export type AccountRefreshGivenUpEvent = {
   type: 'account.refresh-given-up'
   account: string
   attempts: number
-}
-
-export type AdminPersistFailedEvent = {
-  type: 'admin.persist-failed'
-  error: string
 }
 
 export type RequestStartEvent = {
@@ -183,35 +134,26 @@ export type RateLimitEvent = {
 
 // === Config ===
 
-export type RouterOptions = {
-  server: { port: number; host: string }
-  auth: { apiKeys: string[] }
-  providers: Record<string, ProviderOptions>
-  authDir: string
-  routing: RoutingOptions
-  telemetry: TelemetryOptions
-}
-
-export type ProviderOptions = {
+export type ProviderConfig = {
   type: ProviderType
   baseUrl?: string | undefined
-  accounts: Account[]
-  balancing: BalancingOptions
+  account: Account
 }
 
-export type BalancingOptions = {
-  strategy: 'round-robin' | 'sticky' | 'fill-first'
-  rateLimitPerModel?: boolean | undefined
+export type BalancingStrategyName = 'round-robin' | 'sticky' | 'fill-first'
+
+export type PipelineEntry =
+  | { kind: 'alias'; name: string; target: string }
+  | {
+      kind: 'pool'
+      name: string
+      to: string[]
+      strategy: BalancingStrategyName
+      when?: { thinking?: boolean | undefined } | undefined
+    }
+
+export type RouterOptions = {
+  providers: Record<string, ProviderConfig>
+  pipeline: PipelineEntry[] // ordered
+  expose: string[] // gitignore-style globs; empty = all
 }
-
-export type RoutingOptions = {
-  rules: RoutingRule[]
-  scenarios: Partial<Record<ScenarioType, { provider: string; model?: string | undefined }>>
-  default: { provider: string }
-}
-
-export type ScenarioType = 'thinking' | 'long-context' | 'background'
-
-export type RoutingRule = { match: string; provider: string }
-
-export type TelemetryOptions = { level: 'debug' | 'info' | 'warn' | 'error' }

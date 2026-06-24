@@ -1,115 +1,92 @@
 import { z } from 'zod'
 
-import type { RouterOptions } from '../types'
+import type { PipelineEntry, RouterOptions } from '../types'
 
-const DEFAULT_BASE_URLS: Partial<Record<string, string>> = {
-  anthropic: 'https://api.anthropic.com',
-  antigravity: 'https://daily-cloudcode-pa.googleapis.com'
-}
-
-export const AccountSchema = z.discriminatedUnion('type', [
+export const AccountSchema = z.discriminatedUnion('credential', [
   z.object({
-    type: z.literal('api-key'),
-    name: z.string(),
+    credential: z.literal('key'),
     key: z.string(),
     disabled: z.boolean().optional()
   }),
   z.object({
-    type: z.literal('claude-cli'),
-    name: z.string(),
-    tokenPath: z.string(),
+    credential: z.literal('file'),
+    path: z.string(),
     disabled: z.boolean().optional()
   }),
   z.object({
-    type: z.literal('antigravity-oauth'),
+    credential: z.literal('oauth'),
     name: z.string(),
     projectId: z.string().optional(),
-    disabled: z.boolean().optional()
-  }),
-  z.object({
-    type: z.literal('openai-codex-oauth'),
-    name: z.string(),
     disabled: z.boolean().optional()
   })
 ])
 
-const BalancingSchema = z.object({
-  strategy: z.enum(['round-robin', 'sticky', 'fill-first']),
-  rateLimitPerModel: z.boolean().optional()
-})
-
-const ProviderOptionsSchema = z.object({
-  type: z.enum(['anthropic', 'openai', 'antigravity', 'openai-codex']),
+const ProviderTypeSchema = z.string()
+const ProviderSchema = z.object({
+  type: ProviderTypeSchema,
   baseUrl: z.string().optional(),
-  accounts: z.array(AccountSchema),
-  balancing: BalancingSchema
+  account: AccountSchema
 })
 
-const RoutingRuleSchema = z.object({ match: z.string(), provider: z.string() })
+const StrategySchema = z.enum(['round-robin', 'sticky', 'fill-first'])
+const WhenSchema = z.object({ thinking: z.boolean().optional() })
 
-const ScenarioEntrySchema = z.object({ provider: z.string(), model: z.string().optional() })
-
-const RouterOptionsSchema = z.object({
-  server: z
-    .object({ port: z.number().int().positive(), host: z.string() })
-    .default({ port: 3000, host: '127.0.0.1' }),
-  auth: z.object({ apiKeys: z.array(z.string()) }).default({ apiKeys: [] }),
-  providers: z.record(z.string(), ProviderOptionsSchema),
-  authDir: z.string().default('~/.config/hono-router/auth'),
-  routing: z.object({
-    rules: z.array(RoutingRuleSchema).default([]),
-    scenarios: z
-      .object({
-        thinking: ScenarioEntrySchema.optional(),
-        'long-context': ScenarioEntrySchema.optional(),
-        background: ScenarioEntrySchema.optional()
-      })
-      .default({}),
-    default: z.object({ provider: z.string() })
-  }),
-  telemetry: z
-    .object({ level: z.enum(['debug', 'info', 'warn', 'error']) })
-    .default({ level: 'info' })
+const PipelineEntryObjectSchema = z.object({
+  to: z.union([z.string(), z.array(z.string()).nonempty()]),
+  strategy: StrategySchema.optional(),
+  when: WhenSchema.optional()
 })
 
-const resolveBaseUrls = (
-  opts: z.infer<typeof RouterOptionsSchema>
-): z.infer<typeof RouterOptionsSchema> => ({
-  ...opts,
-  providers: Object.fromEntries(
-    Object.entries(opts.providers).map(([name, provider]) => [
+const PipelineValueSchema = z.union([
+  z.string(),
+  z.array(z.string()).nonempty(),
+  PipelineEntryObjectSchema
+])
+
+const RootSchema = z.object({
+  providers: z.record(z.string(), ProviderSchema).default({}),
+  pipeline: z.record(z.string(), PipelineValueSchema).default({}),
+  expose: z.array(z.string()).default([])
+})
+
+const desugar = (name: string, value: z.infer<typeof PipelineValueSchema>): PipelineEntry => {
+  if (typeof value === 'string') {
+    return { kind: 'alias', name, target: value }
+  }
+  if (Array.isArray(value)) {
+    return {
+      kind: 'pool',
       name,
-      { ...provider, baseUrl: provider.baseUrl ?? DEFAULT_BASE_URLS[provider.type] }
-    ])
-  )
-})
-
-const validateProviderRefs = (opts: z.infer<typeof RouterOptionsSchema>): RouterOptions => {
-  const knownProviders = new Set(Object.keys(opts.providers))
-
-  const check = (ref: string, context: string) => {
-    if (!knownProviders.has(ref)) {
-      throw new Error(`Unknown provider "${ref}" referenced in ${context}`)
+      to: value,
+      strategy: 'round-robin'
     }
   }
-
-  check(opts.routing.default.provider, 'routing.default')
-
-  for (const rule of opts.routing.rules) {
-    check(rule.provider, `routing.rules[match=${rule.match}]`)
+  return {
+    kind: 'pool',
+    name,
+    to: Array.isArray(value.to) ? value.to : [value.to],
+    strategy: value.strategy ?? 'round-robin',
+    ...(value.when !== undefined ? { when: value.when } : {})
   }
-
-  for (const [scenario, entry] of Object.entries(opts.routing.scenarios)) {
-    if (entry !== undefined) {
-      check(entry.provider, `routing.scenarios.${scenario}`)
-    }
-  }
-
-  return opts as RouterOptions
 }
 
 export const parseConfig = (raw: unknown): RouterOptions => {
-  const parsed = RouterOptionsSchema.parse(raw)
-  const resolved = resolveBaseUrls(parsed)
-  return validateProviderRefs(resolved)
+  const parsed = RootSchema.parse(raw)
+
+  const providerNames = new Set(Object.keys(parsed.providers))
+  const pipeline: PipelineEntry[] = []
+  for (const [name, value] of Object.entries(parsed.pipeline)) {
+    if (providerNames.has(name)) {
+      throw new Error(
+        `name collision: pipeline entry "${name}" conflicts with provider; rename one`
+      )
+    }
+    pipeline.push(desugar(name, value))
+  }
+
+  return {
+    providers: parsed.providers,
+    pipeline,
+    expose: parsed.expose
+  }
 }

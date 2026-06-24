@@ -1,50 +1,69 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { loadConfig } from './loader'
 
-import { interpolateEnvVars } from './loader'
+let dir: string
+beforeEach(async () => {
+  dir = await mkdtemp(join(tmpdir(), 'pi-route-loader-'))
+})
+afterEach(async () => {
+  delete process.env.MY_TEST_KEY
+  await rm(dir, { recursive: true, force: true })
+})
 
-describe('interpolateEnvVars', () => {
-  const savedEnv = { ...process.env }
+const writeYaml = async (s: string): Promise<string> => {
+  const p = join(dir, 'router.yaml')
+  await writeFile(p, s)
+  return p
+}
 
-  beforeEach(() => {
-    process.env = { ...savedEnv }
+describe('loadConfig', () => {
+  test('parses minimal config', async () => {
+    const p = await writeYaml(`
+providers:
+  cerebras:
+    type: cerebras
+    account: { credential: key, key: sk-test }
+`)
+    const { options } = await loadConfig(p, dir)
+    expect(options.providers.cerebras!.type).toBe('cerebras')
   })
 
-  afterEach(() => {
-    process.env = savedEnv
+  test('interpolates env vars', async () => {
+    process.env.MY_TEST_KEY = 'real-key'
+    const p = await writeYaml(`
+providers:
+  c:
+    type: cerebras
+    account: { credential: key, key: $MY_TEST_KEY }
+`)
+    const { options } = await loadConfig(p, dir)
+    const a = options.providers.c!.account
+    if (a.credential === 'key') expect(a.key).toBe('real-key')
   })
 
-  it('replaces $VAR with env value', () => {
-    process.env.MY_KEY = 'secret'
-    expect(interpolateEnvVars('$MY_KEY')).toBe('secret')
+  test('parses pipeline value shapes', async () => {
+    const p = await writeYaml(`
+pipeline:
+  opus: claude-pool/claude-opus-4-7
+  claude-pool: [claude-personal/$1, claude-work/$1]
+  fancy:
+    to: [a/$1, b/$1]
+    strategy: sticky
+`)
+    const { options } = await loadConfig(p, dir)
+    expect(options.pipeline.map((e) => e.name)).toEqual(['opus', 'claude-pool', 'fancy'])
+    expect(options.pipeline[0]!.kind).toBe('alias')
+    expect(options.pipeline[1]!.kind).toBe('pool')
+    const fancy = options.pipeline[2]!
+    if (fancy.kind === 'pool') expect(fancy.strategy).toBe('sticky')
   })
 
-  it('handles nested object values', () => {
-    process.env.DB_PASS = 'hunter2'
-    const result = interpolateEnvVars({ nested: { key: '$DB_PASS' } })
-    expect(result).toEqual({ nested: { key: 'hunter2' } })
-  })
-
-  it('handles array values', () => {
-    process.env.TOKEN = 'abc123'
-    const result = interpolateEnvVars(['plain', '$TOKEN'])
-    expect(result).toEqual(['plain', 'abc123'])
-  })
-
-  it('leaves non-$ strings untouched', () => {
-    expect(interpolateEnvVars('hello')).toBe('hello')
-    expect(interpolateEnvVars('https://example.com')).toBe('https://example.com')
-  })
-
-  it('passes through non-string primitives unchanged', () => {
-    expect(interpolateEnvVars(42)).toBe(42)
-    expect(interpolateEnvVars(true)).toBe(true)
-    expect(interpolateEnvVars(null)).toBe(null)
-  })
-
-  it('throws on undefined env var', () => {
-    delete process.env.MISSING_VAR
-    expect(() => interpolateEnvVars('$MISSING_VAR')).toThrow(
-      /Environment variable "MISSING_VAR" is not set/
-    )
+  test('returns initial runtime state', async () => {
+    const p = await writeYaml(`providers: {}`)
+    const { state } = await loadConfig(p, dir)
+    expect(state.accounts).toEqual({})
   })
 })
