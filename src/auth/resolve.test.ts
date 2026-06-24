@@ -2,39 +2,36 @@ import { describe, expect, it, mock } from 'bun:test'
 import type { RouterState } from '../state'
 import { createState } from '../state'
 import { createTelemetryEmitter } from '../telemetry/emitter'
-import type { Account } from '../types'
+import type { Account, RouterOptions } from '../types'
 import { writeCredentials } from './credentials'
 import { resolveKey } from './resolve'
 
-const baseOptions = {
-  server: { port: 3000, host: '127.0.0.1' },
-  auth: { apiKeys: [] },
+const baseOptions: RouterOptions = {
   providers: {},
-  authDir: '/tmp',
-  routing: { rules: [], scenarios: {}, default: { provider: 'p1' } },
-  telemetry: { level: 'info' as const }
-} as unknown as RouterState['options']
+  pipeline: [],
+  expose: []
+}
 
 const mkState = (authDir: string): RouterState =>
-  createState({ ...baseOptions, authDir }, null, createTelemetryEmitter([]))
+  createState(baseOptions, null as never, { accounts: {} }, authDir, createTelemetryEmitter([]))
 
 describe('resolveKey', () => {
-  it('api-key account returns the key field', async () => {
+  it('key credential returns the key field', async () => {
     const state = mkState('/tmp')
-    const account: Account = { type: 'api-key', name: 'a', key: 'sk-test' }
-    expect(await resolveKey(state, account)).toBe('sk-test')
+    const account: Account = { credential: 'key', key: 'sk-test' }
+    expect(await resolveKey(state, account, 'openai-compatible')).toBe('sk-test')
   })
 
-  it('claude-cli account reads oauthToken from tokenPath', async () => {
+  it('file credential reads oauthToken from path', async () => {
     const dir = `/tmp/resolve-${crypto.randomUUID()}`
     const tokenPath = `${dir}/cred.json`
     await Bun.write(tokenPath, JSON.stringify({ oauthToken: 'claude-tok-xyz' }))
     const state = mkState(dir)
-    const account: Account = { type: 'claude-cli', name: 'a', tokenPath }
-    expect(await resolveKey(state, account)).toBe('claude-tok-xyz')
+    const account: Account = { credential: 'file', path: tokenPath }
+    expect(await resolveKey(state, account, 'anthropic')).toBe('claude-tok-xyz')
   })
 
-  it('antigravity-oauth account returns JSON {token, projectId} using cached non-expired credentials', async () => {
+  it('antigravity oauth account returns JSON {token, projectId} using cached non-expired credentials', async () => {
     const dir = `/tmp/resolve-${crypto.randomUUID()}`
     await writeCredentials(dir, 'acct', {
       provider: 'google-antigravity',
@@ -44,12 +41,12 @@ describe('resolveKey', () => {
       projectId: 'proj-xyz'
     })
     const state = mkState(dir)
-    const account: Account = { type: 'antigravity-oauth', name: 'acct' }
-    const json = await resolveKey(state, account)
+    const account: Account = { credential: 'oauth', name: 'acct' }
+    const json = await resolveKey(state, account, 'antigravity')
     expect(JSON.parse(json)).toEqual({ token: 'access-abc', projectId: 'proj-xyz' })
   })
 
-  it('openai-codex-oauth account returns raw accessToken (not JSON-wrapped) for fresh credentials', async () => {
+  it('openai-codex oauth account returns raw accessToken (not JSON-wrapped) for fresh credentials', async () => {
     const dir = `/tmp/resolve-${crypto.randomUUID()}`
     await writeCredentials(dir, 'acct', {
       provider: 'openai-codex',
@@ -58,12 +55,12 @@ describe('resolveKey', () => {
       expires: Date.now() + 60_000
     })
     const state = mkState(dir)
-    const account: Account = { type: 'openai-codex-oauth', name: 'acct' }
-    const result = await resolveKey(state, account)
+    const account: Account = { credential: 'oauth', name: 'acct' }
+    const result = await resolveKey(state, account, 'openai-codex')
     expect(result).toBe('raw-access-tok')
   })
 
-  it('openai-codex-oauth account calls refreshOpenAICodexToken and returns refreshed token when credentials are expired', async () => {
+  it('openai-codex oauth account calls refreshOpenAICodexToken and returns refreshed token when credentials are expired', async () => {
     const dir = `/tmp/resolve-${crypto.randomUUID()}`
     await writeCredentials(dir, 'acct', {
       provider: 'openai-codex',
@@ -82,8 +79,8 @@ describe('resolveKey', () => {
 
     try {
       const state = mkState(dir)
-      const account: Account = { type: 'openai-codex-oauth', name: 'acct' }
-      const result = await resolveKey(state, account)
+      const account: Account = { credential: 'oauth', name: 'acct' }
+      const result = await resolveKey(state, account, 'openai-codex')
       expect(stub).toHaveBeenCalledTimes(1)
       expect(result).toBe('new-access')
     } finally {

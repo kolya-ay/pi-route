@@ -524,7 +524,7 @@ export const createAntigravityProvider = (name: string, _baseUrl: string): Provi
           provider: name,
           model: request.model,
           latencyMs: Date.now() - start,
-          account: account.name
+          ...('name' in account ? { account: account.name } : {})
         }
       }
     }
@@ -556,7 +556,7 @@ export const createAntigravityProvider = (name: string, _baseUrl: string): Provi
         provider: name,
         model: request.model,
         latencyMs: Date.now() - start,
-        account: account.name
+        ...('name' in account ? { account: account.name } : {})
       }
     }
   }

@@ -1,10 +1,6 @@
 // src/admin/errors.ts
 
-export type AdminErrorCode =
-  | 'provider_not_found'
-  | 'account_not_found'
-  | 'account_conflict'
-  | 'login_timeout'
+export type AdminErrorCode = 'account_not_found' | 'method_not_allowed'
 
 export class AdminError extends Error {
   constructor(

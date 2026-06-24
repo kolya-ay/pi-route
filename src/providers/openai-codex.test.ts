@@ -18,7 +18,7 @@ const makeRequest = (opts: { stream: boolean }): IncomingRequest => ({
   stream: opts.stream
 })
 
-const account: Account = { type: 'openai-codex-oauth', name: 'me@example.com' }
+const account: Account = { credential: 'oauth', name: 'me@example.com' }
 
 const stubCodexStream = async (
   handler: (model: unknown, ctx: unknown, opts: unknown) => unknown

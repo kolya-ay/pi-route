@@ -3,7 +3,7 @@
 import { chmodSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { RouterState } from '../state'
-import type { Account, CredentialFile } from '../types'
+import type { Account, CredentialFile, ProviderType } from '../types'
 
 export type { CredentialFile } from '../types'
 
@@ -31,18 +31,18 @@ export const writeCredentials = async (
 
 export const refreshAndStore = async (
   state: RouterState,
-  account: Account
+  account: Account & { credential: 'oauth' },
+  providerType: ProviderType
 ): Promise<CredentialFile> => {
-  if (account.type !== 'antigravity-oauth' && account.type !== 'openai-codex-oauth') {
-    throw new Error(`Cannot refresh account of type '${account.type}'`)
+  if (providerType !== 'antigravity' && providerType !== 'openai-codex') {
+    throw new Error(`Cannot refresh provider type '${providerType}'`)
   }
   const current =
-    state.credentials.get(account.name) ??
-    (await readCredentials(state.options.authDir, account.name))
+    state.credentials.get(account.name) ?? (await readCredentials(state.authDir, account.name))
   state.credentials.set(account.name, current)
 
   try {
-    const { refresh, access, expires, providerLabel } = await dispatchRefresh(account, current)
+    const { refresh, access, expires, providerLabel } = await dispatchRefresh(providerType, current)
     const merged: CredentialFile = {
       ...current,
       provider: providerLabel,
@@ -50,7 +50,7 @@ export const refreshAndStore = async (
       accessToken: access,
       expires
     }
-    await writeCredentials(state.options.authDir, account.name, merged)
+    await writeCredentials(state.authDir, account.name, merged)
     state.credentials.set(account.name, merged)
     state.telemetry.emit({
       type: 'account.refreshed',
@@ -71,10 +71,10 @@ export const refreshAndStore = async (
 type RefreshResult = { refresh: string; access: string; expires: number; providerLabel: string }
 
 const dispatchRefresh = async (
-  account: Account,
+  providerType: ProviderType,
   current: CredentialFile
 ): Promise<RefreshResult> => {
-  if (account.type === 'antigravity-oauth') {
+  if (providerType === 'antigravity') {
     const { refreshAccessToken } = await import('./antigravity-oauth')
     const r = await refreshAccessToken(current.refreshToken)
     return {
@@ -84,7 +84,7 @@ const dispatchRefresh = async (
       providerLabel: 'google-antigravity'
     }
   }
-  if (account.type === 'openai-codex-oauth') {
+  if (providerType === 'openai-codex') {
     const { refreshOpenAICodexToken } = await import('./openai-codex-oauth')
     const r = await refreshOpenAICodexToken(current.refreshToken)
     return {
@@ -94,5 +94,5 @@ const dispatchRefresh = async (
       providerLabel: 'openai-codex'
     }
   }
-  throw new Error(`Cannot dispatch refresh for account type '${account.type}'`)
+  throw new Error(`Cannot dispatch refresh for provider type '${providerType}'`)
 }

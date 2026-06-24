@@ -55,7 +55,7 @@ export const createPassthroughProvider = (
         provider: name,
         model: request.model,
         latencyMs,
-        account: account.name
+        ...('name' in account ? { account: account.name } : {})
       }
     }
   }

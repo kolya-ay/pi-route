@@ -16,8 +16,7 @@ const makeRequest = (url: string, headers: Record<string, string> = {}): Incomin
 })
 
 const makeAccount = (): Account => ({
-  type: 'api-key',
-  name: 'test-account',
+  credential: 'key',
   key: 'k'
 })
 
@@ -54,7 +53,7 @@ describe('createPassthroughProvider: anthropic', () => {
       expect(response.metadata.provider).toBe('test-anthropic')
       expect(response.metadata.requestId).toBe('req-test')
       expect(response.metadata.model).toBe('claude-3-5-sonnet')
-      expect(response.metadata.account).toBe('test-account')
+      expect(response.metadata.account).toBeUndefined()
       expect(typeof response.metadata.latencyMs).toBe('number')
     } finally {
       close()

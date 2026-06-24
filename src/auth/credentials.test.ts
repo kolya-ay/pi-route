@@ -11,7 +11,7 @@ import { readCredentials, refreshAndStore, writeCredentials } from './credential
 
 const mkState = (authDir: string, events: TelemetryEvent[] = []) => {
   const telemetry = createTelemetryEmitter([{ emit: (e) => events.push(e) }])
-  return createState({ authDir } as RouterOptions, null, telemetry)
+  return createState({} as RouterOptions, null as never, { accounts: {} }, authDir, telemetry)
 }
 
 let testDir: string
@@ -109,7 +109,11 @@ describe('refreshAndStore', () => {
     }) as typeof fetch
 
     try {
-      const result = await refreshAndStore(state, { type: 'antigravity-oauth', name: 'acct' })
+      const result = await refreshAndStore(
+        state,
+        { credential: 'oauth', name: 'acct' },
+        'antigravity'
+      )
       expect(result.accessToken).toBe('new-access')
       expect(result.refreshToken).toBe('new-refresh')
       expect(result.projectId).toBe('proj-123') // preserved
@@ -144,7 +148,7 @@ describe('refreshAndStore', () => {
 
     try {
       await expect(
-        refreshAndStore(state, { type: 'antigravity-oauth', name: 'acct' })
+        refreshAndStore(state, { credential: 'oauth', name: 'acct' }, 'antigravity')
       ).rejects.toThrow()
       expect(events[0]?.type).toBe('account.refresh-failed')
     } finally {
@@ -163,8 +167,8 @@ const makeCodexJwt = (accountId: string): string => {
 
 describe('refreshAndStore: openai-codex-oauth', () => {
   it('refreshes via pi-ai for an openai-codex-oauth account', async () => {
-    const account: import('../types').Account = {
-      type: 'openai-codex-oauth',
+    const account: import('../types').Account & { credential: 'oauth' } = {
+      credential: 'oauth',
       name: 'me@example.com'
     }
     const state = mkState(testDir)
@@ -194,7 +198,7 @@ describe('refreshAndStore: openai-codex-oauth', () => {
     }) as typeof fetch
 
     try {
-      const merged = await refreshAndStore(state, account)
+      const merged = await refreshAndStore(state, account, 'openai-codex')
       expect(merged.refreshToken).toBe('new-refresh')
       expect(merged.accessToken).toBe(newAccess)
       expect(merged.provider).toBe('openai-codex')

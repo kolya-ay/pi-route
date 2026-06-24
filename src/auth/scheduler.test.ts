@@ -2,22 +2,18 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import type { RouterState } from '../state'
 import { createState } from '../state'
 import { createTelemetryEmitter } from '../telemetry/emitter'
+import type { RouterOptions } from '../types'
 import { writeCredentials } from './credentials'
 import { cancelRefresh, scheduleRefresh } from './scheduler'
 
+const baseOptions: RouterOptions = {
+  providers: {},
+  pipeline: [],
+  expose: []
+}
+
 const mkState = (authDir: string): RouterState =>
-  createState(
-    {
-      server: { port: 3000, host: '127.0.0.1' },
-      auth: { apiKeys: [] },
-      providers: {},
-      authDir,
-      routing: { rules: [], scenarios: {}, default: { provider: 'p1' } },
-      telemetry: { level: 'info' }
-    } as RouterState['options'],
-    null,
-    createTelemetryEmitter([])
-  )
+  createState(baseOptions, null as never, { accounts: {} }, authDir, createTelemetryEmitter([]))
 
 let originalFetch: typeof fetch
 
@@ -29,9 +25,9 @@ afterEach(() => {
 })
 
 describe('scheduleRefresh', () => {
-  it('is a no-op for api-key accounts', () => {
+  it('is a no-op for key-credential accounts', () => {
     const state = mkState('/tmp')
-    scheduleRefresh(state, 'p1', { type: 'api-key', name: 'a', key: 'k' })
+    scheduleRefresh(state, 'p1', 'openai-compatible', { credential: 'key', key: 'k' })
     expect(state.timers.size).toBe(0)
   })
 
@@ -44,13 +40,17 @@ describe('scheduleRefresh', () => {
       expires: Date.now() + 120_000
     })
     const state = mkState(dir)
-    scheduleRefresh(state, 'p1', { type: 'antigravity-oauth', name: 'a', disabled: true })
+    scheduleRefresh(state, 'p1', 'antigravity', {
+      credential: 'oauth',
+      name: 'a',
+      disabled: true
+    })
     expect(state.timers.size).toBe(0)
   })
 
   it('is a no-op when credential file does not exist', () => {
     const state = mkState(`/tmp/missing-${crypto.randomUUID()}`)
-    scheduleRefresh(state, 'p1', { type: 'antigravity-oauth', name: 'a' })
+    scheduleRefresh(state, 'p1', 'antigravity', { credential: 'oauth', name: 'a' })
     expect(state.timers.size).toBe(0)
   })
 
@@ -73,7 +73,7 @@ describe('scheduleRefresh', () => {
       )
     }) as unknown as typeof fetch
 
-    scheduleRefresh(state, 'p1', { type: 'antigravity-oauth', name: 'a' })
+    scheduleRefresh(state, 'p1', 'antigravity', { credential: 'oauth', name: 'a' })
     expect(state.timers.size).toBe(1)
 
     await Bun.sleep(2500)
@@ -91,7 +91,7 @@ describe('cancelRefresh', () => {
       expires: Date.now() + 120_000
     })
     const state = mkState(dir)
-    scheduleRefresh(state, 'p1', { type: 'antigravity-oauth', name: 'a' })
+    scheduleRefresh(state, 'p1', 'antigravity', { credential: 'oauth', name: 'a' })
     expect(state.timers.size).toBe(1)
     cancelRefresh(state, 'a')
     expect(state.timers.size).toBe(0)
@@ -119,7 +119,7 @@ describe('refresh failure backoff', () => {
         status: 400
       })) as unknown as typeof fetch
 
-    scheduleRefresh(state, 'p1', { type: 'antigravity-oauth', name: 'a' })
+    scheduleRefresh(state, 'p1', 'antigravity', { credential: 'oauth', name: 'a' })
     // Wait long enough for first fire + 5 backoff attempts (1+2+4+8+16+32 = 63s — too long).
     // Instead, manually drive: fire one failure, then verify counter.
     await Bun.sleep(2500)

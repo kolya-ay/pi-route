@@ -1,28 +1,19 @@
 // src/routes/admin.ts
 
 import { Hono } from 'hono'
-import { streamSSE } from 'hono/streaming'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { z } from 'zod'
 
-import {
-  addAccount,
-  disableAccount,
-  listAccounts,
-  loginAccount,
-  removeAccount
-} from '../admin/accounts'
+import { getAccount, listAccounts, setAccountInvalid } from '../admin/accounts'
 import { AdminError } from '../admin/errors'
 import type { RouterState } from '../state'
 
 const STATUS_BY_CODE: Record<string, ContentfulStatusCode> = {
-  provider_not_found: 404,
   account_not_found: 404,
-  account_conflict: 409,
-  login_timeout: 408
+  method_not_allowed: 405
 }
 
-const PatchBodySchema = z.object({ disabled: z.boolean() })
+const InvalidBodySchema = z.object({ isInvalid: z.boolean() })
 
 export const mountAdmin = (
   app: Hono<{ Variables: { requestId: string } }>,
@@ -52,48 +43,29 @@ export const mountAdmin = (
 
   admin.get('/accounts', (c) => c.json(listAccounts(state)))
 
-  admin.post('/accounts/:provider', async (c) => {
-    const body = (await c.req.json()) as Parameters<typeof addAccount>[2]
-    await addAccount(state, c.req.param('provider'), body)
-    return c.json(body, 201)
+  admin.get('/accounts/:name', (c) => {
+    const acc = getAccount(state, c.req.param('name'))
+    if (!acc) {
+      return c.json({ error: 'account_not_found', detail: { name: c.req.param('name') } }, 404)
+    }
+    return c.json(acc)
   })
 
-  admin.delete('/accounts/:provider/:name', async (c) => {
-    await removeAccount(state, c.req.param('provider'), c.req.param('name'))
+  admin.patch('/accounts/:name/invalid', async (c) => {
+    const body = InvalidBodySchema.parse(await c.req.json())
+    await setAccountInvalid(state, c.req.param('name'), body.isInvalid)
     return c.body(null, 204)
   })
 
-  admin.patch('/accounts/:provider/:name', async (c) => {
-    const body = PatchBodySchema.parse(await c.req.json())
-    await disableAccount(state, c.req.param('provider'), c.req.param('name'), body.disabled)
-    return c.body(null, 204)
-  })
-
-  admin.post('/accounts/:provider/:name/login', (c) =>
-    streamSSE(c, async (stream) => {
-      const provider = c.req.param('provider')
-      const name = c.req.param('name')
-      try {
-        await loginAccount(
-          state,
-          provider,
-          name,
-          {
-            onAuth: ({ url }) => stream.writeSSE({ event: 'auth', data: JSON.stringify({ url }) }),
-            // OAuthLoginCallbacks requires onPrompt; antigravity-oauth never calls it.
-            onPrompt: async () => '',
-            onProgress: (msg) => stream.writeSSE({ event: 'progress', data: msg })
-          },
-          { signal: c.req.raw.signal }
-        )
-        await stream.writeSSE({ event: 'done', data: '' })
-      } catch (err) {
-        await stream.writeSSE({
-          event: 'error',
-          data: JSON.stringify({ error: err instanceof Error ? err.message : String(err) })
-        })
-      }
-    })
+  // OAuth login moved to CLI (Task 13). Reject legacy login endpoint clearly.
+  admin.all('/accounts/:name/login', (c) =>
+    c.json(
+      {
+        error: 'method_not_allowed',
+        detail: { message: 'OAuth login moved to CLI; use `pi-route login <provider>`' }
+      },
+      405
+    )
   )
 
   app.route('/admin', admin)

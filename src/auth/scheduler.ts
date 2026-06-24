@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { RouterState } from '../state'
-import type { Account } from '../types'
+import type { Account, ProviderType } from '../types'
 import type { CredentialFile } from './credentials'
 import { refreshAndStore } from './credentials'
 
@@ -21,10 +21,12 @@ export const cancelRefresh = (state: RouterState, accountName: string): void => 
 export const scheduleRefresh = (
   state: RouterState,
   providerName: string,
+  providerType: ProviderType,
   account: Account
 ): void => {
-  if (account.type !== 'antigravity-oauth' && account.type !== 'openai-codex-oauth') return
+  if (account.credential !== 'oauth') return
   if (account.disabled === true) return
+  if (providerType !== 'antigravity' && providerType !== 'openai-codex') return
 
   const existing = state.timers.get(account.name)
   if (existing !== undefined) {
@@ -38,7 +40,7 @@ export const scheduleRefresh = (
     expires = cached.expires
   } else {
     try {
-      const fresh = readCredentialsSync(state.options.authDir, account.name)
+      const fresh = readCredentialsSync(state.authDir, account.name)
       state.credentials.set(account.name, fresh)
       expires = fresh.expires
     } catch {
@@ -51,17 +53,23 @@ export const scheduleRefresh = (
     MAX_SETTIMEOUT_MS,
     Math.max(MIN_DELAY_MS, expires - Date.now() - REFRESH_LEAD_MS)
   )
+  const oauthAccount = account
   const timer = setTimeout(() => {
-    void fire(state, providerName, account)
+    void fire(state, providerName, providerType, oauthAccount)
   }, delay)
   state.timers.set(account.name, timer)
 }
 
-const fire = async (state: RouterState, providerName: string, account: Account): Promise<void> => {
+const fire = async (
+  state: RouterState,
+  providerName: string,
+  providerType: ProviderType,
+  account: Account & { credential: 'oauth' }
+): Promise<void> => {
   try {
-    await refreshAndStore(state, account)
+    await refreshAndStore(state, account, providerType)
     state.refreshFailures.delete(account.name)
-    scheduleRefresh(state, providerName, account)
+    scheduleRefresh(state, providerName, providerType, account)
   } catch {
     const failures = (state.refreshFailures.get(account.name) ?? 0) + 1
     state.refreshFailures.set(account.name, failures)
@@ -75,7 +83,7 @@ const fire = async (state: RouterState, providerName: string, account: Account):
       return
     }
     const backoff = Math.min(MAX_BACKOFF_MS, 1000 * 2 ** (failures - 1))
-    const timer = setTimeout(() => void fire(state, providerName, account), backoff)
+    const timer = setTimeout(() => void fire(state, providerName, providerType, account), backoff)
     state.timers.set(account.name, timer)
   }
 }

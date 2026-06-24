@@ -42,7 +42,7 @@ export const createOpenAICodexProvider = (name: string): Provider => ({
       provider: name,
       model: request.model,
       latencyMs: Date.now() - start,
-      account: account.name
+      ...('name' in account ? { account: account.name } : {})
     }
 
     if (request.stream) {
