@@ -4,14 +4,14 @@ import type { Context } from 'hono'
 import { stream as honoStream } from 'hono/streaming'
 
 import { resolveKey } from '../auth/resolve'
-import type { ProviderEntry } from '../providers/registry'
+import { resolveModel } from '../pipeline/resolve'
+import { type ProviderEntry, resolveBaseUrl } from '../providers/registry'
 import type { RouterState } from '../state'
-import type { RoutingStrategy, TelemetryEmitter } from '../types'
+import type { TelemetryEmitter } from '../types'
 
 export type DispatchDeps = {
   format: 'anthropic' | 'openai'
   registry: Map<string, ProviderEntry>
-  routing: RoutingStrategy
   state: RouterState
   telemetry: TelemetryEmitter
 }
@@ -32,35 +32,35 @@ export const createDispatchHandler = (deps: DispatchDeps) => async (c: Context) 
     stream
   })
 
-  const decision = deps.routing.resolve({
-    model,
-    format: deps.format,
-    headers: c.req.raw.headers,
-    body: parsed,
-    options: deps.state.options
-  })
+  const thinking = (parsed.thinking as { type?: string } | undefined)?.type === 'enabled'
 
-  if (!decision) {
-    return c.json({ error: 'No routing decision' }, 502)
+  let decision: { provider: string; modelId: string }
+  try {
+    decision = resolveModel(deps.state.options, deps.state.catalog, model, { thinking })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'No routing decision'
+    return c.json({ error: message }, 502)
   }
 
   const entry = deps.registry.get(decision.provider)
   if (!entry) {
-    return c.json({ error: `Provider "${decision.provider}" not found` }, 502)
+    return c.json({ error: `provider "${decision.provider}" not in registry` }, 500)
   }
 
-  const accountState = entry.pool.select(decision.model ?? model)
-  if (!accountState) {
-    return c.json({ error: 'No available accounts — all rate-limited or invalid' }, 429)
+  if (entry.account.disabled === true) {
+    return c.json({ error: `provider "${decision.provider}" account is disabled` }, 503)
+  }
+  const runtime = deps.state.runtime.accounts[decision.provider]
+  if (runtime?.isInvalid === true) {
+    return c.json({ error: `provider "${decision.provider}" account marked invalid` }, 503)
   }
 
-  const finalModel = decision.model ?? model
+  const finalModel = decision.modelId
   const finalBody =
-    decision.model && decision.model !== model
-      ? JSON.stringify({ ...parsed, model: decision.model })
-      : bodyText
+    finalModel !== model ? JSON.stringify({ ...parsed, model: finalModel }) : bodyText
 
-  const upstreamUrl = deps.state.options.providers[decision.provider]?.baseUrl ?? ''
+  const providerConfig = deps.state.options.providers[decision.provider]
+  const upstreamUrl = resolveBaseUrl(providerConfig?.type ?? '', providerConfig?.baseUrl)
   const rawReq = c.req.raw
   const outgoingRequest = new Request(upstreamUrl, {
     method: rawReq.method,
@@ -70,7 +70,7 @@ export const createDispatchHandler = (deps: DispatchDeps) => async (c: Context) 
   } as RequestInit)
 
   try {
-    const apiKey = await resolveKey(deps.state, accountState.account)
+    const apiKey = await resolveKey(deps.state, entry.account, entry.provider.type)
     const response = await entry.provider.dispatch(
       {
         id: requestId,
@@ -79,7 +79,7 @@ export const createDispatchHandler = (deps: DispatchDeps) => async (c: Context) 
         model: finalModel,
         stream
       },
-      accountState.account,
+      entry.account,
       apiKey
     )
 
@@ -96,19 +96,6 @@ export const createDispatchHandler = (deps: DispatchDeps) => async (c: Context) 
       latencyMs: response.metadata.latencyMs
     })
 
-    if (response.status === 429) {
-      const retryAfter = response.headers.get('retry-after')
-      const retryMs = retryAfter ? Number(retryAfter) * 1000 : 60_000
-      entry.pool.markRateLimited(accountState, finalModel, retryMs)
-      deps.telemetry.emit({
-        type: 'ratelimit_hit',
-        provider: decision.provider,
-        account: accountState.account.name,
-        model: finalModel,
-        retryAfterMs: retryMs
-      })
-    }
-
     if (response.body instanceof ReadableStream) {
       return honoStream(c, async (s) => {
         c.header('Content-Type', 'text/event-stream')
@@ -121,12 +108,10 @@ export const createDispatchHandler = (deps: DispatchDeps) => async (c: Context) 
     return c.json(response.body as Record<string, unknown>, response.status as 200)
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown provider error'
-    entry.pool.markError(accountState, { message })
     deps.telemetry.emit({
       type: 'provider_error',
       requestId,
       provider: decision.provider,
-      account: accountState.account.name,
       message
     })
     return c.json({ error: message }, 502)

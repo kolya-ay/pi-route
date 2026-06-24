@@ -2,51 +2,46 @@
 
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { createPersistHook } from './admin/persist'
 import { createAuthMiddleware } from './auth/middleware'
 import { scheduleRefresh } from './auth/scheduler'
-import { interpolateEnvVars } from './config/loader'
-import { parseConfig } from './config/schema'
+import { readEnvConfig } from './config/env'
+import { loadConfig } from './config/loader'
+import { buildCatalog } from './pipeline/catalog'
 import { createProviderRegistry } from './providers/registry'
 import { mountAdmin } from './routes/admin'
 import { createChatCompletionsRoute } from './routes/chat-completions'
 import { createHealthRoute } from './routes/health'
 import { createMessagesRoute } from './routes/messages'
 import { createModelsRoute } from './routes/models'
-import { createRoutingPipeline } from './routing/pipeline'
 import { createState, type RouterState } from './state'
 import { createConsoleSink, createTelemetryEmitter } from './telemetry/emitter'
-import type { RouterOptions, TelemetrySink } from './types'
+import type { TelemetrySink } from './types'
 
 type Env = { Variables: { requestId: string } }
 
-export type CreateRouterOpts = {
+export type CreateAppOpts = {
   admin?: { authKey: string }
-  persist?: (opts: RouterOptions) => Promise<void>
   telemetrySinks?: TelemetrySink[]
 }
 
-export const createRouter = (
-  options: RouterOptions,
-  opts: CreateRouterOpts = {}
-): RouterState & { app: Hono } => {
+export const createApp = async (opts: CreateAppOpts = {}): Promise<RouterState & { app: Hono }> => {
   if (opts.admin !== undefined && !opts.admin.authKey) {
-    throw new Error('createRouter: admin.authKey must be a non-empty string')
+    throw new Error('createApp: admin.authKey must be a non-empty string')
   }
 
+  const env = readEnvConfig()
+  const { options, state: runtime } = await loadConfig(env.configPath, env.authDir)
+  const catalog = buildCatalog(options)
   const telemetry = createTelemetryEmitter(opts.telemetrySinks ?? [createConsoleSink()])
-  const state = createState(options, opts.persist ?? null, telemetry)
+  const state = createState(options, catalog, runtime, env.authDir, telemetry)
 
-  for (const [providerName, provider] of Object.entries(options.providers)) {
-    for (const account of provider.accounts) {
-      scheduleRefresh(state, providerName, account)
-    }
+  for (const [providerName, config] of Object.entries(state.options.providers)) {
+    scheduleRefresh(state, providerName, config.type, config.account)
   }
 
   const app = new Hono<Env>()
   const startTime = Date.now()
   const registry = createProviderRegistry(state)
-  const routing = createRoutingPipeline()
 
   app.use('*', cors())
   app.use('/v1/*', async (c, next) => {
@@ -55,27 +50,17 @@ export const createRouter = (
     c.header('x-request-id', requestId)
     await next()
   })
-  app.use('/v1/*', createAuthMiddleware(options.auth.apiKeys))
+  app.use('/v1/*', createAuthMiddleware(env.tokens))
 
   app.get('/', (c) => c.json({ name: 'pi-route', status: 'ok' }))
   app.route('/health', createHealthRoute(registry, startTime))
-  app.route('/v1/models', createModelsRoute(options))
-  app.route('/v1/messages', createMessagesRoute(registry, routing, state, telemetry))
-  app.route('/v1/chat/completions', createChatCompletionsRoute(registry, routing, state, telemetry))
+  app.route('/v1/models', createModelsRoute(state.options, state.catalog))
+  app.route('/v1/messages', createMessagesRoute(registry, state, telemetry))
+  app.route('/v1/chat/completions', createChatCompletionsRoute(registry, state, telemetry))
 
   if (opts.admin !== undefined) {
     mountAdmin(app, state, { authKey: opts.admin.authKey })
   }
 
   return Object.assign(state, { app: app as unknown as Hono })
-}
-
-export const loadRouter = async (
-  configPath: string,
-  opts: CreateRouterOpts = {}
-): Promise<RouterState & { app: Hono }> => {
-  const raw: unknown = await Bun.file(configPath).json()
-  const options = parseConfig(interpolateEnvVars(raw))
-  // File-based persist is the default; caller-provided opts.persist overrides it.
-  return createRouter(options, { persist: createPersistHook(configPath), ...opts })
 }

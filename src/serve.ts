@@ -1,18 +1,17 @@
 // src/serve.ts
 
-import { loadRouter } from './app'
+import { createApp } from './app'
+import { readEnvConfig } from './config/env'
 
-const configPath = Bun.env.ROUTER_CONFIG ?? 'router.json'
-const adminKey = Bun.env.PI_ROUTE_ADMIN_KEY
+const env = readEnvConfig()
+const adminKey = process.env.PI_ROUTE_ADMIN_KEY
 
-const router = await loadRouter(configPath, adminKey ? { admin: { authKey: adminKey } } : {})
+const router = await createApp(adminKey ? { admin: { authKey: adminKey } } : {})
 
-console.log(
-  `Router listening on http://${router.options.server.host}:${router.options.server.port}`
-)
+console.log(`Router listening on http://${env.host}:${env.port}`)
 
 export default {
-  port: router.options.server.port,
-  hostname: router.options.server.host,
+  port: env.port,
+  hostname: env.host,
   fetch: router.app.fetch
 }

@@ -11,13 +11,10 @@ export const createHealthRoute = (
   const app = new Hono()
 
   app.get('/', (c) => {
-    const providers: Record<
-      string,
-      { type: string; accounts: ReturnType<ProviderEntry['pool']['health']> }
-    > = Object.fromEntries(
+    const providers: Record<string, { type: string; credential: string }> = Object.fromEntries(
       Array.from(registry.entries()).map(([name, entry]) => [
         name,
-        { type: entry.provider.type, accounts: entry.pool.health() }
+        { type: entry.provider.type, credential: entry.account.credential }
       ])
     )
 
