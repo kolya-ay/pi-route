@@ -1,5 +1,5 @@
 {
-  "authDir": "~/.config/hono-router/auth",
+  "authDir": "~/.config/pi-route/auth",
   "providers": {
     "claude-direct": {
       "type": "anthropic",
