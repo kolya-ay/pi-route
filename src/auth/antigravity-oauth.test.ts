@@ -1,12 +1,12 @@
 // src/auth/antigravity-oauth.test.ts
 
-import { afterEach, describe, expect, it, mock } from 'bun:test'
-import { unregisterOAuthProvider } from '@mariozechner/pi-ai/oauth'
+import { describe, expect, it, mock } from 'bun:test'
+import { getOAuthProvider, registerOAuthProvider } from '@mariozechner/pi-ai/oauth'
 
 import {
+  antigravityOAuthProvider,
   buildAuthUrl,
   discoverProject,
-  ensureAntigravityOAuthRegistered,
   exchangeCode,
   loginAntigravity,
   refreshAccessToken
@@ -216,20 +216,16 @@ describe('discoverProject', () => {
   })
 })
 
-describe('ensureAntigravityOAuthRegistered', () => {
-  afterEach(() => {
-    unregisterOAuthProvider('google-antigravity')
+describe('antigravity OAuth provider', () => {
+  it('registers under id "google-antigravity" and is retrievable', () => {
+    registerOAuthProvider(antigravityOAuthProvider)
+    expect(getOAuthProvider('google-antigravity')).toBe(antigravityOAuthProvider)
   })
 
-  it('registers without returning a value (void side-effect)', () => {
-    const result = ensureAntigravityOAuthRegistered()
-    expect(result).toBeUndefined()
-  })
-
-  it('is idempotent — repeated calls do not throw', () => {
-    ensureAntigravityOAuthRegistered()
-    ensureAntigravityOAuthRegistered()
-    // No error means success
+  it('is idempotent — repeated registration keeps the same provider instance', () => {
+    registerOAuthProvider(antigravityOAuthProvider)
+    registerOAuthProvider(antigravityOAuthProvider)
+    expect(getOAuthProvider('google-antigravity')).toBe(antigravityOAuthProvider)
   })
 
   it('refreshToken preserves projectId via standalone function', async () => {

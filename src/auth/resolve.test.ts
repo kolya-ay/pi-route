@@ -19,30 +19,21 @@ describe('resolveKey', () => {
   it('key credential returns the key field', async () => {
     const state = mkState('/tmp')
     const account: Account = { credential: 'key', key: 'sk-test' }
-    expect(await resolveKey(state, account, 'openai-compatible')).toBe('sk-test')
-  })
-
-  it('file credential reads oauthToken from path', async () => {
-    const dir = `/tmp/resolve-${crypto.randomUUID()}`
-    const tokenPath = `${dir}/cred.json`
-    await Bun.write(tokenPath, JSON.stringify({ oauthToken: 'claude-tok-xyz' }))
-    const state = mkState(dir)
-    const account: Account = { credential: 'file', path: tokenPath }
-    expect(await resolveKey(state, account, 'anthropic')).toBe('claude-tok-xyz')
+    expect(await resolveKey(state, account)).toBe('sk-test')
   })
 
   it('antigravity oauth account returns JSON {token, projectId} using cached non-expired credentials', async () => {
     const dir = `/tmp/resolve-${crypto.randomUUID()}`
     await writeCredentials(dir, 'acct', {
       provider: 'google-antigravity',
-      refreshToken: 'r',
-      accessToken: 'access-abc',
+      refresh: 'r',
+      access: 'access-abc',
       expires: Date.now() + 60_000,
       projectId: 'proj-xyz'
     })
     const state = mkState(dir)
     const account: Account = { credential: 'oauth', name: 'acct' }
-    const json = await resolveKey(state, account, 'antigravity')
+    const json = await resolveKey(state, account)
     expect(JSON.parse(json)).toEqual({ token: 'access-abc', projectId: 'proj-xyz' })
   })
 
@@ -50,41 +41,45 @@ describe('resolveKey', () => {
     const dir = `/tmp/resolve-${crypto.randomUUID()}`
     await writeCredentials(dir, 'acct', {
       provider: 'openai-codex',
-      refreshToken: 'r',
-      accessToken: 'raw-access-tok',
+      refresh: 'r',
+      access: 'raw-access-tok',
       expires: Date.now() + 60_000
     })
     const state = mkState(dir)
     const account: Account = { credential: 'oauth', name: 'acct' }
-    const result = await resolveKey(state, account, 'openai-codex')
+    const result = await resolveKey(state, account)
     expect(result).toBe('raw-access-tok')
   })
 
-  it('openai-codex oauth account calls refreshOpenAICodexToken and returns refreshed token when credentials are expired', async () => {
+  it('openai-codex oauth account calls registered provider refreshToken and returns refreshed access', async () => {
     const dir = `/tmp/resolve-${crypto.randomUUID()}`
     await writeCredentials(dir, 'acct', {
       provider: 'openai-codex',
-      refreshToken: 'old-r',
-      accessToken: 'old-access',
+      refresh: 'old-r',
+      access: 'old-access',
       expires: Date.now() - 1
     })
 
-    const realModule = await import('./openai-codex-oauth')
-    const stub = mock(async () => ({
+    const { registerOAuthProvider, getOAuthProvider } = await import('@mariozechner/pi-ai/oauth')
+    const previous = getOAuthProvider('openai-codex')
+    if (!previous) throw new Error('openai-codex provider not pre-registered for test')
+
+    const refreshStub = mock(async () => ({
       refresh: 'new-r',
       access: 'new-access',
       expires: Date.now() + 3600_000
     }))
-    mock.module('./openai-codex-oauth', () => ({ ...realModule, refreshOpenAICodexToken: stub }))
+    registerOAuthProvider({ ...previous, refreshToken: refreshStub })
 
     try {
       const state = mkState(dir)
       const account: Account = { credential: 'oauth', name: 'acct' }
-      const result = await resolveKey(state, account, 'openai-codex')
-      expect(stub).toHaveBeenCalledTimes(1)
+      const result = await resolveKey(state, account)
+      expect(refreshStub).toHaveBeenCalledTimes(1)
       expect(result).toBe('new-access')
     } finally {
-      mock.module('./openai-codex-oauth', () => realModule)
+      // Restore the original (preload-installed) provider
+      registerOAuthProvider(previous)
     }
   })
 })

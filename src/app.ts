@@ -36,7 +36,7 @@ export const createApp = async (opts: CreateAppOpts = {}): Promise<RouterState &
   const state = createState(options, catalog, runtime, env.authDir, telemetry)
 
   for (const [providerName, config] of Object.entries(state.options.providers)) {
-    scheduleRefresh(state, providerName, config.type, config.account)
+    scheduleRefresh(state, providerName, config.account)
   }
 
   const app = new Hono<Env>()

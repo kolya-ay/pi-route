@@ -1,16 +1,19 @@
 #!/usr/bin/env bun
 // src/cli.ts
 
-import { loginAntigravity } from './auth/antigravity-oauth'
+import { getOAuthProvider, type OAuthCredentials } from '@mariozechner/pi-ai/oauth'
+
 import { writeCredentials } from './auth/credentials'
-import { discoverEmail, loginOpenAICodex } from './auth/openai-codex-oauth'
+import { deriveName } from './auth/name-derivers'
+import { registerAllOAuthProviders } from './auth/register-all-oauth'
 import { readEnvConfig } from './config/env'
 import type { CredentialFile } from './types'
 
 const usage = `Usage:
-  pi-route login antigravity <email>
-  pi-route login codex [email]
-  pi-route serve`
+  pi-route login <provider-type> [name]
+  pi-route serve
+
+Known OAuth provider types: anthropic, openai-codex, google-antigravity`
 
 const [, , verb, target, arg2] = Bun.argv
 
@@ -20,7 +23,7 @@ const tryOpen = (url: string): void => {
       Bun.spawn([opener, url]).exited.catch(() => {})
       return
     } catch {
-      // try next
+      // try next opener
     }
   }
 }
@@ -36,35 +39,37 @@ const onAuth = ({ url }: { url: string }): void => {
 
 const onPrompt = async (): Promise<string> => ''
 
-if (verb === 'login' && target === 'antigravity') {
-  const email = arg2
-  if (!email) {
+if (verb === 'login') {
+  if (!target) {
     console.error(usage)
     process.exit(1)
   }
-  const env = readEnvConfig()
-  const creds = await loginAntigravity({ onAuth, onPrompt, onProgress: log })
-  const credentialFile: CredentialFile = {
-    provider: 'google-antigravity',
-    refreshToken: creds.refresh,
-    accessToken: creds.access,
-    expires: creds.expires,
-    ...(typeof creds.projectId === 'string' ? { projectId: creds.projectId } : {})
+
+  registerAllOAuthProviders()
+
+  const provider = getOAuthProvider(target)
+  if (!provider) {
+    console.error(`Unknown OAuth provider: "${target}"`)
+    console.error(usage)
+    process.exit(1)
   }
-  await writeCredentials(env.authDir, email, credentialFile)
-  console.log(`Logged in: antigravity/${email}`)
-} else if (verb === 'login' && target === 'codex') {
+
   const env = readEnvConfig()
-  const creds = await loginOpenAICodex({ onAuth, onPrompt, onProgress: log })
-  const email = arg2 ?? discoverEmail(creds.access)
-  const credentialFile: CredentialFile = {
-    provider: 'openai-codex',
-    refreshToken: creds.refresh,
-    accessToken: creds.access,
-    expires: creds.expires
+  const creds: OAuthCredentials = await provider.login({
+    onAuth,
+    onPrompt,
+    onProgress: log
+  })
+
+  const name = arg2 ?? deriveName(target, creds)
+  if (!name) {
+    console.error(`Name required for provider "${target}": pi-route login ${target} <name>`)
+    process.exit(1)
   }
-  await writeCredentials(env.authDir, email, credentialFile)
-  console.log(`Logged in: openai-codex/${email}`)
+
+  const credentialFile: CredentialFile = { ...creds, provider: target }
+  await writeCredentials(env.authDir, name, credentialFile)
+  console.log(`Logged in: ${target}/${name}`)
 } else if (verb === 'serve') {
   await import('./serve')
 } else {

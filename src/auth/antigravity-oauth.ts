@@ -5,7 +5,6 @@ import type {
   OAuthLoginCallbacks,
   OAuthProviderInterface
 } from '@mariozechner/pi-ai/oauth'
-import { registerOAuthProvider } from '@mariozechner/pi-ai/oauth'
 
 const CLIENT_ID = 'GOOGLE_OAUTH_CLIENT_ID_PLACEHOLDER.apps.googleusercontent.com'
 const CLIENT_SECRET = 'GOOGLE_OAUTH_CLIENT_SECRET_PLACEHOLDER'
@@ -305,27 +304,15 @@ export const loginAntigravity = async (
   }
 }
 
-let registered = false
-
-export const ensureAntigravityOAuthRegistered = (): void => {
-  if (registered) return
-
-  const provider: OAuthProviderInterface = {
-    id: 'google-antigravity',
-    name: 'Google Antigravity',
-    usesCallbackServer: true,
-
-    login: loginAntigravity,
-
-    refreshToken: async (credentials) => {
-      const refreshed = await refreshAccessToken(credentials.refresh)
-      return { ...refreshed, projectId: credentials.projectId }
-    },
-
-    getApiKey: (credentials) =>
-      JSON.stringify({ token: credentials.access, projectId: credentials.projectId })
-  }
-
-  registerOAuthProvider(provider)
-  registered = true
+export const antigravityOAuthProvider: OAuthProviderInterface = {
+  id: 'google-antigravity',
+  name: 'Google Antigravity',
+  usesCallbackServer: true,
+  login: loginAntigravity,
+  refreshToken: async (credentials) => {
+    const refreshed = await refreshAccessToken(credentials.refresh)
+    return { ...refreshed, projectId: credentials.projectId }
+  },
+  getApiKey: (credentials) =>
+    JSON.stringify({ token: credentials.access, projectId: credentials.projectId })
 }

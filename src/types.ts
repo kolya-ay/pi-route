@@ -1,5 +1,7 @@
 // src/types.ts
 
+import type { OAuthCredentials } from '@mariozechner/pi-ai/oauth'
+
 // === Provider ===
 
 export type ProviderType =
@@ -45,17 +47,12 @@ export type ResponseMetadata = {
 
 // === Accounts ===
 
-export type CredentialFile = {
+export type CredentialFile = OAuthCredentials & {
   provider: string
-  refreshToken: string
-  accessToken: string
-  expires: number
-  [key: string]: unknown
 }
 
 export type Account = { disabled?: boolean | undefined } & (
   | { credential: 'key'; key: string }
-  | { credential: 'file'; path: string }
   | { credential: 'oauth'; name: string; projectId?: string | undefined }
 )
 

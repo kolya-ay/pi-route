@@ -9,11 +9,6 @@ export const AccountSchema = z.discriminatedUnion('credential', [
     disabled: z.boolean().optional()
   }),
   z.object({
-    credential: z.literal('file'),
-    path: z.string(),
-    disabled: z.boolean().optional()
-  }),
-  z.object({
     credential: z.literal('oauth'),
     name: z.string(),
     projectId: z.string().optional(),

@@ -27,7 +27,7 @@ afterEach(() => {
 describe('scheduleRefresh', () => {
   it('is a no-op for key-credential accounts', () => {
     const state = mkState('/tmp')
-    scheduleRefresh(state, 'p1', 'openai-compatible', { credential: 'key', key: 'k' })
+    scheduleRefresh(state, 'p1', { credential: 'key', key: 'k' })
     expect(state.timers.size).toBe(0)
   })
 
@@ -35,12 +35,12 @@ describe('scheduleRefresh', () => {
     const dir = `/tmp/sched-${crypto.randomUUID()}`
     await writeCredentials(dir, 'a', {
       provider: 'google-antigravity',
-      refreshToken: 'r',
-      accessToken: 'k',
+      refresh: 'r',
+      access: 'k',
       expires: Date.now() + 120_000
     })
     const state = mkState(dir)
-    scheduleRefresh(state, 'p1', 'antigravity', {
+    scheduleRefresh(state, 'p1', {
       credential: 'oauth',
       name: 'a',
       disabled: true
@@ -50,7 +50,7 @@ describe('scheduleRefresh', () => {
 
   it('is a no-op when credential file does not exist', () => {
     const state = mkState(`/tmp/missing-${crypto.randomUUID()}`)
-    scheduleRefresh(state, 'p1', 'antigravity', { credential: 'oauth', name: 'a' })
+    scheduleRefresh(state, 'p1', { credential: 'oauth', name: 'a' })
     expect(state.timers.size).toBe(0)
   })
 
@@ -58,8 +58,8 @@ describe('scheduleRefresh', () => {
     const dir = `/tmp/sched-${crypto.randomUUID()}`
     await writeCredentials(dir, 'a', {
       provider: 'google-antigravity',
-      refreshToken: 'r',
-      accessToken: 'k',
+      refresh: 'r',
+      access: 'k',
       expires: Date.now() + 61_500 // ~1.5s from now after subtracting 60s
     })
     const state = mkState(dir)
@@ -73,7 +73,7 @@ describe('scheduleRefresh', () => {
       )
     }) as unknown as typeof fetch
 
-    scheduleRefresh(state, 'p1', 'antigravity', { credential: 'oauth', name: 'a' })
+    scheduleRefresh(state, 'p1', { credential: 'oauth', name: 'a' })
     expect(state.timers.size).toBe(1)
 
     await Bun.sleep(2500)
@@ -86,12 +86,12 @@ describe('cancelRefresh', () => {
     const dir = `/tmp/cancel-${crypto.randomUUID()}`
     await writeCredentials(dir, 'a', {
       provider: 'google-antigravity',
-      refreshToken: 'r',
-      accessToken: 'k',
+      refresh: 'r',
+      access: 'k',
       expires: Date.now() + 120_000
     })
     const state = mkState(dir)
-    scheduleRefresh(state, 'p1', 'antigravity', { credential: 'oauth', name: 'a' })
+    scheduleRefresh(state, 'p1', { credential: 'oauth', name: 'a' })
     expect(state.timers.size).toBe(1)
     cancelRefresh(state, 'a')
     expect(state.timers.size).toBe(0)
@@ -104,8 +104,8 @@ describe('refresh failure backoff', () => {
     const dir = `/tmp/fail-${crypto.randomUUID()}`
     await writeCredentials(dir, 'a', {
       provider: 'google-antigravity',
-      refreshToken: 'r',
-      accessToken: 'k',
+      refresh: 'r',
+      access: 'k',
       expires: Date.now() + 61_500
     })
     const events: Array<{ type: string }> = []
@@ -119,7 +119,7 @@ describe('refresh failure backoff', () => {
         status: 400
       })) as unknown as typeof fetch
 
-    scheduleRefresh(state, 'p1', 'antigravity', { credential: 'oauth', name: 'a' })
+    scheduleRefresh(state, 'p1', { credential: 'oauth', name: 'a' })
     // Wait long enough for first fire + 5 backoff attempts (1+2+4+8+16+32 = 63s — too long).
     // Instead, manually drive: fire one failure, then verify counter.
     await Bun.sleep(2500)

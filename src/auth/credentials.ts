@@ -2,8 +2,9 @@
 
 import { chmodSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { getOAuthProvider } from '@mariozechner/pi-ai/oauth'
 import type { RouterState } from '../state'
-import type { Account, CredentialFile, ProviderType } from '../types'
+import type { Account, CredentialFile } from '../types'
 
 export type { CredentialFile } from '../types'
 
@@ -31,25 +32,19 @@ export const writeCredentials = async (
 
 export const refreshAndStore = async (
   state: RouterState,
-  account: Account & { credential: 'oauth' },
-  providerType: ProviderType
+  account: Account & { credential: 'oauth' }
 ): Promise<CredentialFile> => {
-  if (providerType !== 'antigravity' && providerType !== 'openai-codex') {
-    throw new Error(`Cannot refresh provider type '${providerType}'`)
-  }
   const current =
     state.credentials.get(account.name) ?? (await readCredentials(state.authDir, account.name))
   state.credentials.set(account.name, current)
 
   try {
-    const { refresh, access, expires, providerLabel } = await dispatchRefresh(providerType, current)
-    const merged: CredentialFile = {
-      ...current,
-      provider: providerLabel,
-      refreshToken: refresh,
-      accessToken: access,
-      expires
+    const provider = getOAuthProvider(current.provider)
+    if (!provider) {
+      throw new Error(`Cannot refresh: no OAuth provider registered for id '${current.provider}'`)
     }
+    const refreshed = await provider.refreshToken(current)
+    const merged: CredentialFile = { ...current, ...refreshed }
     await writeCredentials(state.authDir, account.name, merged)
     state.credentials.set(account.name, merged)
     state.telemetry.emit({
@@ -66,33 +61,4 @@ export const refreshAndStore = async (
     })
     throw err
   }
-}
-
-type RefreshResult = { refresh: string; access: string; expires: number; providerLabel: string }
-
-const dispatchRefresh = async (
-  providerType: ProviderType,
-  current: CredentialFile
-): Promise<RefreshResult> => {
-  if (providerType === 'antigravity') {
-    const { refreshAccessToken } = await import('./antigravity-oauth')
-    const r = await refreshAccessToken(current.refreshToken)
-    return {
-      refresh: r.refresh,
-      access: r.access,
-      expires: r.expires,
-      providerLabel: 'google-antigravity'
-    }
-  }
-  if (providerType === 'openai-codex') {
-    const { refreshOpenAICodexToken } = await import('./openai-codex-oauth')
-    const r = await refreshOpenAICodexToken(current.refreshToken)
-    return {
-      refresh: r.refresh,
-      access: r.access,
-      expires: r.expires,
-      providerLabel: 'openai-codex'
-    }
-  }
-  throw new Error(`Cannot dispatch refresh for provider type '${providerType}'`)
 }

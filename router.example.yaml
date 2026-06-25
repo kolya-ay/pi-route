@@ -9,11 +9,11 @@
 
 # Atomic upstream connections. One provider = one account.
 providers:
-  claude-direct:
+  claude-max:
     type: anthropic
     account:
-      credential: file
-      path: ~/.claude/credentials.json
+      credential: oauth
+      name: your-email@example.com   # run: pi-route login anthropic your-email@example.com
 
   antigravity:
     type: antigravity
@@ -27,12 +27,12 @@ providers:
 #   key: {to, strategy?, when?}  → full entry
 pipeline:
   # Aliases — convenient short names for common Claude models.
-  opus:    claude-direct/claude-opus-4-7
-  sonnet:  claude-direct/claude-sonnet-4-6
-  haiku:   claude-direct/claude-haiku-4-5
+  opus:    claude-max/claude-opus-4-7
+  sonnet:  claude-max/claude-sonnet-4-6
+  haiku:   claude-max/claude-haiku-4-5
 
 # Public-surface filter for /v1/models. Empty / omitted = all reachable.
 # Use gitignore-style patterns:
-#   `claude-direct/**`       — allow everything under that prefix
+#   `claude-max/**`          — allow everything under that prefix
 #   `!**/claude-3-*`         — exclude (after allow)
 expose: []

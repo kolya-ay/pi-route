@@ -5,8 +5,8 @@ import { resolveModel } from './resolve'
 
 const opts = (over: Partial<RouterOptions> = {}): RouterOptions => ({
   providers: {
-    'claude-personal': { type: 'anthropic', account: { credential: 'file', path: '/x' } },
-    'claude-work': { type: 'anthropic', account: { credential: 'file', path: '/y' } }
+    'claude-personal': { type: 'anthropic', account: { credential: 'key', key: 'x' } },
+    'claude-work': { type: 'anthropic', account: { credential: 'key', key: 'y' } }
   },
   pipeline: [],
   expose: [],

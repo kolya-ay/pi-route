@@ -101,7 +101,7 @@ export const createDispatchHandler = (deps: DispatchDeps) => async (c: Context) 
   } as RequestInit)
 
   try {
-    const apiKey = await resolveKey(deps.state, entry.account, entry.provider.type)
+    const apiKey = await resolveKey(deps.state, entry.account)
     const response = await entry.provider.dispatch(
       {
         id: requestId,
