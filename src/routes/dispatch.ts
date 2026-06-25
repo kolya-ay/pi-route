@@ -5,9 +5,39 @@ import { stream as honoStream } from 'hono/streaming'
 
 import { resolveKey } from '../auth/resolve'
 import { resolveModel } from '../pipeline/resolve'
-import { type ProviderEntry, resolveBaseUrl } from '../providers/registry'
+import type { ProviderEntry } from '../providers/registry'
 import type { RouterState } from '../state'
 import type { TelemetryEmitter } from '../types'
+
+// Headers that must not flow from an incoming client request to the outgoing
+// upstream-provider request:
+//   - host / content-length: fetch() recomputes both from the new URL and
+//     body. Forwarding the original Host is the bug that surfaced as TLS
+//     errors on Bun (SNI taken from Host instead of URL).
+//   - hop-by-hop set (RFC 7230 §6.1): scoped to a single transport hop.
+//   - cookie / origin / referer: browser-scoped client context that providers
+//     don't need and shouldn't see.
+const STRIPPED_HEADERS = [
+  'host',
+  'content-length',
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailers',
+  'transfer-encoding',
+  'upgrade',
+  'cookie',
+  'origin',
+  'referer'
+]
+
+const buildUpstreamHeaders = (incoming: Headers): Headers => {
+  const h = new Headers(incoming)
+  for (const name of STRIPPED_HEADERS) h.delete(name)
+  return h
+}
 
 export type DispatchDeps = {
   format: 'anthropic' | 'openai'
@@ -59,12 +89,13 @@ export const createDispatchHandler = (deps: DispatchDeps) => async (c: Context) 
   const finalBody =
     finalModel !== model ? JSON.stringify({ ...parsed, model: finalModel }) : bodyText
 
-  const providerConfig = deps.state.options.providers[decision.provider]
-  const upstreamUrl = resolveBaseUrl(providerConfig?.type ?? '', providerConfig?.baseUrl)
+  // Preserve the inbound URL (including pathname) on the outgoing Request so
+  // the provider's URL rewrite can re-anchor to its own base. Using the
+  // provider's base URL here strips the endpoint segment.
   const rawReq = c.req.raw
-  const outgoingRequest = new Request(upstreamUrl, {
+  const outgoingRequest = new Request(rawReq.url, {
     method: rawReq.method,
-    headers: rawReq.headers,
+    headers: buildUpstreamHeaders(rawReq.headers),
     body: finalBody,
     duplex: 'half'
   } as RequestInit)

@@ -29,7 +29,13 @@ export const createPassthroughProvider = (
     }
 
     const originalUrl = new URL(request.rawRequest.url)
-    const rewrittenUrl = new URL(originalUrl.pathname, baseUrl).toString()
+    // Strip pi-route's /v1 API-root prefix to get the endpoint tail, then join
+    // onto the provider's base URL preserving the base's path (e.g. /api/v1
+    // for openrouter). `new URL(absolutePath, base)` would REPLACE the base
+    // path; relative-tail + trailing-slash base appends correctly.
+    const endpointTail = originalUrl.pathname.replace(/^\/v1\//, '')
+    const baseWithSlash = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`
+    const rewrittenUrl = new URL(endpointTail + originalUrl.search, baseWithSlash).toString()
 
     const upstream = new Request(rewrittenUrl, {
       method: request.rawRequest.method,
@@ -42,9 +48,26 @@ export const createPassthroughProvider = (
     const latencyMs = Date.now() - start
 
     const contentType = response.headers.get('content-type') ?? ''
-    const body: ProviderResponse['body'] = contentType.includes('text/event-stream')
-      ? (response.body as ReadableStream)
-      : ((await response.json()) as Record<string, unknown>)
+    let body: ProviderResponse['body']
+    if (contentType.includes('text/event-stream')) {
+      body = response.body as ReadableStream
+    } else {
+      // Read once, then parse. response.json() throws an opaque "Failed to
+      // parse JSON" when upstreams return text/* error pages (NVIDIA 404,
+      // Cloudflare HTML, etc.); reading text() first lets us surface the
+      // real upstream body to the caller.
+      const text = await response.text()
+      try {
+        body = JSON.parse(text) as Record<string, unknown>
+      } catch {
+        body = {
+          error: 'upstream returned non-JSON response',
+          upstreamStatus: response.status,
+          upstreamContentType: contentType || null,
+          upstreamBody: text.length > 2048 ? `${text.slice(0, 2048)}…` : text
+        }
+      }
+    }
 
     return {
       status: response.status,

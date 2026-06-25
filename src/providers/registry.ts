@@ -9,8 +9,11 @@ import { createPassthroughProvider } from './passthrough'
 export type ProviderEntry = { provider: Provider; account: Account }
 
 const DEFAULT_BASE_URLS: Partial<Record<string, string>> = {
-  anthropic: 'https://api.anthropic.com',
-  openai: 'https://api.openai.com',
+  // Each base URL must include the provider's API-version prefix; the
+  // passthrough joins inbound endpoint tails (e.g. `chat/completions`) onto
+  // the base as a relative path.
+  anthropic: 'https://api.anthropic.com/v1',
+  openai: 'https://api.openai.com/v1',
   cerebras: 'https://api.cerebras.ai/v1',
   openrouter: 'https://openrouter.ai/api/v1',
   antigravity: 'https://daily-cloudcode-pa.googleapis.com',

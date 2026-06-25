@@ -1,0 +1,38 @@
+# pi-route example config.
+#
+# Operational settings (port, host, tokens, paths) live in env vars:
+#   PI_ROUTE_PORT    listen port            (default 3000)
+#   PI_ROUTE_HOST    listen host            (default 127.0.0.1)
+#   PI_ROUTE_TOKEN   comma-separated client bearer tokens; unset = no gate
+#   PI_ROUTE_CONFIG  path to this file      (default ./router.yaml)
+#   PI_ROUTE_AUTH    OAuth + state.json dir (default ~/.config/pi-route/auth)
+
+# Atomic upstream connections. One provider = one account.
+providers:
+  claude-direct:
+    type: anthropic
+    account:
+      credential: file
+      path: ~/.claude/credentials.json
+
+  antigravity:
+    type: antigravity
+    account:
+      credential: oauth
+      name: user@gmail.com
+
+# Routing pipeline. Each entry's YAML value shape declares its semantics:
+#   key: target           → alias (rewrite bare name to target)
+#   key: [m1, m2, ...]    → pool (balance across members; default round-robin)
+#   key: {to, strategy?, when?}  → full entry
+pipeline:
+  # Aliases — convenient short names for common Claude models.
+  opus:    claude-direct/claude-opus-4-7
+  sonnet:  claude-direct/claude-sonnet-4-6
+  haiku:   claude-direct/claude-haiku-4-5
+
+# Public-surface filter for /v1/models. Empty / omitted = all reachable.
+# Use gitignore-style patterns:
+#   `claude-direct/**`       — allow everything under that prefix
+#   `!**/claude-3-*`         — exclude (after allow)
+expose: []

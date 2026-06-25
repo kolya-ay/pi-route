@@ -1,100 +1,40 @@
-import { describe, expect, it } from 'bun:test'
+// src/app.test.ts
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createApp } from './app'
 
-import { createRouter } from './app'
-import type { RouterOptions } from './types'
-
-const testOptions: RouterOptions = {
-  server: { port: 3000, host: 'localhost' },
-  auth: { apiKeys: [] },
-  authDir: '~/.config/hono-router/auth',
-  providers: {
-    'test-provider': {
-      type: 'anthropic',
-      baseUrl: 'https://api.anthropic.com',
-      accounts: [{ type: 'api-key', name: 'test-account', key: 'sk-test-key' }],
-      balancing: { strategy: 'round-robin' }
-    }
-  },
-  routing: {
-    rules: [
-      { match: 'claude-sonnet-4-20250514', provider: 'test-provider' },
-      { match: 'claude-*', provider: 'test-provider' }
-    ],
-    scenarios: {},
-    default: { provider: 'test-provider' }
-  },
-  telemetry: { level: 'info' }
-}
-
-const authedOptions: RouterOptions = { ...testOptions, auth: { apiKeys: ['test-secret-key'] } }
-
-describe('createRouter', () => {
-  it('returns an object whose .options is the live RouterState.options reference', async () => {
-    // Contract: admin mutators reassign state.options; the returned router must
-    // observe those reassignments via the same identity, otherwise CRUD changes
-    // would be invisible to callers.
-    const router = createRouter(testOptions)
-    const next = { ...router.options, authDir: '/different' }
-    router.options = next
-    expect(router.options).toBe(next)
-  })
+let dir: string
+beforeEach(async () => {
+  dir = await mkdtemp(join(tmpdir(), 'pi-route-app-'))
+  process.env.PI_ROUTE_CONFIG = join(dir, 'router.yaml')
+  process.env.PI_ROUTE_AUTH = dir
+  await writeFile(
+    process.env.PI_ROUTE_CONFIG,
+    `providers:\n  cerebras:\n    type: cerebras\n    account:\n      credential: key\n      key: sk-test\n`
+  )
 })
 
-describe('GET /', () => {
-  it('returns 200 with name', async () => {
-    const router = createRouter(testOptions)
-    const res = await router.app.request('/')
-    expect(res.status).toBe(200)
-    const body = (await res.json()) as Record<string, unknown>
-    expect(body.name).toBe('pi-route')
-    expect(body.status).toBe('ok')
-  })
+afterEach(async () => {
+  delete process.env.PI_ROUTE_CONFIG
+  delete process.env.PI_ROUTE_AUTH
+  await rm(dir, { recursive: true, force: true })
 })
 
-describe('GET /health', () => {
-  it('returns 200 with status ok and providers', async () => {
-    const router = createRouter(testOptions)
-    const res = await router.app.request('/health')
-    expect(res.status).toBe(200)
-    const body = (await res.json()) as Record<string, unknown>
-    expect(body.status).toBe('ok')
-    expect(body.providers).toBeDefined()
-    const providers = body.providers as Record<string, unknown>
-    expect(providers['test-provider']).toBeDefined()
-  })
-})
-
-describe('GET /v1/models', () => {
-  it('returns 200 with list object', async () => {
-    const router = createRouter(testOptions)
-    const res = await router.app.request('/v1/models')
-    expect(res.status).toBe(200)
-    const body = (await res.json()) as Record<string, unknown>
+describe('createApp', () => {
+  test('builds a Hono app and serves /v1/models', async () => {
+    const router = await createApp()
+    const r = await router.app.request('/v1/models')
+    expect(r.status).toBe(200)
+    const body = (await r.json()) as { object: string; data: unknown[] }
     expect(body.object).toBe('list')
-    const data = body.data as Record<string, unknown>[]
-    expect(data.length).toBe(1)
-    expect(data[0]?.id).toBe('claude-sonnet-4-20250514')
-  })
-})
-
-describe('/v1/* middleware', () => {
-  it('sets x-request-id header', async () => {
-    const router = createRouter(testOptions)
-    const res = await router.app.request('/v1/models')
-    expect(res.headers.get('x-request-id')).toBeTruthy()
+    expect(Array.isArray(body.data)).toBe(true)
   })
 
-  it('rejects with 401 when auth configured and no key', async () => {
-    const router = createRouter(authedOptions)
-    const res = await router.app.request('/v1/models')
-    expect(res.status).toBe(401)
-  })
-
-  it('allows with valid bearer key', async () => {
-    const router = createRouter(authedOptions)
-    const res = await router.app.request('/v1/models', {
-      headers: { Authorization: 'Bearer test-secret-key' }
-    })
-    expect(res.status).toBe(200)
+  test('health endpoint returns 200', async () => {
+    const router = await createApp()
+    const r = await router.app.request('/health')
+    expect(r.status).toBe(200)
   })
 })

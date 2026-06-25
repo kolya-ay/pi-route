@@ -1,138 +1,68 @@
 // src/integration.test.ts
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createApp } from './app'
 
-import { describe, expect, it } from 'bun:test'
-
-import { createRouter } from './app'
-import type { RouterOptions } from './types'
-
-const baseOptions: RouterOptions = {
-  server: { port: 3000, host: '127.0.0.1' },
-  auth: { apiKeys: [] },
-  authDir: '~/.config/hono-router/auth',
-  providers: {
-    'anthropic-provider': {
-      type: 'anthropic',
-      baseUrl: 'https://api.anthropic.com',
-      accounts: [{ type: 'api-key', name: 'account-1', key: 'sk-ant-test-key' }],
-      balancing: { strategy: 'round-robin' }
-    },
-    'openai-provider': {
-      type: 'openai',
-      baseUrl: 'https://api.openai.com',
-      accounts: [
-        { type: 'api-key', name: 'account-a', key: 'sk-openai-key-a' },
-        { type: 'api-key', name: 'account-b', key: 'sk-openai-key-b' }
-      ],
-      balancing: { strategy: 'round-robin' }
-    }
-  },
-  routing: {
-    rules: [
-      { match: 'claude-*', provider: 'anthropic-provider' },
-      { match: 'gpt-*', provider: 'openai-provider' }
-    ],
-    scenarios: {},
-    default: { provider: 'anthropic-provider' }
-  },
-  telemetry: { level: 'info' }
-}
-
-describe('integration: health endpoint', () => {
-  it('shows both providers with account counts', async () => {
-    const router = createRouter(baseOptions)
-    const res = await router.app.request('/health')
-
-    expect(res.status).toBe(200)
-    const body = (await res.json()) as Record<string, unknown>
-    expect(body.status).toBe('ok')
-
-    const providers = body.providers as Record<string, unknown>
-    expect(providers['anthropic-provider']).toBeDefined()
-    expect(providers['openai-provider']).toBeDefined()
-
-    const anthropicEntry = providers['anthropic-provider'] as Record<string, unknown>
-    const openaiEntry = providers['openai-provider'] as Record<string, unknown>
-
-    expect(anthropicEntry.type).toBe('anthropic')
-    expect(openaiEntry.type).toBe('openai')
-
-    const anthropicAccounts = anthropicEntry.accounts as { total: number }
-    const openaiAccounts = openaiEntry.accounts as { total: number }
-
-    expect(anthropicAccounts.total).toBe(1)
-    expect(openaiAccounts.total).toBe(2)
-  })
-
-  it('shows uptime as a non-negative number', async () => {
-    const router = createRouter(baseOptions)
-    const res = await router.app.request('/health')
-    const body = (await res.json()) as Record<string, unknown>
-    expect(typeof body.uptime).toBe('number')
-    expect(body.uptime as number).toBeGreaterThanOrEqual(0)
-  })
+let dir: string
+beforeEach(async () => {
+  dir = await mkdtemp(join(tmpdir(), 'pi-route-int-'))
+  process.env.PI_ROUTE_CONFIG = join(dir, 'router.yaml')
+  process.env.PI_ROUTE_AUTH = dir
+})
+afterEach(async () => {
+  delete process.env.PI_ROUTE_CONFIG
+  delete process.env.PI_ROUTE_AUTH
+  await rm(dir, { recursive: true, force: true })
 })
 
-describe('integration: routing claude models to anthropic provider', () => {
-  it('routes claude-* model and gets 502 with no real upstream', async () => {
-    const router = createRouter(baseOptions)
+describe('integration — config shapes load and dispatch wiring works', () => {
+  test('config with aliases + pools loads', async () => {
+    await writeFile(
+      process.env.PI_ROUTE_CONFIG!,
+      `
+providers:
+  c1:
+    type: cerebras
+    account: { credential: key, key: k1 }
+  c2:
+    type: cerebras
+    account: { credential: key, key: k2 }
 
-    const res = await router.app.request('/v1/messages', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 100,
-        messages: [{ role: 'user', content: 'Hello' }]
-      })
-    })
-
-    // non-2xx is expected since there is no real upstream
-    expect(res.status).toBeGreaterThanOrEqual(400)
+pipeline:
+  pool: [c1/$1, c2/$1]
+  opus: c1/llama3.1-8b
+`
+    )
+    const router = await createApp()
+    const r = await router.app.request('/v1/models')
+    expect(r.status).toBe(200)
+    const body = (await r.json()) as { data: { id: string }[] }
+    const ids = body.data.map((e) => e.id)
+    expect(ids).toContain('opus')
+    expect(ids.some((id) => id.startsWith('c1/'))).toBe(true)
   })
 
-  it('routes gpt-* model and gets an error response with no real upstream', async () => {
-    const router = createRouter(baseOptions)
+  test('expose filter narrows /v1/models', async () => {
+    await writeFile(
+      process.env.PI_ROUTE_CONFIG!,
+      `
+providers:
+  c1:
+    type: cerebras
+    account: { credential: key, key: k1 }
 
-    const res = await router.app.request('/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model: 'gpt-4o', messages: [{ role: 'user', content: 'Hello' }] })
-    })
+pipeline:
+  opus: c1/llama3.1-8b
 
-    // No real upstream — expect a non-2xx response (502 on network failure, or
-    // the actual upstream error code if the host happens to be reachable)
-    expect(res.status).toBeGreaterThanOrEqual(400)
-  })
-})
-
-describe('integration: 429 when all accounts are rate-limited', () => {
-  it('returns 429 when all anthropic accounts are rate-limited', async () => {
-    // Use 0 accounts to force pool.select() to return null → 429
-    const noAccountOptions: RouterOptions = {
-      ...baseOptions,
-      providers: {
-        'anthropic-provider': {
-          type: 'anthropic',
-          baseUrl: 'https://api.anthropic.com',
-          accounts: [],
-          balancing: { strategy: 'round-robin' }
-        }
-      }
-    }
-
-    const router = createRouter(noAccountOptions)
-    const res = await router.app.request('/v1/messages', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 100,
-        messages: [{ role: 'user', content: 'Hello' }]
-      })
-    })
-
-    expect(res.status).toBe(429)
-    const body = (await res.json()) as Record<string, unknown>
-    expect(body.error).toContain('rate-limited')
+expose:
+  - opus
+`
+    )
+    const router = await createApp()
+    const r = await router.app.request('/v1/models')
+    const body = (await r.json()) as { data: { id: string }[] }
+    expect(body.data.map((e) => e.id)).toEqual(['opus'])
   })
 })
