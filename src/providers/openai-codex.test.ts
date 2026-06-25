@@ -9,12 +9,12 @@ const makeRequest = (opts: { stream: boolean }): IncomingRequest => ({
   rawRequest: new Request('http://localhost/v1/chat/completions', {
     method: 'POST',
     body: JSON.stringify({
-      model: 'gpt-4.1-codex',
+      model: 'gpt-5.3-codex',
       messages: [{ role: 'user', content: 'hi' }],
       stream: opts.stream
     })
   }),
-  model: 'gpt-4.1-codex',
+  model: 'gpt-5.3-codex',
   stream: opts.stream
 })
 
@@ -49,7 +49,7 @@ const pushDoneEvent = (stream: AssistantMessageEventStream) => {
         content: [{ type: 'text', text: 'hello' }],
         api: 'openai-codex-responses',
         provider: 'openai-codex-responses',
-        model: 'gpt-4.1-codex',
+        model: 'gpt-5.3-codex',
         usage: {
           input: 1,
           output: 1,
@@ -70,7 +70,7 @@ describe('createOpenAICodexProvider', () => {
     const piAi = await import('@mariozechner/pi-ai')
     const { stub, restore } = await stubCodexStream((model, _ctx, opts) => {
       expect((opts as { apiKey?: string }).apiKey).toBe('jwt-here')
-      expect((model as { id: string }).id).toBe('gpt-4.1-codex')
+      expect((model as { id: string }).id).toBe('gpt-5.3-codex')
       const stream = piAi.createAssistantMessageEventStream()
       pushDoneEvent(stream)
       return stream

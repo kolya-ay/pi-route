@@ -1,6 +1,6 @@
 // src/providers/openai-codex.ts
 
-import type { AssistantMessage, Model } from '@mariozechner/pi-ai'
+import { type AssistantMessage, getModel } from '@mariozechner/pi-ai'
 import { streamOpenAICodexResponses } from '@mariozechner/pi-ai/openai-codex-responses'
 
 import type { Account, IncomingRequest, Provider, ProviderResponse } from '../types'
@@ -28,12 +28,21 @@ export const createOpenAICodexProvider = (name: string): Provider => ({
     const context =
       request.format === 'anthropic' ? anthropicToContext(body) : openaiToContext(body)
 
-    const model = {
-      id: request.model,
-      api: 'openai-codex-responses',
-      provider: 'openai-codex-responses',
-      maxTokens: (body.max_tokens as number) ?? 8192
-    } as Model<'openai-codex-responses'>
+    // Use pi-ai's catalog entry — pi-ai's response code reads model.input,
+    // model.cost, etc., so a hand-rolled stub crashes at runtime
+    // ("undefined is not an object: model.input.includes").
+    const catalogModel = getModel(
+      'openai-codex',
+      request.model as Parameters<typeof getModel<'openai-codex', never>>[1]
+    )
+    if (!catalogModel) {
+      throw new Error(`openai-codex model "${request.model}" not in pi-ai catalog`)
+    }
+    const requestedMax = body.max_tokens as number | undefined
+    const model =
+      typeof requestedMax === 'number'
+        ? { ...catalogModel, maxTokens: Math.min(requestedMax, catalogModel.maxTokens) }
+        : catalogModel
 
     const eventStream = streamOpenAICodexResponses(model, context, { apiKey })
 
