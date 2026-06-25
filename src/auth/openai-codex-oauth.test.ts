@@ -8,7 +8,23 @@ const makeJwt = (payload: Record<string, unknown>): string => {
 }
 
 describe('discoverEmail', () => {
-  it('returns the email claim from a valid JWT', () => {
+  it('returns the email from the namespaced OpenAI profile claim', () => {
+    const token = makeJwt({
+      'https://api.openai.com/profile': { email: 'user@example.com' },
+      sub: 'abc'
+    })
+    expect(discoverEmail(token)).toBe('user@example.com')
+  })
+
+  it('prefers the namespaced claim over a stray top-level email', () => {
+    const token = makeJwt({
+      'https://api.openai.com/profile': { email: 'real@example.com' },
+      email: 'stale@example.com'
+    })
+    expect(discoverEmail(token)).toBe('real@example.com')
+  })
+
+  it('falls back to a top-level email claim when namespaced profile is absent', () => {
     const token = makeJwt({ email: 'user@example.com', sub: 'abc' })
     expect(discoverEmail(token)).toBe('user@example.com')
   })

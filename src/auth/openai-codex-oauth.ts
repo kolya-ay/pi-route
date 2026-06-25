@@ -19,9 +19,16 @@ const decodeJwtPayload = (token: string): Record<string, unknown> => {
   }
 }
 
+// OpenAI's access-token JWT follows Auth0's namespaced custom-claims
+// convention: user-identifying fields live under the URL-keyed `profile`
+// object, not at the top level. Top-level `email` is kept as a defensive
+// fallback in case OpenAI/pi-ai ever changes the shape.
+const PROFILE_CLAIM = 'https://api.openai.com/profile'
+
 export const discoverEmail = (accessToken: string): string => {
   const payload = decodeJwtPayload(accessToken)
-  const email = payload.email
+  const profile = payload[PROFILE_CLAIM] as { email?: unknown } | undefined
+  const email = profile?.email ?? payload.email
   if (typeof email !== 'string' || email.length === 0) {
     throw new Error(
       `OpenAI Codex access token missing 'email' claim. JWT payload keys: ${Object.keys(payload).join(', ')}`
