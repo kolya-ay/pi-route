@@ -62,6 +62,126 @@ const toAsyncIterable = async function* (
   }
 }
 
+/** Parse raw SSE text into ordered list of {event, data} pairs. */
+const parseSseEvents = (raw: string): { event: string; data: unknown }[] => {
+  const results: { event: string; data: unknown }[] = []
+  for (const block of raw.split('\n\n')) {
+    const trimmed = block.trim()
+    if (!trimmed) continue
+    const eventLine = trimmed.split('\n').find((l) => l.startsWith('event: '))
+    const dataLine = trimmed.split('\n').find((l) => l.startsWith('data: '))
+    if (eventLine && dataLine) {
+      results.push({
+        event: eventLine.slice(7),
+        data: JSON.parse(dataLine.slice(6))
+      })
+    }
+  }
+  return results
+}
+
+const drainStream = async (stream: ReadableStream<Uint8Array>): Promise<string> => {
+  const reader = stream.getReader()
+  const decoder = new TextDecoder()
+  const chunks: string[] = []
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(decoder.decode(value, { stream: true }))
+  }
+  return chunks.join('')
+}
+
+// --- Anthropic SSE contentIndex bug-fix tests ---
+
+describe('createAnthropicSseStream - contentIndex state machine', () => {
+  it('thinking-then-text WITHOUT thinking_end: auto-closes thinking block at index 0', async () => {
+    const partial = makePartial()
+    const events: AssistantMessageEvent[] = [
+      { type: 'start', partial },
+      { type: 'thinking_start', contentIndex: 0, partial },
+      { type: 'thinking_delta', contentIndex: 0, delta: 'hmm', partial },
+      // No thinking_end — text_start arrives with new contentIndex
+      { type: 'text_start', contentIndex: 1, partial },
+      { type: 'text_delta', contentIndex: 1, delta: 'answer', partial },
+      { type: 'text_end', contentIndex: 1, content: 'answer', partial },
+      { type: 'done', reason: 'stop', message: makePartial() }
+    ]
+    const raw = await drainStream(createAnthropicSseStream(toAsyncIterable(events), 'r4', 'model'))
+    const evts = parseSseEvents(raw)
+    const types = evts.map((e) => e.event)
+    // thinking_start → thinking_delta → auto content_block_stop[0] → text content_block_start[1] → text_delta → text content_block_stop[1]
+    expect(types).toEqual([
+      'message_start',
+      'content_block_start',
+      'content_block_delta',
+      'content_block_stop', // auto-emitted for thinking block
+      'content_block_start',
+      'content_block_delta',
+      'content_block_stop',
+      'message_delta',
+      'message_stop'
+    ])
+    expect((evts[1]!.data as Record<string, unknown>).index).toBe(0)
+    expect((evts[1]!.data as Record<string, unknown>).content_block).toMatchObject({
+      type: 'thinking'
+    })
+    expect((evts[3]!.data as Record<string, unknown>).index).toBe(0) // auto-close for thinking
+    expect((evts[4]!.data as Record<string, unknown>).index).toBe(1)
+    expect((evts[4]!.data as Record<string, unknown>).content_block).toMatchObject({ type: 'text' })
+    expect((evts[6]!.data as Record<string, unknown>).index).toBe(1)
+  })
+
+  it('done while block open: emits content_block_stop before message_delta', async () => {
+    const partial = makePartial()
+    const events: AssistantMessageEvent[] = [
+      { type: 'start', partial },
+      { type: 'text_start', contentIndex: 0, partial },
+      { type: 'text_delta', contentIndex: 0, delta: 'incomplete', partial },
+      // No text_end
+      { type: 'done', reason: 'stop', message: makePartial() }
+    ]
+    const raw = await drainStream(createAnthropicSseStream(toAsyncIterable(events), 'r5', 'model'))
+    const evts = parseSseEvents(raw)
+    const types = evts.map((e) => e.event)
+    expect(types).toEqual([
+      'message_start',
+      'content_block_start',
+      'content_block_delta',
+      'content_block_stop', // auto-emitted before done
+      'message_delta',
+      'message_stop'
+    ])
+    expect((evts[3]!.data as Record<string, unknown>).index).toBe(0)
+  })
+
+  it('error mid-stream while block open: emits content_block_stop then error', async () => {
+    const partial = makePartial()
+    const events: AssistantMessageEvent[] = [
+      { type: 'start', partial },
+      { type: 'text_start', contentIndex: 0, partial },
+      { type: 'text_delta', contentIndex: 0, delta: 'partial', partial },
+      {
+        type: 'error',
+        reason: 'error',
+        error: makePartial({ stopReason: 'error', errorMessage: 'upstream failed' })
+      }
+    ]
+    const raw = await drainStream(createAnthropicSseStream(toAsyncIterable(events), 'r7', 'model'))
+    const evts = parseSseEvents(raw)
+    const types = evts.map((e) => e.event)
+    expect(types).toEqual([
+      'message_start',
+      'content_block_start',
+      'content_block_delta',
+      'content_block_stop', // auto-emitted before error
+      'error'
+    ])
+    expect((evts[3]!.data as Record<string, unknown>).index).toBe(0)
+    expect((evts[4]!.data as Record<string, unknown>).type).toBe('error')
+  })
+})
+
 // --- Anthropic SSE tests ---
 
 describe('createAnthropicSseStream', () => {

@@ -29,12 +29,16 @@ const sseDone = (): string => 'data: [DONE]\n\n'
 
 // --- Anthropic SSE streaming ---
 
+type SseState = { openBlockIndex: number | undefined }
+
+const closeBlockSse = (index: number): string =>
+  sseEvent('content_block_stop', { type: 'content_block_stop', index })
+
 const anthropicEventToSse = (
   event: AssistantMessageEvent,
   requestId: string,
   model: string,
-  getBlockIndex: () => number,
-  advanceBlockIndex: () => void
+  state: SseState
 ): string => {
   switch (event.type) {
     case 'start':
@@ -57,87 +61,130 @@ const anthropicEventToSse = (
         }
       })
 
-    case 'text_start':
-      return sseEvent('content_block_start', {
-        type: 'content_block_start',
-        index: getBlockIndex(),
-        content_block: { type: 'text', text: '' }
-      })
+    case 'text_start': {
+      const out: string[] = []
+      if (state.openBlockIndex !== undefined && state.openBlockIndex !== event.contentIndex) {
+        out.push(closeBlockSse(state.openBlockIndex))
+      }
+      state.openBlockIndex = event.contentIndex
+      out.push(
+        sseEvent('content_block_start', {
+          type: 'content_block_start',
+          index: event.contentIndex,
+          content_block: { type: 'text', text: '' }
+        })
+      )
+      return out.join('')
+    }
 
     case 'text_delta':
       return sseEvent('content_block_delta', {
         type: 'content_block_delta',
-        index: getBlockIndex(),
+        index: event.contentIndex,
         delta: { type: 'text_delta', text: event.delta }
       })
 
     case 'text_end': {
-      const idx = getBlockIndex()
-      advanceBlockIndex()
-      return sseEvent('content_block_stop', { type: 'content_block_stop', index: idx })
+      const out = closeBlockSse(event.contentIndex)
+      if (state.openBlockIndex === event.contentIndex) state.openBlockIndex = undefined
+      return out
     }
 
-    case 'thinking_start':
-      return sseEvent('content_block_start', {
-        type: 'content_block_start',
-        index: getBlockIndex(),
-        content_block: { type: 'thinking', thinking: '' }
-      })
+    case 'thinking_start': {
+      const out: string[] = []
+      if (state.openBlockIndex !== undefined && state.openBlockIndex !== event.contentIndex) {
+        out.push(closeBlockSse(state.openBlockIndex))
+      }
+      state.openBlockIndex = event.contentIndex
+      out.push(
+        sseEvent('content_block_start', {
+          type: 'content_block_start',
+          index: event.contentIndex,
+          content_block: { type: 'thinking', thinking: '' }
+        })
+      )
+      return out.join('')
+    }
 
     case 'thinking_delta':
       return sseEvent('content_block_delta', {
         type: 'content_block_delta',
-        index: getBlockIndex(),
+        index: event.contentIndex,
         delta: { type: 'thinking_delta', thinking: event.delta }
       })
 
     case 'thinking_end': {
-      const idx = getBlockIndex()
-      advanceBlockIndex()
-      return sseEvent('content_block_stop', { type: 'content_block_stop', index: idx })
+      const out = closeBlockSse(event.contentIndex)
+      if (state.openBlockIndex === event.contentIndex) state.openBlockIndex = undefined
+      return out
     }
 
     case 'toolcall_start': {
+      const out: string[] = []
+      if (state.openBlockIndex !== undefined && state.openBlockIndex !== event.contentIndex) {
+        out.push(closeBlockSse(state.openBlockIndex))
+      }
+      state.openBlockIndex = event.contentIndex
       const toolCallContent = event.partial.content[event.contentIndex] as ToolCall | undefined
-      return sseEvent('content_block_start', {
-        type: 'content_block_start',
-        index: getBlockIndex(),
-        content_block: {
-          type: 'tool_use',
-          id: toolCallContent?.id ?? '',
-          name: toolCallContent?.name ?? '',
-          input: {}
-        }
-      })
+      out.push(
+        sseEvent('content_block_start', {
+          type: 'content_block_start',
+          index: event.contentIndex,
+          content_block: {
+            type: 'tool_use',
+            id: toolCallContent?.id ?? '',
+            name: toolCallContent?.name ?? '',
+            input: {}
+          }
+        })
+      )
+      return out.join('')
     }
 
     case 'toolcall_delta':
       return sseEvent('content_block_delta', {
         type: 'content_block_delta',
-        index: getBlockIndex(),
+        index: event.contentIndex,
         delta: { type: 'input_json_delta', partial_json: event.delta }
       })
 
     case 'toolcall_end': {
-      const idx = getBlockIndex()
-      advanceBlockIndex()
-      return sseEvent('content_block_stop', { type: 'content_block_stop', index: idx })
+      const out = closeBlockSse(event.contentIndex)
+      if (state.openBlockIndex === event.contentIndex) state.openBlockIndex = undefined
+      return out
     }
 
-    case 'done':
-      return (
+    case 'done': {
+      const tail: string[] = []
+      if (state.openBlockIndex !== undefined) {
+        tail.push(closeBlockSse(state.openBlockIndex))
+        state.openBlockIndex = undefined
+      }
+      tail.push(
         sseEvent('message_delta', {
           type: 'message_delta',
           delta: { stop_reason: mapAnthropicStopReason(event.reason), stop_sequence: null },
           usage: { output_tokens: event.message.usage.output }
-        }) + sseEvent('message_stop', { type: 'message_stop' })
+        })
       )
+      tail.push(sseEvent('message_stop', { type: 'message_stop' }))
+      return tail.join('')
+    }
 
-    case 'error':
-      return sseEvent('error', {
-        type: 'error',
-        error: { type: 'api_error', message: event.error.errorMessage ?? 'Unknown error' }
-      })
+    case 'error': {
+      const tail: string[] = []
+      if (state.openBlockIndex !== undefined) {
+        tail.push(closeBlockSse(state.openBlockIndex))
+        state.openBlockIndex = undefined
+      }
+      tail.push(
+        sseEvent('error', {
+          type: 'error',
+          error: { type: 'api_error', message: event.error.errorMessage ?? 'Unknown error' }
+        })
+      )
+      return tail.join('')
+    }
   }
 }
 
@@ -147,7 +194,7 @@ export const createAnthropicSseStream = (
   model: string
 ): ReadableStream<Uint8Array> => {
   const encoder = new TextEncoder()
-  const state = { blockIndex: 0 }
+  const state: SseState = { openBlockIndex: undefined }
   const iterator = events[Symbol.asyncIterator]()
 
   return new ReadableStream({
@@ -157,15 +204,7 @@ export const createAnthropicSseStream = (
         controller.close()
         return
       }
-      const sse = anthropicEventToSse(
-        value,
-        requestId,
-        model,
-        () => state.blockIndex,
-        () => {
-          state.blockIndex += 1
-        }
-      )
+      const sse = anthropicEventToSse(value, requestId, model, state)
       controller.enqueue(encoder.encode(sse))
     }
   })
@@ -311,7 +350,6 @@ export const createOpenAiSseStream = (
           controller.enqueue(encoder.encode(sse))
           return
         }
-        // Skip null events (text_start, text_end, thinking_*, toolcall_end)
       }
     }
   })
