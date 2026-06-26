@@ -11,6 +11,11 @@ import {
   openaiMessageToJson
 } from './to-sse'
 
+// Self-heal transient 429/5xx via pi-ai's SDK-level retry. 3 attempts caps
+// Codex's `usage_limit_reached` retry storm; 30s caps the per-attempt wait
+// before we surface the error to the client.
+export const RETRY_OPTIONS = { maxRetries: 3, maxRetryDelayMs: 30_000 } as const
+
 export const capMaxTokens = <M extends { maxTokens: number }>(
   model: M,
   body: Record<string, unknown>

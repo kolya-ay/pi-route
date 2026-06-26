@@ -3,7 +3,13 @@
 import { getModel } from '@mariozechner/pi-ai'
 import { streamOpenAICodexResponses } from '@mariozechner/pi-ai/openai-codex-responses'
 import type { Account, IncomingRequest, Provider, ProviderResponse } from '../types'
-import { capMaxTokens, jsonResponse, makeMetadata, streamingResponse } from './pi-ai-runtime'
+import {
+  capMaxTokens,
+  jsonResponse,
+  makeMetadata,
+  RETRY_OPTIONS,
+  streamingResponse
+} from './pi-ai-runtime'
 import { anthropicToContext, openaiToContext } from './to-context'
 
 export const createOpenAICodexProvider = (name: string): Provider => ({
@@ -34,7 +40,8 @@ export const createOpenAICodexProvider = (name: string): Provider => ({
     const eventStream = streamOpenAICodexResponses(model, context, {
       apiKey,
       maxTokens: model.maxTokens,
-      signal: request.rawRequest.signal
+      signal: request.rawRequest.signal,
+      ...RETRY_OPTIONS
     })
     const metadata = makeMetadata(request, name, account, start)
 

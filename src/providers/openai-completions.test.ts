@@ -225,6 +225,26 @@ describe('createOpenAICompletionsProvider', () => {
     }
   })
 
+  it('passes maxRetries=3 and maxRetryDelayMs=30000 to pi-ai', async () => {
+    let capturedOpts: unknown
+    const { restore } = await stubCompletions((_m, _ctx, opts) => {
+      capturedOpts = opts
+      const ev = createAssistantMessageEventStream()
+      pushDone(ev, 'meta/llama-3.1-8b-instruct')
+      return ev
+    })
+    try {
+      const p = createOpenAICompletionsProvider('nvidia', 'openai-compatible', 'https://x/v1')
+      const req = makeRequest({ format: 'openai', stream: false })
+      await p.dispatch(req, account, 'k')
+      const o = capturedOpts as { maxRetries: number; maxRetryDelayMs: number }
+      expect(o.maxRetries).toBe(3)
+      expect(o.maxRetryDelayMs).toBe(30_000)
+    } finally {
+      restore()
+    }
+  })
+
   it('propagates client AbortSignal as opts.signal', async () => {
     let capturedOpts: unknown
     const { restore } = await stubCompletions((_m, _ctx, opts) => {

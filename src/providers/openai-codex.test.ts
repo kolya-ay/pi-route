@@ -88,6 +88,27 @@ describe('createOpenAICodexProvider', () => {
     }
   })
 
+  it('passes maxRetries=3 and maxRetryDelayMs=30000 to pi-ai', async () => {
+    const piAi = await import('@mariozechner/pi-ai')
+    let capturedOpts: unknown
+    const { restore } = await stubCodexStream((_m, _ctx, opts) => {
+      capturedOpts = opts
+      const stream = piAi.createAssistantMessageEventStream()
+      pushDoneEvent(stream)
+      return stream
+    })
+
+    try {
+      const provider = createOpenAICodexProvider('codex')
+      await provider.dispatch(makeRequest({ stream: false }), account, 'jwt-here')
+      const o = capturedOpts as { maxRetries: number; maxRetryDelayMs: number }
+      expect(o.maxRetries).toBe(3)
+      expect(o.maxRetryDelayMs).toBe(30_000)
+    } finally {
+      restore()
+    }
+  })
+
   it('returns JSON when stream=false', async () => {
     const piAi = await import('@mariozechner/pi-ai')
     const { restore } = await stubCodexStream(() => {

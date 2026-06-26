@@ -3,7 +3,13 @@
 import { getModel, type KnownProvider, type Model } from '@mariozechner/pi-ai'
 import { streamOpenAICompletions } from '@mariozechner/pi-ai/openai-completions'
 import type { Account, IncomingRequest, Provider, ProviderResponse } from '../types'
-import { capMaxTokens, jsonResponse, makeMetadata, streamingResponse } from './pi-ai-runtime'
+import {
+  capMaxTokens,
+  jsonResponse,
+  makeMetadata,
+  RETRY_OPTIONS,
+  streamingResponse
+} from './pi-ai-runtime'
 import { anthropicToContext, openaiToContext } from './to-context'
 
 // Which provider types have a pi-ai catalog entry to consult first.
@@ -61,7 +67,8 @@ export const createOpenAICompletionsProvider = (
     const eventStream = streamOpenAICompletions(model, context, {
       apiKey,
       maxTokens: model.maxTokens,
-      signal: request.rawRequest.signal
+      signal: request.rawRequest.signal,
+      ...RETRY_OPTIONS
     })
     const metadata = makeMetadata(request, name, account, start)
 
