@@ -1,6 +1,7 @@
 import { registerAllOAuthProviders } from '../auth/register-all-oauth'
 import type { RouterState } from '../state'
 import type { Account, Provider, ProviderConfig } from '../types'
+import { createAnthropicProvider } from './anthropic'
 import { createAntigravityProvider } from './antigravity'
 import { createOpenAICodexProvider } from './openai-codex'
 import { createOpenAICompletionsProvider } from './openai-completions'
@@ -12,7 +13,6 @@ const DEFAULT_BASE_URLS: Partial<Record<string, string>> = {
   // Each base URL must include the provider's API-version prefix; the
   // passthrough joins inbound endpoint tails (e.g. `chat/completions`) onto
   // the base as a relative path.
-  anthropic: 'https://api.anthropic.com/v1',
   openai: 'https://api.openai.com/v1',
   cerebras: 'https://api.cerebras.ai/v1',
   openrouter: 'https://openrouter.ai/api/v1',
@@ -25,7 +25,7 @@ export const resolveBaseUrl = (type: string, configured?: string): string => {
   return DEFAULT_BASE_URLS[type] ?? ''
 }
 
-const PASSTHROUGH_TYPES = ['anthropic', 'openai']
+const PASSTHROUGH_TYPES = ['openai']
 const OPENAI_COMPLETIONS_TYPES = ['openai-compatible', 'cerebras', 'openrouter']
 
 const buildProvider = (name: string, config: ProviderConfig): Provider => {
@@ -35,6 +35,9 @@ const buildProvider = (name: string, config: ProviderConfig): Provider => {
   }
   if (config.type === 'openai-codex') {
     return createOpenAICodexProvider(name)
+  }
+  if (config.type === 'anthropic') {
+    return createAnthropicProvider(name)
   }
   if (OPENAI_COMPLETIONS_TYPES.includes(config.type)) {
     return createOpenAICompletionsProvider(name, config.type, baseUrl)
