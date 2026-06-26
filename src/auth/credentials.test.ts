@@ -44,6 +44,24 @@ describe('readCredentials', () => {
     expect(result.projectId).toBe('my-project')
   })
 
+  it('renames legacy accessToken/refreshToken keys on read', async () => {
+    const legacy = {
+      provider: 'openai-codex',
+      refreshToken: 'leg-ref',
+      accessToken: 'leg-acc',
+      expires: 9999999999999
+    }
+    await Bun.write(join(testDir, 'legacy.json'), JSON.stringify(legacy))
+
+    const result = (await readCredentials(testDir, 'legacy')) as Record<string, unknown>
+    expect(result.access).toBe('leg-acc')
+    expect(result.refresh).toBe('leg-ref')
+    expect(result.accessToken).toBeUndefined()
+    expect(result.refreshToken).toBeUndefined()
+    expect(result.provider).toBe('openai-codex')
+    expect(result.expires).toBe(9999999999999)
+  })
+
   it('throws when file does not exist', async () => {
     await expect(readCredentials(testDir, 'nonexistent')).rejects.toThrow()
   })

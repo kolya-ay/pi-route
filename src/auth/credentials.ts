@@ -16,7 +16,12 @@ export const readCredentials = async (
   if (!(await file.exists())) {
     throw new Error(`Credential file not found: ${join(authDir, `${accountName}.json`)}`)
   }
-  return file.json() as Promise<CredentialFile>
+  const raw = (await file.json()) as Record<string, unknown>
+  if (raw.accessToken !== undefined && raw.access === undefined) raw.access = raw.accessToken
+  if (raw.refreshToken !== undefined && raw.refresh === undefined) raw.refresh = raw.refreshToken
+  delete raw.accessToken
+  delete raw.refreshToken
+  return raw as CredentialFile
 }
 
 export const writeCredentials = async (
