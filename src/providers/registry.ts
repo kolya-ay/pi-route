@@ -4,6 +4,7 @@ import type { RouterState } from '../state'
 import type { Account, Provider, ProviderConfig } from '../types'
 import { createAntigravityProvider } from './antigravity'
 import { createOpenAICodexProvider } from './openai-codex'
+import { createOpenAICompletionsProvider } from './openai-completions'
 import { createPassthroughProvider } from './passthrough'
 
 export type ProviderEntry = { provider: Provider; account: Account }
@@ -25,6 +26,9 @@ export const resolveBaseUrl = (type: string, configured?: string): string => {
   return DEFAULT_BASE_URLS[type] ?? ''
 }
 
+const PASSTHROUGH_TYPES = ['anthropic', 'openai']
+const OPENAI_COMPLETIONS_TYPES = ['openai-compatible', 'cerebras', 'openrouter']
+
 const buildProvider = (name: string, config: ProviderConfig): Provider => {
   const baseUrl = resolveBaseUrl(config.type, config.baseUrl)
   if (config.type === 'antigravity') {
@@ -35,16 +39,19 @@ const buildProvider = (name: string, config: ProviderConfig): Provider => {
     ensureOpenAICodexOAuthRegistered()
     return createOpenAICodexProvider(name)
   }
+  if (OPENAI_COMPLETIONS_TYPES.includes(config.type)) {
+    return createOpenAICompletionsProvider(name, config.type, baseUrl)
+  }
   return createPassthroughProvider(name, config.type, baseUrl)
 }
-
-const PASSTHROUGH_TYPES = ['anthropic', 'openai', 'openai-compatible', 'cerebras', 'openrouter']
 
 export const createProviderRegistry = (state: RouterState): Map<string, ProviderEntry> => {
   const registry = new Map<string, ProviderEntry>()
   for (const [name, config] of Object.entries(state.options.providers)) {
     const provider = buildProvider(name, config)
-    if (PASSTHROUGH_TYPES.includes(config.type) && !resolveBaseUrl(config.type, config.baseUrl)) {
+    const needsBaseUrl =
+      PASSTHROUGH_TYPES.includes(config.type) || OPENAI_COMPLETIONS_TYPES.includes(config.type)
+    if (needsBaseUrl && !resolveBaseUrl(config.type, config.baseUrl)) {
       throw new Error(`provider "${name}" (type ${config.type}) requires baseUrl`)
     }
     registry.set(name, { provider, account: config.account })
