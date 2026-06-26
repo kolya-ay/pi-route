@@ -7,6 +7,10 @@ export type EnvConfig = {
   tokens: string[]
   configPath: string
   authDir: string
+  // Bun.serve idle timeout in seconds. Default 120 (Bun's default of 10 kills
+  // slow upstreams + multi-request keep-alive clients like Claude Code).
+  // 0 disables Bun's idle timeout (HTTP/1.1 only). Cap is 255 per Bun's API.
+  idleTimeout: number
 }
 
 const parsePort = (raw: string | undefined): number => {
@@ -14,6 +18,15 @@ const parsePort = (raw: string | undefined): number => {
   const n = Number(raw)
   if (!Number.isInteger(n) || n <= 0 || n > 65535) {
     throw new Error(`PI_ROUTE_PORT must be a valid port (1-65535), got "${raw}"`)
+  }
+  return n
+}
+
+const parseIdleTimeout = (raw: string | undefined): number => {
+  if (raw === undefined) return 120
+  const n = Number(raw)
+  if (!Number.isInteger(n) || n < 0 || n > 255) {
+    throw new Error(`PI_ROUTE_IDLE_TIMEOUT must be an integer 0-255 seconds, got "${raw}"`)
   }
   return n
 }
@@ -29,7 +42,8 @@ export const readEnvConfig = (): EnvConfig => {
       .map((s) => s.trim())
       .filter(Boolean),
     configPath: process.env.PI_ROUTE_CONFIG ?? './router.yaml',
-    authDir
+    authDir,
+    idleTimeout: parseIdleTimeout(process.env.PI_ROUTE_IDLE_TIMEOUT)
   }
 }
 

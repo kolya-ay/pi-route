@@ -13,5 +13,6 @@ console.log(`Router listening on http://${env.host}:${env.port}`)
 export default {
   port: env.port,
   hostname: env.host,
+  idleTimeout: env.idleTimeout,
   fetch: router.app.fetch
 }

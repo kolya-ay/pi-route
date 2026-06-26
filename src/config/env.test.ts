@@ -30,6 +30,7 @@ describe('readEnvConfig', () => {
     delete process.env.PI_ROUTE_TOKEN
     delete process.env.PI_ROUTE_CONFIG
     delete process.env.PI_ROUTE_AUTH
+    delete process.env.PI_ROUTE_IDLE_TIMEOUT
   })
   test('defaults', () => {
     delete process.env.PI_ROUTE_PORT
@@ -37,12 +38,14 @@ describe('readEnvConfig', () => {
     delete process.env.PI_ROUTE_TOKEN
     delete process.env.PI_ROUTE_CONFIG
     delete process.env.PI_ROUTE_AUTH
+    delete process.env.PI_ROUTE_IDLE_TIMEOUT
     const e = readEnvConfig()
     expect(e.port).toBe(3000)
     expect(e.host).toBe('127.0.0.1')
     expect(e.tokens).toEqual([])
     expect(e.configPath).toBe('./router.yaml')
     expect(e.authDir.endsWith('/pi-route/auth')).toBe(true)
+    expect(e.idleTimeout).toBe(120)
   })
   test('overrides via env', () => {
     process.env.PI_ROUTE_PORT = '3030'
@@ -50,15 +53,25 @@ describe('readEnvConfig', () => {
     process.env.PI_ROUTE_TOKEN = 'a,b,c'
     process.env.PI_ROUTE_CONFIG = '/tmp/r.yaml'
     process.env.PI_ROUTE_AUTH = '/tmp/auth'
+    process.env.PI_ROUTE_IDLE_TIMEOUT = '30'
     const e = readEnvConfig()
     expect(e.port).toBe(3030)
     expect(e.host).toBe('0.0.0.0')
     expect(e.tokens).toEqual(['a', 'b', 'c'])
     expect(e.configPath).toBe('/tmp/r.yaml')
     expect(e.authDir).toBe('/tmp/auth')
+    expect(e.idleTimeout).toBe(30)
   })
   test('throws on invalid port', () => {
     process.env.PI_ROUTE_PORT = 'abc'
     expect(() => readEnvConfig()).toThrow(/PI_ROUTE_PORT/)
+  })
+  test('throws on idleTimeout over Bun cap', () => {
+    process.env.PI_ROUTE_IDLE_TIMEOUT = '999'
+    expect(() => readEnvConfig()).toThrow(/PI_ROUTE_IDLE_TIMEOUT/)
+  })
+  test('throws on non-numeric idleTimeout', () => {
+    process.env.PI_ROUTE_IDLE_TIMEOUT = 'abc'
+    expect(() => readEnvConfig()).toThrow(/PI_ROUTE_IDLE_TIMEOUT/)
   })
 })
