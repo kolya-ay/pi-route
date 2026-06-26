@@ -1,4 +1,4 @@
-import type { PipelineEntry, RouterOptions } from '../types'
+import type { BalancingStrategyName, PipelineEntry, RouterOptions } from '../types'
 import type { Catalog } from './catalog'
 import { compileGlob, hasGlobMetachars, matches, substitute } from './match'
 
@@ -30,7 +30,7 @@ const fires = (entry: PipelineEntry, model: string, req: ResolveRequest): FireRe
 }
 
 const pickStrategy = (
-  strategy: 'round-robin' | 'sticky' | 'fill-first',
+  strategy: Exclude<BalancingStrategyName, 'failover'>,
   candidates: string[],
   counter: { i: number }
 ): string => {
@@ -49,12 +49,23 @@ const enumerateCatalog = (catalog: Catalog, pattern: string): string[] => {
   return out
 }
 
-export const resolveModel = (
+const splitAddress = (opts: RouterOptions, address: string): ResolveResult => {
+  const slash = address.indexOf('/')
+  if (slash === -1) throw new Error(`unresolved bare model "${address}" — no provider prefix`)
+  const provider = address.slice(0, slash)
+  const modelId = address.slice(slash + 1)
+  if (!opts.providers[provider]) {
+    throw new Error(`unknown provider "${provider}" in resolved model "${address}"`)
+  }
+  return { provider, modelId }
+}
+
+export const resolveCandidates = (
   opts: RouterOptions,
   catalog: Catalog,
   initialModel: string,
   req: ResolveRequest
-): ResolveResult => {
+): ResolveResult[] => {
   let model = initialModel
   const seen = new Set<string>()
   const counter = { i: 0 }
@@ -81,8 +92,19 @@ export const resolveModel = (
       if (hasGlobMetachars(substituted)) candidates.push(...enumerateCatalog(catalog, substituted))
       else candidates.push(substituted)
     }
+    // Failover pools surface the full ordered candidate list; everything else
+    // (alias, round-robin, sticky, fill-first) reduces to a single pick that
+    // may itself fire another pipeline entry on the next iteration.
+    if (firedEntry.kind === 'pool' && firedEntry.strategy === 'failover') {
+      return candidates.map((address) => splitAddress(opts, address))
+    }
+
     if (candidates.length === 0) continue
-    const strategy = firedEntry.kind === 'pool' ? firedEntry.strategy : 'round-robin'
+
+    const strategy: Exclude<BalancingStrategyName, 'failover'> =
+      firedEntry.kind === 'pool' && firedEntry.strategy !== 'failover'
+        ? firedEntry.strategy
+        : 'round-robin'
     const newModel = pickStrategy(strategy, candidates, counter)
     if (newModel === model) break
     model = newModel
@@ -90,17 +112,10 @@ export const resolveModel = (
 
   const slash = model.indexOf('/')
   if (slash === -1) {
-    // If we have a `seen` set with any entries, the bare model is the residue of
-    // a cycle (entries flipped a→b→a until both were `seen`, then nothing fired).
     if (seen.size > 0) {
       throw new Error(`pipeline cycle detected; entries fired: ${[...seen].join(', ')}`)
     }
     throw new Error(`unresolved bare model "${model}" — no provider prefix`)
   }
-  const provider = model.slice(0, slash)
-  const modelId = model.slice(slash + 1)
-  if (!opts.providers[provider]) {
-    throw new Error(`unknown provider "${provider}" in resolved model "${model}"`)
-  }
-  return { provider, modelId }
+  return [splitAddress(opts, model)]
 }

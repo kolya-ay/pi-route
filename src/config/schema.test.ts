@@ -80,6 +80,23 @@ describe('parseConfig — pipeline value shapes', () => {
     })
     expect(opts.pipeline.map((e) => e.name)).toEqual(['a', 'b', 'c'])
   })
+  test('accepts strategy: failover on a pool entry', () => {
+    const parsed = parseConfig({
+      providers: {
+        a: { type: 'openai-compatible', account: { credential: 'key', key: 'k' } },
+        b: { type: 'openai-compatible', account: { credential: 'key', key: 'k' } }
+      },
+      pipeline: {
+        gpt: { to: ['a/x', 'b/x'], strategy: 'failover' }
+      }
+    })
+    expect(parsed.pipeline).toHaveLength(1)
+    const entry = parsed.pipeline[0]!
+    expect(entry.kind).toBe('pool')
+    if (entry.kind !== 'pool') throw new Error('unreachable')
+    expect(entry.strategy).toBe('failover')
+    expect(entry.to).toEqual(['a/x', 'b/x'])
+  })
 })
 
 describe('parseConfig — expose', () => {

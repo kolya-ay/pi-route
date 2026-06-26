@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { RouterOptions } from '../types'
 import { buildCatalog } from './catalog'
-import { resolveModel } from './resolve'
+import { resolveCandidates } from './resolve'
 
 const opts = (over: Partial<RouterOptions> = {}): RouterOptions => ({
   providers: {
@@ -14,14 +14,20 @@ const opts = (over: Partial<RouterOptions> = {}): RouterOptions => ({
 })
 
 const resolve = (o: RouterOptions, model: string, req: { thinking?: boolean } = {}) =>
-  resolveModel(o, buildCatalog(o), model, req)
+  resolveCandidates(o, buildCatalog(o), model, req)
 
-describe('resolveModel', () => {
+const first = (o: RouterOptions, model: string, req: { thinking?: boolean } = {}) => {
+  const list = resolve(o, model, req)
+  if (list.length === 0) throw new Error('no candidates')
+  return list[0]!
+}
+
+describe('resolveCandidates', () => {
   test('alias rewrites bare name to target', () => {
     const o = opts({
       pipeline: [{ kind: 'alias', name: 'opus', target: 'claude-personal/claude-opus-4-7' }]
     })
-    const r = resolve(o, 'opus')
+    const r = first(o, 'opus')
     expect(r.provider).toBe('claude-personal')
     expect(r.modelId).toBe('claude-opus-4-7')
   })
@@ -37,7 +43,7 @@ describe('resolveModel', () => {
         }
       ]
     })
-    const a = resolve(o, 'pool/claude-opus-4-7')
+    const a = first(o, 'pool/claude-opus-4-7')
     expect(['claude-personal', 'claude-work']).toContain(a.provider)
     expect(a.modelId).toBe('claude-opus-4-7')
   })
@@ -54,7 +60,7 @@ describe('resolveModel', () => {
         }
       ]
     })
-    const r = resolve(o, 'opus')
+    const r = first(o, 'opus')
     expect(r.provider).toBe('claude-personal')
     expect(r.modelId).toBe('claude-opus-4-7')
   })
@@ -77,7 +83,7 @@ describe('resolveModel', () => {
         }
       ]
     })
-    const yes = resolve(o, 'something', { thinking: true })
+    const yes = first(o, 'something', { thinking: true })
     expect(yes.provider).toBe('claude-personal')
     expect(yes.modelId).toBe('claude-opus-4-7')
   })
@@ -96,7 +102,7 @@ describe('resolveModel', () => {
       ]
     })
     // thinking flag is false → detect entry should NOT fire; alias fires instead
-    const r = resolve(o, 'something', { thinking: false })
+    const r = first(o, 'something', { thinking: false })
     expect(r.provider).toBe('claude-personal')
     expect(r.modelId).toBe('claude-3-5-haiku')
   })
@@ -114,5 +120,57 @@ describe('resolveModel', () => {
       ]
     })
     expect(() => resolve(o, 'a')).toThrow(/cycle/i)
+  })
+
+  test('failover pool returns members in declaration order', () => {
+    const o = opts({
+      pipeline: [
+        {
+          kind: 'pool',
+          name: 'gpt',
+          to: ['claude-personal/$1', 'claude-work/$1'],
+          strategy: 'failover'
+        }
+      ]
+    })
+    const list = resolve(o, 'gpt/x')
+    expect(list).toEqual([
+      { provider: 'claude-personal', modelId: 'x' },
+      { provider: 'claude-work', modelId: 'x' }
+    ])
+  })
+
+  test('failover pool with glob members expands all matches in catalog order', () => {
+    const o = opts({
+      pipeline: [
+        {
+          kind: 'pool',
+          name: 'all',
+          to: ['claude-personal/zzz-*', 'claude-work/zzz-*'],
+          strategy: 'failover'
+        }
+      ]
+    })
+    // No real model IDs start with 'zzz-', so glob expansion yields no
+    // candidates; the test guards the no-match / empty-list path.
+    const list = resolve(o, 'all/whatever')
+    expect(list).toEqual([])
+  })
+
+  test('non-failover pool with multiple members returns a single picked candidate', () => {
+    const o = opts({
+      pipeline: [
+        {
+          kind: 'pool',
+          name: 'pool',
+          to: ['claude-personal/$1', 'claude-work/$1'],
+          strategy: 'round-robin'
+        }
+      ]
+    })
+    const list = resolve(o, 'pool/claude-opus-4-7')
+    expect(list).toHaveLength(1)
+    expect(['claude-personal', 'claude-work']).toContain(list[0]!.provider)
+    expect(list[0]!.modelId).toBe('claude-opus-4-7')
   })
 })

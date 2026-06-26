@@ -23,7 +23,7 @@ const ProviderSchema = z.object({
   account: AccountSchema
 })
 
-const StrategySchema = z.enum(['round-robin', 'sticky', 'fill-first'])
+const StrategySchema = z.enum(['round-robin', 'sticky', 'fill-first', 'failover'])
 const WhenSchema = z.object({ thinking: z.boolean().optional() })
 
 const PipelineEntryObjectSchema = z.object({

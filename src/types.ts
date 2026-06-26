@@ -67,6 +67,7 @@ export type TelemetryEvent =
   | RequestEndEvent
   | ProviderErrorEvent
   | RateLimitEvent
+  | ProviderFallbackEvent
   | AccountRefreshedEvent
   | AccountRefreshFailedEvent
   | AccountRefreshGivenUpEvent
@@ -129,6 +130,14 @@ export type RateLimitEvent = {
   retryAfterMs: number
 }
 
+export type ProviderFallbackEvent = {
+  type: 'provider_fallback'
+  requestId: string
+  from: string
+  to: string
+  reason: string
+}
+
 // === Config ===
 
 export type ProviderConfig = {
@@ -137,7 +146,7 @@ export type ProviderConfig = {
   account: Account
 }
 
-export type BalancingStrategyName = 'round-robin' | 'sticky' | 'fill-first'
+export type BalancingStrategyName = 'round-robin' | 'sticky' | 'fill-first' | 'failover'
 
 export type PipelineEntry =
   | { kind: 'alias'; name: string; target: string }

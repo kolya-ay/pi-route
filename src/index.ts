@@ -17,7 +17,7 @@ export type { AccountRuntimeState, RuntimeState } from './config/state'
 export { readRuntimeState, writeRuntimeState } from './config/state'
 export type { Catalog } from './pipeline/catalog'
 export { buildCatalog } from './pipeline/catalog'
-export { resolveModel } from './pipeline/resolve'
+export { resolveCandidates } from './pipeline/resolve'
 export type { RouterState } from './state'
 export { createState } from './state'
 export type {
