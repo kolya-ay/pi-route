@@ -256,9 +256,150 @@ const convertOpenAiMessage = (m: Record<string, unknown>): Message | null => {
 }
 
 // --- Responses → Context ---
-// Full implementation in Task 3. Stubbed here so plumbing in Task 2 type-checks.
-export const responsesToContext = (_body: Record<string, unknown>): Context => {
-  throw new Error('responsesToContext: not implemented')
+
+const extractResponsesInputContent = (content: unknown): string | TextContent[] => {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  const parts: TextContent[] = []
+  for (const part of content) {
+    if (!part || typeof part !== 'object') continue
+    const p = part as Record<string, unknown>
+    // Accept 'input_text' (Responses API) and 'text' (some clients send this synonym).
+    if ((p.type === 'input_text' || p.type === 'text') && typeof p.text === 'string') {
+      parts.push({ type: 'text', text: p.text })
+    }
+    // input_image dropped silently in v1
+  }
+  if (parts.length === 0) return ''
+  if (parts.length === 1) return parts[0]!.text
+  return parts
+}
+
+const extractResponsesOutputContent = (content: unknown): string => {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  const parts: string[] = []
+  for (const part of content) {
+    if (!part || typeof part !== 'object') continue
+    const p = part as Record<string, unknown>
+    if (p.type === 'output_text' && typeof p.text === 'string') parts.push(p.text)
+  }
+  return parts.join('')
+}
+
+const flattenFunctionOutput = (output: unknown): string => {
+  if (typeof output === 'string') return output
+  if (!Array.isArray(output)) return ''
+  const parts: string[] = []
+  for (const part of output) {
+    if (!part || typeof part !== 'object') continue
+    const p = part as Record<string, unknown>
+    if (typeof p.text === 'string') parts.push(p.text)
+  }
+  return parts.join('')
+}
+
+const convertResponsesTools = (tools: unknown): Tool[] | undefined => {
+  if (!Array.isArray(tools) || tools.length === 0) return undefined
+  const out: Tool[] = []
+  for (const t of tools) {
+    if (!t || typeof t !== 'object') continue
+    const tool = t as Record<string, unknown>
+    // Responses-format function tools are flat: { type: "function", name, description, parameters }
+    // All other types (web_search, file_search, computer_use) are ignored.
+    if (tool.type === 'function' && typeof tool.name === 'string') {
+      out.push({
+        name: tool.name,
+        description: typeof tool.description === 'string' ? tool.description : '',
+        parameters:
+          typeof tool.parameters === 'object' && tool.parameters !== null
+            ? (tool.parameters as Record<string, unknown>)
+            : {}
+      })
+    }
+  }
+  return out.length > 0 ? out : undefined
+}
+
+export const responsesToContext = (body: Record<string, unknown>): Context => {
+  const messages: Message[] = []
+  const input = body.input
+
+  if (typeof input === 'string') {
+    messages.push(makeUserMessage(input))
+  } else if (Array.isArray(input)) {
+    for (const item of input) {
+      if (!item || typeof item !== 'object') continue
+      const it = item as Record<string, unknown>
+
+      if (it.type === 'message' || it.type === undefined) {
+        const role = it.role
+        if (role === 'user') {
+          messages.push(makeUserMessage(extractResponsesInputContent(it.content)))
+        } else if (role === 'assistant') {
+          const text = extractResponsesOutputContent(it.content)
+          messages.push(makeAssistantMessage(text ? [{ type: 'text', text }] : []))
+        }
+        // system/developer roles are collected below as system prompt; not pushed to messages
+      } else if (it.type === 'function_call') {
+        const callId = typeof it.call_id === 'string' ? it.call_id : ''
+        const name = typeof it.name === 'string' ? it.name : ''
+        const argsStr = typeof it.arguments === 'string' ? it.arguments : '{}'
+        let args: Record<string, unknown> = {}
+        try {
+          args = JSON.parse(argsStr) as Record<string, unknown>
+        } catch {
+          /* keep empty */
+        }
+        const toolCall: ToolCall = { type: 'toolCall', id: callId, name, arguments: args }
+        const last = messages[messages.length - 1]
+        if (last && last.role === 'assistant') {
+          ;(last.content as Array<TextContent | ToolCall>).push(toolCall)
+        } else {
+          messages.push(makeAssistantMessage([toolCall]))
+        }
+      } else if (it.type === 'function_call_output') {
+        const callId = typeof it.call_id === 'string' ? it.call_id : ''
+        const text = flattenFunctionOutput(it.output)
+        messages.push(makeToolResult(callId, text))
+      }
+      // 'reasoning' items ignored in v1
+    }
+  }
+
+  // Build system prompt: instructions field takes precedence, then system/developer message items
+  let systemPrompt: string | undefined
+  if (typeof body.instructions === 'string' && body.instructions.length > 0) {
+    systemPrompt = body.instructions
+  }
+  if (Array.isArray(input)) {
+    const sysParts: string[] = []
+    for (const item of input) {
+      if (!item || typeof item !== 'object') continue
+      const it = item as Record<string, unknown>
+      if (
+        (it.type === 'message' || it.type === undefined) &&
+        (it.role === 'system' || it.role === 'developer')
+      ) {
+        const text =
+          typeof it.content === 'string'
+            ? it.content
+            : extractResponsesOutputContent(it.content) || extractResponsesInputContent(it.content)
+        if (typeof text === 'string' && text.length > 0) sysParts.push(text)
+      }
+    }
+    if (sysParts.length > 0) {
+      const joined = sysParts.join('\n\n')
+      systemPrompt = systemPrompt ? `${systemPrompt}\n\n${joined}` : joined
+    }
+  }
+
+  const tools = convertResponsesTools(body.tools)
+  return {
+    ...(systemPrompt !== undefined ? { systemPrompt } : {}),
+    messages,
+    ...(tools !== undefined ? { tools } : {})
+  }
 }
 
 export const openaiToContext = (body: Record<string, unknown>): Context => {

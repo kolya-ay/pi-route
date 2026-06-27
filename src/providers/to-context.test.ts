@@ -1,9 +1,14 @@
 // src/providers/to-context.test.ts
 
 import { describe, expect, it } from 'bun:test'
-import type { TextContent, ToolCall, ToolResultMessage } from '@mariozechner/pi-ai'
+import type {
+  AssistantMessage,
+  TextContent,
+  ToolCall,
+  ToolResultMessage
+} from '@mariozechner/pi-ai'
 
-import { anthropicToContext, openaiToContext } from './to-context'
+import { anthropicToContext, openaiToContext, responsesToContext } from './to-context'
 
 describe('anthropicToContext', () => {
   it('converts basic anthropic message to systemPrompt and user message', () => {
@@ -196,5 +201,123 @@ describe('openaiToContext', () => {
     expect(ctx.tools?.[0]?.name).toBe('search')
     expect(ctx.tools?.[0]?.description).toBe('Search the web')
     expect(ctx.tools?.[0]?.parameters).toMatchObject({ type: 'object' })
+  })
+})
+
+describe('responsesToContext', () => {
+  it('parses a simple string input as a user message', () => {
+    const ctx = responsesToContext({ model: 'gpt-4', input: 'hello world' })
+    expect(ctx.messages).toHaveLength(1)
+    expect(ctx.messages[0]).toMatchObject({ role: 'user', content: 'hello world' })
+  })
+
+  it('parses instructions as a system prompt', () => {
+    const ctx = responsesToContext({
+      model: 'gpt-4',
+      instructions: 'Be terse.',
+      input: 'hi'
+    })
+    expect(ctx.systemPrompt).toBe('Be terse.')
+  })
+
+  it('returns empty messages when input is missing', () => {
+    const ctx = responsesToContext({ model: 'gpt-4' })
+    expect(ctx.messages).toHaveLength(0)
+    expect(ctx.systemPrompt).toBeUndefined()
+  })
+
+  it('parses multi-part user input with input_text blocks', () => {
+    const ctx = responsesToContext({
+      model: 'gpt-4',
+      input: [
+        {
+          type: 'message',
+          role: 'user',
+          content: [
+            { type: 'input_text', text: 'part 1' },
+            { type: 'input_text', text: 'part 2' }
+          ]
+        }
+      ]
+    })
+    expect(ctx.messages[0]?.content).toEqual([
+      { type: 'text', text: 'part 1' },
+      { type: 'text', text: 'part 2' }
+    ])
+  })
+
+  it('parses function_call + function_call_output into ToolCall + ToolResult', () => {
+    const ctx = responsesToContext({
+      model: 'gpt-4',
+      input: [
+        { type: 'message', role: 'user', content: 'what is the weather?' },
+        {
+          type: 'function_call',
+          call_id: 'call_abc',
+          name: 'get_weather',
+          arguments: '{"city":"SF"}'
+        },
+        { type: 'function_call_output', call_id: 'call_abc', output: '72F sunny' }
+      ]
+    })
+    expect(ctx.messages).toHaveLength(3)
+    expect(ctx.messages[0]?.role).toBe('user')
+    expect(ctx.messages[1]?.role).toBe('assistant')
+    expect((ctx.messages[1] as AssistantMessage).content[0]).toMatchObject({
+      type: 'toolCall',
+      id: 'call_abc',
+      name: 'get_weather',
+      arguments: { city: 'SF' }
+    })
+    expect(ctx.messages[2]?.role).toBe('toolResult')
+    expect((ctx.messages[2] as ToolResultMessage).toolCallId).toBe('call_abc')
+  })
+
+  it('parses tools array', () => {
+    const ctx = responsesToContext({
+      model: 'gpt-4',
+      input: 'hi',
+      tools: [
+        {
+          type: 'function',
+          name: 'get_weather',
+          description: 'Get weather',
+          parameters: { type: 'object', properties: {} }
+        }
+      ]
+    })
+    expect(ctx.tools).toHaveLength(1)
+    expect(ctx.tools![0]).toMatchObject({ name: 'get_weather' })
+  })
+
+  it('ignores unsupported tool types (web_search, file_search)', () => {
+    const ctx = responsesToContext({
+      model: 'gpt-4',
+      input: 'hi',
+      tools: [{ type: 'web_search' }, { type: 'function', name: 'get_weather', parameters: {} }]
+    })
+    expect(ctx.tools).toHaveLength(1)
+    expect(ctx.tools![0]?.name).toBe('get_weather')
+  })
+
+  it('flattens array-shaped function_call_output to a string', () => {
+    const ctx = responsesToContext({
+      model: 'gpt-4',
+      input: [
+        { type: 'function_call', call_id: 'c1', name: 'fn', arguments: '{}' },
+        {
+          type: 'function_call_output',
+          call_id: 'c1',
+          output: [
+            { type: 'output_text', text: 'part a' },
+            { type: 'output_text', text: 'part b' }
+          ]
+        }
+      ]
+    })
+    expect((ctx.messages[1] as ToolResultMessage).content[0]).toMatchObject({
+      type: 'text',
+      text: 'part apart b'
+    })
   })
 })
