@@ -245,6 +245,70 @@ describe('createOpenAICompletionsProvider', () => {
     }
   })
 
+  it('does not emit type:"input_text" in upstream OpenAI payload', async () => {
+    const captured: string[] = []
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (input: Request | string | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      if (url.includes('/chat/completions') && typeof init?.body === 'string') {
+        captured.push(init.body)
+      }
+      const sse =
+        'data: {"id":"x","object":"chat.completion.chunk","created":0,' +
+        '"model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":""},' +
+        '"finish_reason":null}]}\n\n' +
+        'data: {"id":"x","object":"chat.completion.chunk","created":0,' +
+        '"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n' +
+        'data: [DONE]\n\n'
+      return new Response(sse, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' }
+      })
+    }) as typeof fetch
+
+    try {
+      const p = createOpenAICompletionsProvider(
+        'nvidia',
+        'openai-compatible',
+        'https://example.test/v1'
+      )
+      const req = makeRequest({
+        format: 'openai',
+        stream: false,
+        body: {
+          model: 'meta/llama-3.1-8b-instruct',
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: 'x' },
+                { type: 'text', text: 'y' }
+              ]
+            }
+          ],
+          max_tokens: 8
+        }
+      })
+      await p.dispatch(req, account, 'k')
+
+      expect(captured.length).toBeGreaterThan(0)
+      const body = captured[0]!
+      expect(body).not.toContain('"type":"input_text"')
+
+      const parsed = JSON.parse(body) as {
+        messages: Array<{ role: string; content: unknown }>
+      }
+      const userMsg = parsed.messages.find((m) => m.role === 'user')
+      expect(userMsg).toBeDefined()
+      expect(Array.isArray(userMsg!.content)).toBe(true)
+      for (const part of userMsg!.content as Array<{ type: string }>) {
+        expect(part.type).toBe('text')
+      }
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
   it('propagates client AbortSignal as opts.signal', async () => {
     let capturedOpts: unknown
     const { restore } = await stubCompletions((_m, _ctx, opts) => {
