@@ -45,6 +45,26 @@ export const createApp = async (opts: CreateAppOpts = {}): Promise<RouterState &
   const registry = createProviderRegistry(state)
 
   app.use('*', cors())
+  app.use('*', async (c, next) => {
+    const encoding = c.req.header('content-encoding')?.toLowerCase()
+    if (!encoding || (encoding !== 'zstd' && encoding !== 'gzip' && encoding !== 'deflate'))
+      return next()
+    const body = c.req.raw.body
+    if (!body) return next()
+    const decompressed = await new Response(
+      body.pipeThrough(new DecompressionStream(encoding as CompressionFormat))
+    ).bytes()
+    const newHeaders = new Headers(c.req.raw.headers)
+    newHeaders.delete('content-encoding')
+    newHeaders.delete('content-length')
+    c.req.raw = new Request(c.req.raw.url, {
+      method: c.req.raw.method,
+      headers: newHeaders,
+      body: decompressed,
+      duplex: 'half'
+    } as RequestInit)
+    return next()
+  })
   app.use('/v1/*', async (c, next) => {
     const requestId = crypto.randomUUID()
     c.set('requestId', requestId)
