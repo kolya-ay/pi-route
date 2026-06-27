@@ -18,13 +18,8 @@ import {
 
 import type { Account, IncomingRequest, Provider, ProviderResponse } from '../types'
 
-import { anthropicToContext, openaiToContext } from './to-context'
-import {
-  anthropicMessageToJson,
-  createAnthropicSseStream,
-  createOpenAiSseStream,
-  openaiMessageToJson
-} from './to-sse'
+import { toContext } from './to-context'
+import { formatJson, formatSse } from './to-sse'
 
 // --- Google Content types (local, minimal) ---
 
@@ -494,8 +489,7 @@ export const createAntigravityProvider = (name: string, _baseUrl: string): Provi
     const start = Date.now()
 
     const body = JSON.parse(await request.rawRequest.text()) as Record<string, unknown>
-    const context =
-      request.format === 'anthropic' ? anthropicToContext(body) : openaiToContext(body)
+    const context = toContext(request.format, body)
 
     const model = {
       id: request.model,
@@ -506,10 +500,6 @@ export const createAntigravityProvider = (name: string, _baseUrl: string): Provi
 
     if (request.stream) {
       const eventStream = streamAntigravity(model, context, { apiKey })
-      const sseBody =
-        request.format === 'anthropic'
-          ? createAnthropicSseStream(eventStream, request.id, request.model)
-          : createOpenAiSseStream(eventStream, request.id, request.model)
 
       return {
         status: 200,
@@ -518,7 +508,7 @@ export const createAntigravityProvider = (name: string, _baseUrl: string): Provi
           'cache-control': 'no-cache',
           connection: 'keep-alive'
         }),
-        body: sseBody,
+        body: formatSse(request.format, eventStream, request.id, request.model),
         metadata: {
           requestId: request.id,
           provider: name,
@@ -542,15 +532,10 @@ export const createAntigravityProvider = (name: string, _baseUrl: string): Provi
 
     if (!message) throw new Error('No response from Antigravity stream')
 
-    const responseBody =
-      request.format === 'anthropic'
-        ? anthropicMessageToJson(message, request.id, request.model)
-        : openaiMessageToJson(message, request.id, request.model)
-
     return {
       status: 200,
       headers: new Headers({ 'content-type': 'application/json' }),
-      body: responseBody,
+      body: formatJson(request.format, message, request.id, request.model),
       metadata: {
         requestId: request.id,
         provider: name,

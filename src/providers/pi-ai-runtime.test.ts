@@ -24,6 +24,18 @@ describe('capMaxTokens', () => {
     const result = capMaxTokens(m, {})
     expect(result.maxTokens).toBe(4096)
   })
+
+  it('caps max output tokens from max_output_tokens field (Responses-API name)', () => {
+    const model = { maxTokens: 1000 }
+    const capped = capMaxTokens(model, { max_output_tokens: 16 })
+    expect(capped.maxTokens).toBe(16)
+  })
+
+  it('prefers max_tokens over max_output_tokens when both present', () => {
+    const model = { maxTokens: 1000 }
+    const capped = capMaxTokens(model, { max_tokens: 32, max_output_tokens: 16 })
+    expect(capped.maxTokens).toBe(32)
+  })
 })
 
 describe('makeMetadata', () => {
@@ -111,7 +123,7 @@ const meta = {
   latencyMs: 1
 }
 
-const makeReq = (format: 'anthropic' | 'openai'): IncomingRequest => ({
+const makeReq = (format: 'anthropic' | 'openai' | 'responses'): IncomingRequest => ({
   id: 'r-1',
   format,
   rawRequest: new Request('http://x'),

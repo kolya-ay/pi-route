@@ -12,6 +12,8 @@ import type {
   UserMessage
 } from '@mariozechner/pi-ai'
 
+import type { IncomingRequest } from '../types'
+
 const defaultUsage = () => ({
   input: 0,
   output: 0,
@@ -253,6 +255,12 @@ const convertOpenAiMessage = (m: Record<string, unknown>): Message | null => {
   return makeUserMessage('')
 }
 
+// --- Responses → Context ---
+// Full implementation in Task 3. Stubbed here so plumbing in Task 2 type-checks.
+export const responsesToContext = (_body: Record<string, unknown>): Context => {
+  throw new Error('responsesToContext: not implemented')
+}
+
 export const openaiToContext = (body: Record<string, unknown>): Context => {
   const rawMessages = Array.isArray(body.messages) ? body.messages : []
   const typedMessages = rawMessages.filter(
@@ -275,3 +283,13 @@ export const openaiToContext = (body: Record<string, unknown>): Context => {
     ...(tools !== undefined ? { tools } : {})
   }
 }
+
+export const toContext = (
+  format: IncomingRequest['format'],
+  body: Record<string, unknown>
+): Context =>
+  format === 'anthropic'
+    ? anthropicToContext(body)
+    : format === 'responses'
+      ? responsesToContext(body)
+      : openaiToContext(body)

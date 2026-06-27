@@ -10,7 +10,7 @@ import {
   RETRY_OPTIONS,
   streamingResponse
 } from './pi-ai-runtime'
-import { anthropicToContext, openaiToContext } from './to-context'
+import { toContext } from './to-context'
 
 export const createOpenAICodexProvider = (name: string): Provider => ({
   name,
@@ -23,8 +23,7 @@ export const createOpenAICodexProvider = (name: string): Provider => ({
   ): Promise<ProviderResponse> {
     const start = Date.now()
     const body = JSON.parse(await request.rawRequest.text()) as Record<string, unknown>
-    const context =
-      request.format === 'anthropic' ? anthropicToContext(body) : openaiToContext(body)
+    const context = toContext(request.format, body)
 
     // Pi-ai's response code reads model.input/cost/etc — a hand-rolled stub
     // crashes at runtime. Catalog lookup is required for Codex (no fallback).

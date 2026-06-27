@@ -40,7 +40,7 @@ const buildUpstreamHeaders = (incoming: Headers): Headers => {
 }
 
 export type DispatchDeps = {
-  format: 'anthropic' | 'openai'
+  format: 'anthropic' | 'openai' | 'responses'
   registry: Map<string, ProviderEntry>
   state: RouterState
   telemetry: TelemetryEmitter

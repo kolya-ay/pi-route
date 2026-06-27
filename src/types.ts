@@ -22,7 +22,7 @@ export type Provider = {
 
 export type IncomingRequest = {
   id: string
-  format: 'anthropic' | 'openai'
+  format: 'anthropic' | 'openai' | 'responses'
   rawRequest: Request
   model: string
   stream: boolean
@@ -94,7 +94,7 @@ export type RequestStartEvent = {
   type: 'request_start'
   requestId: string
   timestamp: number
-  format: 'anthropic' | 'openai'
+  format: 'anthropic' | 'openai' | 'responses'
   model: string
   stream: boolean
 }

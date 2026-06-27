@@ -10,7 +10,7 @@ import {
   RETRY_OPTIONS,
   streamingResponse
 } from './pi-ai-runtime'
-import { anthropicToContext, openaiToContext } from './to-context'
+import { toContext } from './to-context'
 
 // Which provider types have a pi-ai catalog entry to consult first.
 // 'openai-compatible' (used by nvidia, chutes) intentionally absent — those
@@ -52,8 +52,7 @@ export const createOpenAICompletionsProvider = (
   ): Promise<ProviderResponse> {
     const start = Date.now()
     const body = JSON.parse(await request.rawRequest.text()) as Record<string, unknown>
-    const context =
-      request.format === 'anthropic' ? anthropicToContext(body) : openaiToContext(body)
+    const context = toContext(request.format, body)
 
     const catalogProvider = CATALOG_PROVIDER[type]
     const baseModel =

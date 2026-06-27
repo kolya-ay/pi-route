@@ -1,6 +1,13 @@
 // src/providers/to-sse.ts
 
-import type { AssistantMessage, AssistantMessageEvent, ToolCall } from '@mariozechner/pi-ai'
+import type {
+  AssistantMessage,
+  AssistantMessageEvent,
+  AssistantMessageEventStream,
+  ToolCall
+} from '@mariozechner/pi-ai'
+
+import type { IncomingRequest } from '../types'
 
 const mapAnthropicStopReason = (reason: string): string =>
   reason === 'stop'
@@ -390,6 +397,25 @@ export const anthropicMessageToJson = (
   }
 })
 
+// --- Responses SSE streaming + non-streaming JSON ---
+// Full implementations in Task 4.
+
+export const createResponsesSseStream = (
+  _events: AssistantMessageEventStream,
+  _requestId: string,
+  _requestedModel: string
+): ReadableStream => {
+  throw new Error('createResponsesSseStream: not implemented')
+}
+
+export const responsesMessageToJson = (
+  _message: AssistantMessage,
+  _requestId: string,
+  _requestedModel: string
+): Record<string, unknown> => {
+  throw new Error('responsesMessageToJson: not implemented')
+}
+
 // --- Non-streaming OpenAI JSON ---
 
 export const openaiMessageToJson = (
@@ -428,3 +454,27 @@ export const openaiMessageToJson = (
     }
   }
 }
+
+export const formatSse = (
+  format: IncomingRequest['format'],
+  events: AssistantMessageEventStream,
+  requestId: string,
+  requestedModel: string
+): ReadableStream =>
+  format === 'anthropic'
+    ? createAnthropicSseStream(events, requestId, requestedModel)
+    : format === 'responses'
+      ? createResponsesSseStream(events, requestId, requestedModel)
+      : createOpenAiSseStream(events, requestId, requestedModel)
+
+export const formatJson = (
+  format: IncomingRequest['format'],
+  message: AssistantMessage,
+  requestId: string,
+  requestedModel: string
+): Record<string, unknown> =>
+  format === 'anthropic'
+    ? anthropicMessageToJson(message, requestId, requestedModel)
+    : format === 'responses'
+      ? responsesMessageToJson(message, requestId, requestedModel)
+      : openaiMessageToJson(message, requestId, requestedModel)

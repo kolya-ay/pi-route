@@ -6,7 +6,7 @@ import { streamAnthropic } from '@mariozechner/pi-ai/anthropic'
 import type { Account, IncomingRequest, Provider, ProviderResponse } from '../types'
 
 import { capMaxTokens, jsonResponse, makeMetadata, streamingResponse } from './pi-ai-runtime'
-import { anthropicToContext, openaiToContext } from './to-context'
+import { toContext } from './to-context'
 
 export const createAnthropicProvider = (name: string): Provider => ({
   name,
@@ -19,8 +19,7 @@ export const createAnthropicProvider = (name: string): Provider => ({
   ): Promise<ProviderResponse> {
     const start = Date.now()
     const body = JSON.parse(await request.rawRequest.text()) as Record<string, unknown>
-    const context =
-      request.format === 'anthropic' ? anthropicToContext(body) : openaiToContext(body)
+    const context = toContext(request.format, body)
 
     const catalogModel = getModel(
       'anthropic',

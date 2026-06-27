@@ -4,12 +4,7 @@ import type { AssistantMessage, AssistantMessageEventStream } from '@mariozechne
 
 import type { Account, IncomingRequest, ProviderResponse } from '../types'
 
-import {
-  anthropicMessageToJson,
-  createAnthropicSseStream,
-  createOpenAiSseStream,
-  openaiMessageToJson
-} from './to-sse'
+import { formatJson, formatSse } from './to-sse'
 
 // Self-heal transient 429/5xx via pi-ai's SDK-level retry. 3 attempts caps
 // Codex's `usage_limit_reached` retry storm; 30s caps the per-attempt wait
@@ -20,7 +15,7 @@ export const capMaxTokens = <M extends { maxTokens: number }>(
   model: M,
   body: Record<string, unknown>
 ): M => {
-  const requested = body.max_tokens
+  const requested = body.max_tokens ?? body.max_output_tokens
   if (typeof requested !== 'number' || !Number.isFinite(requested) || requested <= 0) return model
   return { ...model, maxTokens: Math.min(requested, model.maxTokens) }
 }
@@ -49,10 +44,7 @@ export const streamingResponse = (
     'cache-control': 'no-cache',
     connection: 'keep-alive'
   }),
-  body:
-    request.format === 'anthropic'
-      ? createAnthropicSseStream(eventStream, request.id, request.model)
-      : createOpenAiSseStream(eventStream, request.id, request.model),
+  body: formatSse(request.format, eventStream, request.id, request.model),
   metadata
 })
 
@@ -74,10 +66,7 @@ export const jsonResponse = async (
   return {
     status: 200,
     headers: new Headers({ 'content-type': 'application/json' }),
-    body:
-      request.format === 'anthropic'
-        ? anthropicMessageToJson(message, request.id, request.model)
-        : openaiMessageToJson(message, request.id, request.model),
+    body: formatJson(request.format, message, request.id, request.model),
     metadata
   }
 }

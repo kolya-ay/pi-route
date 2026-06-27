@@ -13,6 +13,7 @@ import { createChatCompletionsRoute } from './routes/chat-completions'
 import { createHealthRoute } from './routes/health'
 import { createMessagesRoute } from './routes/messages'
 import { createModelsRoute } from './routes/models'
+import { createResponsesRoute } from './routes/responses'
 import { createState, type RouterState } from './state'
 import { createConsoleSink, createTelemetryEmitter } from './telemetry/emitter'
 import type { TelemetrySink } from './types'
@@ -57,6 +58,7 @@ export const createApp = async (opts: CreateAppOpts = {}): Promise<RouterState &
   app.route('/v1/models', createModelsRoute(state.options, state.catalog))
   app.route('/v1/messages', createMessagesRoute(registry, state, telemetry))
   app.route('/v1/chat/completions', createChatCompletionsRoute(registry, state, telemetry))
+  app.route('/v1/responses', createResponsesRoute(registry, state, telemetry))
 
   if (opts.admin !== undefined) {
     mountAdmin(app, state, { authKey: opts.admin.authKey })
