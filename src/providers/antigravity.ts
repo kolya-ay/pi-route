@@ -495,7 +495,7 @@ export const createAntigravityProvider = (name: string, _baseUrl: string): Provi
       id: request.model,
       api: 'google-antigravity' as Api,
       provider: 'google-antigravity',
-      maxTokens: (body.max_tokens as number) ?? 8192
+      maxTokens: ((body.max_tokens ?? body.max_output_tokens) as number | undefined) ?? 8192
     } as Model<Api>
 
     if (request.stream) {
