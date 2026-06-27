@@ -398,23 +398,292 @@ export const anthropicMessageToJson = (
 })
 
 // --- Responses SSE streaming + non-streaming JSON ---
-// Full implementations in Task 4.
+
+const makeRespId = (requestId: string): string => `resp_${requestId}`
+const makeMsgId = (requestId: string): string => `msg_${requestId}_${Date.now()}`
+const makeFcId = (callId: string): string => `fc_${callId}`
+
+const buildOutputItems = (message: AssistantMessage): Record<string, unknown>[] => {
+  const items: Record<string, unknown>[] = []
+  const textParts: string[] = []
+  const toolCalls: ToolCall[] = []
+  for (const part of message.content) {
+    if (part.type === 'text') textParts.push(part.text)
+    else if (part.type === 'toolCall') toolCalls.push(part)
+  }
+  if (textParts.length > 0) {
+    items.push({
+      type: 'message',
+      id: makeMsgId('m'),
+      status: 'completed',
+      role: 'assistant',
+      content: [{ type: 'output_text', text: textParts.join(''), annotations: [] }]
+    })
+  }
+  for (const tc of toolCalls) {
+    items.push({
+      type: 'function_call',
+      id: makeFcId(tc.id),
+      call_id: tc.id,
+      name: tc.name,
+      arguments: JSON.stringify(tc.arguments),
+      status: 'completed'
+    })
+  }
+  return items
+}
+
+const buildUsage = (message: AssistantMessage): Record<string, unknown> => {
+  const usage: Record<string, unknown> = {
+    input_tokens: message.usage.input,
+    output_tokens: message.usage.output,
+    total_tokens: message.usage.input + message.usage.output
+  }
+  if (message.usage.cacheRead > 0) {
+    usage.input_tokens_details = { cached_tokens: message.usage.cacheRead }
+  }
+  return usage
+}
+
+const respEnvelope = (
+  respId: string,
+  model: string,
+  status: string,
+  output: Record<string, unknown>[],
+  usage?: Record<string, unknown>
+): Record<string, unknown> => ({
+  id: respId,
+  object: 'response',
+  created_at: Math.floor(Date.now() / 1000),
+  model,
+  status,
+  output,
+  ...(usage !== undefined ? { usage } : {})
+})
 
 export const createResponsesSseStream = (
-  _events: AssistantMessageEventStream,
-  _requestId: string,
-  _requestedModel: string
-): ReadableStream => {
-  throw new Error('createResponsesSseStream: not implemented')
+  events: AsyncIterable<AssistantMessageEvent>,
+  requestId: string,
+  requestedModel: string
+): ReadableStream<Uint8Array> => {
+  const encoder = new TextEncoder()
+  const respId = makeRespId(requestId)
+
+  return new ReadableStream({
+    async start(controller) {
+      const enq = (eventName: string, data: unknown) => {
+        controller.enqueue(encoder.encode(`event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`))
+      }
+
+      let outputIndex = 0
+      let textItemId: string | null = null
+      let textContentIndex = 0
+      let accText = ''
+      // key: contentIndex, value: tracked function call
+      const openFcs = new Map<
+        number,
+        { itemId: string; callId: string; name: string; args: string }
+      >()
+
+      try {
+        for await (const ev of events) {
+          switch (ev.type) {
+            case 'start':
+              enq('response.created', {
+                type: 'response.created',
+                response: respEnvelope(respId, requestedModel, 'in_progress', [])
+              })
+              break
+
+            case 'text_start': {
+              const itemId = makeMsgId(requestId)
+              textItemId = itemId
+              textContentIndex = 0
+              accText = ''
+              enq('response.output_item.added', {
+                type: 'response.output_item.added',
+                output_index: outputIndex,
+                item: {
+                  type: 'message',
+                  id: itemId,
+                  status: 'in_progress',
+                  role: 'assistant',
+                  content: []
+                }
+              })
+              enq('response.content_part.added', {
+                type: 'response.content_part.added',
+                item_id: itemId,
+                output_index: outputIndex,
+                content_index: textContentIndex,
+                part: { type: 'output_text', text: '', annotations: [] }
+              })
+              break
+            }
+
+            case 'text_delta':
+              if (textItemId) {
+                accText += ev.delta
+                enq('response.output_text.delta', {
+                  type: 'response.output_text.delta',
+                  item_id: textItemId,
+                  output_index: outputIndex,
+                  content_index: textContentIndex,
+                  delta: ev.delta
+                })
+              }
+              break
+
+            case 'text_end':
+              if (textItemId) {
+                const text = ev.content ?? accText
+                enq('response.output_text.done', {
+                  type: 'response.output_text.done',
+                  item_id: textItemId,
+                  output_index: outputIndex,
+                  content_index: textContentIndex,
+                  text
+                })
+                enq('response.content_part.done', {
+                  type: 'response.content_part.done',
+                  item_id: textItemId,
+                  output_index: outputIndex,
+                  content_index: textContentIndex,
+                  part: { type: 'output_text', text, annotations: [] }
+                })
+                enq('response.output_item.done', {
+                  type: 'response.output_item.done',
+                  output_index: outputIndex,
+                  item: {
+                    type: 'message',
+                    id: textItemId,
+                    status: 'completed',
+                    role: 'assistant',
+                    content: [{ type: 'output_text', text, annotations: [] }]
+                  }
+                })
+                outputIndex += 1
+                textItemId = null
+              }
+              break
+
+            case 'toolcall_start': {
+              const part = ev.partial.content[ev.contentIndex] as ToolCall | undefined
+              const callId = part?.id ?? ''
+              const name = part?.name ?? ''
+              const itemId = makeFcId(callId)
+              openFcs.set(ev.contentIndex, { itemId, callId, name, args: '' })
+              enq('response.output_item.added', {
+                type: 'response.output_item.added',
+                output_index: outputIndex,
+                item: {
+                  type: 'function_call',
+                  id: itemId,
+                  call_id: callId,
+                  name,
+                  arguments: '',
+                  status: 'in_progress'
+                }
+              })
+              break
+            }
+
+            case 'toolcall_delta': {
+              const fc = openFcs.get(ev.contentIndex)
+              if (fc) {
+                fc.args += ev.delta
+                enq('response.function_call_arguments.delta', {
+                  type: 'response.function_call_arguments.delta',
+                  item_id: fc.itemId,
+                  output_index: outputIndex,
+                  delta: ev.delta
+                })
+              }
+              break
+            }
+
+            case 'toolcall_end': {
+              const fc = openFcs.get(ev.contentIndex)
+              if (fc) {
+                // Use streamed args if available, else serialize the final toolCall.arguments
+                const args = fc.args || JSON.stringify(ev.toolCall.arguments ?? {})
+                // Update ids/name from the finalized ToolCall
+                fc.callId = ev.toolCall.id
+                fc.name = ev.toolCall.name
+                fc.itemId = makeFcId(fc.callId)
+                enq('response.function_call_arguments.done', {
+                  type: 'response.function_call_arguments.done',
+                  item_id: fc.itemId,
+                  output_index: outputIndex,
+                  arguments: args,
+                  name: fc.name
+                })
+                enq('response.output_item.done', {
+                  type: 'response.output_item.done',
+                  output_index: outputIndex,
+                  item: {
+                    type: 'function_call',
+                    id: fc.itemId,
+                    call_id: fc.callId,
+                    name: fc.name,
+                    arguments: args,
+                    status: 'completed'
+                  }
+                })
+                openFcs.delete(ev.contentIndex)
+                outputIndex += 1
+              }
+              break
+            }
+
+            case 'done':
+              enq('response.completed', {
+                type: 'response.completed',
+                response: respEnvelope(
+                  respId,
+                  requestedModel,
+                  'completed',
+                  buildOutputItems(ev.message),
+                  buildUsage(ev.message)
+                )
+              })
+              controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+              controller.close()
+              return
+
+            case 'error':
+              controller.error(new Error(ev.error.errorMessage ?? 'pi-ai stream error'))
+              return
+
+            // thinking events — no Responses equivalent in v1
+            case 'thinking_start':
+            case 'thinking_delta':
+            case 'thinking_end':
+              break
+          }
+        }
+        // Iterator exhausted without 'done' — close cleanly
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+        controller.close()
+      } catch (err) {
+        controller.error(err)
+      }
+    }
+  })
 }
 
 export const responsesMessageToJson = (
-  _message: AssistantMessage,
-  _requestId: string,
-  _requestedModel: string
-): Record<string, unknown> => {
-  throw new Error('responsesMessageToJson: not implemented')
-}
+  message: AssistantMessage,
+  requestId: string,
+  requestedModel: string
+): Record<string, unknown> =>
+  respEnvelope(
+    makeRespId(requestId),
+    requestedModel,
+    'completed',
+    buildOutputItems(message),
+    buildUsage(message)
+  )
 
 // --- Non-streaming OpenAI JSON ---
 

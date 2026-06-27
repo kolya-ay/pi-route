@@ -7,7 +7,9 @@ import {
   anthropicMessageToJson,
   createAnthropicSseStream,
   createOpenAiSseStream,
-  openaiMessageToJson
+  createResponsesSseStream,
+  openaiMessageToJson,
+  responsesMessageToJson
 } from './to-sse'
 
 const makeUsage = (input = 100, output = 50) => ({
@@ -776,5 +778,171 @@ describe('openaiMessageToJson', () => {
     const result = openaiMessageToJson(message, 'req-5', 'gpt-4')
     const msg = (result.choices as Record<string, unknown>[])[0]!.message as Record<string, unknown>
     expect(msg.content).toBe('visible')
+  })
+})
+
+// --- Responses helpers ---
+
+/** Drain a ReadableStream<Uint8Array> to a single string. */
+const readStream = async (stream: ReadableStream<Uint8Array>): Promise<string> => {
+  const reader = stream.getReader()
+  const decoder = new TextDecoder()
+  const chunks: string[] = []
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(decoder.decode(value, { stream: true }))
+  }
+  return chunks.join('')
+}
+
+/** Build a minimal AssistantMessage for Responses encoder tests. */
+const makeAssistantStubMessage = (
+  text: string,
+  toolCalls: {
+    type: 'toolCall'
+    id: string
+    name: string
+    arguments: Record<string, unknown>
+  }[] = []
+): AssistantMessage =>
+  makePartial({
+    content: [...(text ? [{ type: 'text' as const, text }] : []), ...toolCalls]
+  })
+
+// --- Responses SSE streaming tests ---
+
+describe('createResponsesSseStream', () => {
+  it('emits response.created then text deltas then response.completed for a simple text turn', async () => {
+    const partial = makePartial()
+    const events: AssistantMessageEvent[] = [
+      { type: 'start', partial },
+      { type: 'text_start', contentIndex: 0, partial },
+      { type: 'text_delta', contentIndex: 0, delta: 'Hello', partial },
+      { type: 'text_delta', contentIndex: 0, delta: ' world', partial },
+      { type: 'text_end', contentIndex: 0, content: 'Hello world', partial },
+      { type: 'done', reason: 'stop', message: makeAssistantStubMessage('Hello world') }
+    ]
+    const stream = createResponsesSseStream(toAsyncIterable(events), 'req-1', 'gpt-4')
+    const text = await readStream(stream)
+
+    expect(text).toContain('event: response.created')
+    expect(text).toContain('event: response.output_item.added')
+    expect(text).toContain('event: response.content_part.added')
+    expect(text).toContain('event: response.output_text.delta')
+    expect(text).toContain('"delta":"Hello"')
+    expect(text).toContain('"delta":" world"')
+    expect(text).toContain('event: response.output_text.done')
+    expect(text).toContain('event: response.content_part.done')
+    expect(text).toContain('event: response.output_item.done')
+    expect(text).toContain('event: response.completed')
+    expect(text.trim().endsWith('data: [DONE]')).toBe(true)
+
+    // Verify ordering: response.created must appear before response.output_text.delta
+    const createdIdx = text.indexOf('response.created')
+    const deltaIdx = text.indexOf('response.output_text.delta')
+    const completedIdx = text.indexOf('response.completed')
+    const doneIdx = text.lastIndexOf('[DONE]')
+    expect(createdIdx).toBeLessThan(deltaIdx)
+    expect(deltaIdx).toBeLessThan(completedIdx)
+    expect(completedIdx).toBeLessThan(doneIdx)
+  })
+
+  it('emits function_call events for a tool call', async () => {
+    const partialWithTool = makePartial({
+      content: [{ type: 'toolCall', id: 'call_x', name: 'fn', arguments: {} }]
+    })
+    const events: AssistantMessageEvent[] = [
+      { type: 'start', partial: makePartial() },
+      { type: 'toolcall_start', contentIndex: 0, partial: partialWithTool },
+      { type: 'toolcall_delta', contentIndex: 0, delta: '{"a":', partial: partialWithTool },
+      { type: 'toolcall_delta', contentIndex: 0, delta: '1}', partial: partialWithTool },
+      {
+        type: 'toolcall_end',
+        contentIndex: 0,
+        toolCall: { type: 'toolCall', id: 'call_x', name: 'fn', arguments: { a: 1 } },
+        partial: partialWithTool
+      },
+      {
+        type: 'done',
+        reason: 'toolUse',
+        message: makeAssistantStubMessage('', [
+          { type: 'toolCall', id: 'call_x', name: 'fn', arguments: { a: 1 } }
+        ])
+      }
+    ]
+    const stream = createResponsesSseStream(toAsyncIterable(events), 'req-2', 'gpt-4')
+    const text = await readStream(stream)
+
+    expect(text).toContain('event: response.output_item.added')
+    expect(text).toContain('"type":"function_call"')
+    expect(text).toContain('event: response.function_call_arguments.delta')
+    expect(text).toContain('"delta":"{\\"a\\":')
+    expect(text).toContain('event: response.function_call_arguments.done')
+    expect(text).toContain('event: response.output_item.done')
+    expect(text).toContain('event: response.completed')
+    expect(text.trim().endsWith('data: [DONE]')).toBe(true)
+  })
+
+  it('emits [DONE] sentinel last', async () => {
+    const partial = makePartial()
+    const events: AssistantMessageEvent[] = [
+      { type: 'start', partial },
+      { type: 'done', reason: 'stop', message: makeAssistantStubMessage('') }
+    ]
+    const stream = createResponsesSseStream(toAsyncIterable(events), 'req-3', 'gpt-4')
+    const text = await readStream(stream)
+    expect(text.trim().endsWith('data: [DONE]')).toBe(true)
+  })
+})
+
+// --- Responses non-streaming JSON tests ---
+
+describe('responsesMessageToJson', () => {
+  it('encodes a text-only message as a Responses object', () => {
+    const msg = makeAssistantStubMessage('Hello world')
+    const out = responsesMessageToJson(msg, 'req-1', 'gpt-4')
+    expect(out.id).toMatch(/^resp_/)
+    expect(out.object).toBe('response')
+    expect(out.model).toBe('gpt-4')
+    expect(out.status).toBe('completed')
+    const output = out.output as Record<string, unknown>[]
+    expect(output).toHaveLength(1)
+    expect(output[0]!.type).toBe('message')
+    expect(output[0]!.role).toBe('assistant')
+    const content = output[0]!.content as Record<string, unknown>[]
+    expect(content[0]!.type).toBe('output_text')
+    expect(content[0]!.text).toBe('Hello world')
+  })
+
+  it('includes usage when present', () => {
+    const msg = makeAssistantStubMessage('hi')
+    msg.usage = {
+      input: 10,
+      output: 5,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 15,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+    }
+    const out = responsesMessageToJson(msg, 'req-1', 'gpt-4')
+    const usage = out.usage as Record<string, unknown>
+    expect(usage.input_tokens).toBe(10)
+    expect(usage.output_tokens).toBe(5)
+    expect(usage.total_tokens).toBe(15)
+  })
+
+  it('encodes function calls as function_call output items', () => {
+    const msg = makeAssistantStubMessage('', [
+      { type: 'toolCall', id: 'call_x', name: 'fn', arguments: { a: 1 } }
+    ])
+    const out = responsesMessageToJson(msg, 'req-1', 'gpt-4')
+    const output = out.output as Record<string, unknown>[]
+    const fcItem = output.find((item) => item.type === 'function_call')
+    expect(fcItem).toBeDefined()
+    expect(fcItem!.call_id).toBe('call_x')
+    expect(fcItem!.name).toBe('fn')
+    expect(fcItem!.arguments).toBe('{"a":1}')
+    expect(fcItem!.status).toBe('completed')
   })
 })
