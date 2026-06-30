@@ -11,6 +11,10 @@ export type EnvConfig = {
   // slow upstreams + multi-request keep-alive clients like Claude Code).
   // 0 disables Bun's idle timeout (HTTP/1.1 only). Cap is 255 per Bun's API.
   idleTimeout: number
+  otlpUrl: string
+  capturePrompts: boolean
+  captureMaxBytes: number
+  serviceName: string
 }
 
 const parsePort = (raw: string | undefined): number => {
@@ -31,6 +35,22 @@ const parseIdleTimeout = (raw: string | undefined): number => {
   return n
 }
 
+const parseCaptureMaxBytes = (raw: string | undefined): number => {
+  if (raw === undefined) return 65536
+  const n = Number(raw)
+  if (!Number.isInteger(n) || n < 1024) {
+    throw new Error(`PI_ROUTE_CAPTURE_MAX_BYTES must be an integer >= 1024, got "${raw}"`)
+  }
+  return n
+}
+
+const resolveOtlpUrl = (): string => {
+  if (process.env.PI_ROUTE_OTLP_URL) return process.env.PI_ROUTE_OTLP_URL
+  const port = process.env.PI_ROUTE_OTLP_PORT
+  if (port) return `http://localhost:${port}`
+  return ''
+}
+
 export const readEnvConfig = (): EnvConfig => {
   const rawAuth = process.env.PI_ROUTE_AUTH ?? '~/.config/pi-route/auth'
   const authDir = rawAuth.startsWith('~/') ? join(homedir(), rawAuth.slice(2)) : rawAuth
@@ -43,7 +63,11 @@ export const readEnvConfig = (): EnvConfig => {
       .filter(Boolean),
     configPath: process.env.PI_ROUTE_CONFIG ?? './router.yaml',
     authDir,
-    idleTimeout: parseIdleTimeout(process.env.PI_ROUTE_IDLE_TIMEOUT)
+    idleTimeout: parseIdleTimeout(process.env.PI_ROUTE_IDLE_TIMEOUT),
+    otlpUrl: resolveOtlpUrl(),
+    capturePrompts: process.env.PI_ROUTE_CAPTURE_PROMPTS === '1',
+    captureMaxBytes: parseCaptureMaxBytes(process.env.PI_ROUTE_CAPTURE_MAX_BYTES),
+    serviceName: process.env.PI_ROUTE_SERVICE_NAME ?? 'pi-route'
   }
 }
 

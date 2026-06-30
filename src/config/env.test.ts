@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it, test } from 'bun:test'
 import { interpolateEnvVars, readEnvConfig } from './env'
 
 describe('interpolateEnvVars', () => {
@@ -73,5 +73,72 @@ describe('readEnvConfig', () => {
   test('throws on non-numeric idleTimeout', () => {
     process.env.PI_ROUTE_IDLE_TIMEOUT = 'abc'
     expect(() => readEnvConfig()).toThrow(/PI_ROUTE_IDLE_TIMEOUT/)
+  })
+})
+
+const KEYS = [
+  'PI_ROUTE_OTLP_URL',
+  'PI_ROUTE_OTLP_PORT',
+  'PI_ROUTE_CAPTURE_PROMPTS',
+  'PI_ROUTE_CAPTURE_MAX_BYTES',
+  'PI_ROUTE_SERVICE_NAME'
+] as const
+
+describe('readEnvConfig telemetry fields', () => {
+  const saved: Record<string, string | undefined> = {}
+  beforeEach(() => {
+    for (const k of KEYS) {
+      saved[k] = process.env[k]
+      delete process.env[k]
+    }
+  })
+  afterEach(() => {
+    for (const k of KEYS) {
+      if (saved[k] === undefined) delete process.env[k]
+      else process.env[k] = saved[k]
+    }
+  })
+
+  it('defaults: otlpUrl empty, capture off, cap 65536, service pi-route', () => {
+    const env = readEnvConfig()
+    expect(env.otlpUrl).toBe('')
+    expect(env.capturePrompts).toBe(false)
+    expect(env.captureMaxBytes).toBe(65536)
+    expect(env.serviceName).toBe('pi-route')
+  })
+
+  it('reads PI_ROUTE_OTLP_URL when set', () => {
+    process.env.PI_ROUTE_OTLP_URL = 'http://localhost:4318'
+    expect(readEnvConfig().otlpUrl).toBe('http://localhost:4318')
+  })
+
+  it('PI_ROUTE_OTLP_PORT derives otlpUrl when PI_ROUTE_OTLP_URL is unset', () => {
+    delete process.env.PI_ROUTE_OTLP_URL
+    process.env.PI_ROUTE_OTLP_PORT = '2010'
+    expect(readEnvConfig().otlpUrl).toBe('http://localhost:2010')
+  })
+
+  it('PI_ROUTE_OTLP_URL wins over PI_ROUTE_OTLP_PORT when both are set', () => {
+    process.env.PI_ROUTE_OTLP_URL = 'http://otel.internal:9999'
+    process.env.PI_ROUTE_OTLP_PORT = '2010'
+    expect(readEnvConfig().otlpUrl).toBe('http://otel.internal:9999')
+  })
+
+  it('neither PI_ROUTE_OTLP_URL nor PI_ROUTE_OTLP_PORT → empty otlpUrl', () => {
+    delete process.env.PI_ROUTE_OTLP_URL
+    delete process.env.PI_ROUTE_OTLP_PORT
+    expect(readEnvConfig().otlpUrl).toBe('')
+  })
+
+  it('PI_ROUTE_CAPTURE_PROMPTS=1 toggles capture on', () => {
+    process.env.PI_ROUTE_CAPTURE_PROMPTS = '1'
+    expect(readEnvConfig().capturePrompts).toBe(true)
+  })
+
+  it('PI_ROUTE_CAPTURE_MAX_BYTES is an integer >= 1024; rejects junk', () => {
+    process.env.PI_ROUTE_CAPTURE_MAX_BYTES = '1024'
+    expect(readEnvConfig().captureMaxBytes).toBe(1024)
+    process.env.PI_ROUTE_CAPTURE_MAX_BYTES = 'oops'
+    expect(() => readEnvConfig()).toThrow(/PI_ROUTE_CAPTURE_MAX_BYTES/)
   })
 })
