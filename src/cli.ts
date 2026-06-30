@@ -12,6 +12,7 @@ import type { CredentialFile } from './types'
 const usage = `Usage:
   pi-route login <provider-type> [name]
   pi-route serve
+  pi-route stats [--by provider|model|day|session] [--since 7d]
 
 Known OAuth provider types: anthropic, openai-codex, google-antigravity`
 
@@ -72,6 +73,41 @@ if (verb === 'login') {
   console.log(`Logged in: ${target}/${name}`)
 } else if (verb === 'serve') {
   await import('./serve')
+} else if (verb === 'stats') {
+  const { runStats, formatTable } = await import('./cli/stats')
+  const argVal = (flag: string, def: string): string => {
+    const idx = Bun.argv.indexOf(flag)
+    if (idx === -1) return def
+    const val = Bun.argv[idx + 1]
+    if (val === undefined || val.startsWith('--')) {
+      console.error(`Missing value for ${flag}`)
+      process.exit(1)
+    }
+    return val
+  }
+  const byArg = argVal('--by', 'provider')
+  const since = argVal('--since', '7d')
+  if (!['provider', 'model', 'day', 'session'].includes(byArg)) {
+    console.error(`Invalid --by "${byArg}". Must be one of: provider|model|day|session`)
+    process.exit(1)
+  }
+  const by = byArg as 'provider' | 'model' | 'day' | 'session'
+  const rows = await runStats({ by, since })
+  console.log(formatTable(by, rows))
+} else if (verb === 'query') {
+  const viewer =
+    process.env.PI_ROUTE_VIEWER_URL ??
+    `http://localhost:${process.env.PI_ROUTE_VIEWER_PORT ?? '8000'}`
+  console.error(
+    [
+      'pi-route query is deprecated.',
+      '',
+      `Open the viewer UI: ${viewer}`,
+      'Or run ad-hoc SQL against the viewer database:',
+      '  duckdb ~/.cache/pi-route/otel.duckdb'
+    ].join('\n')
+  )
+  process.exit(2)
 } else {
   console.error(usage)
   process.exit(1)
