@@ -1,0 +1,34 @@
+# jaeger/docker-compose.yaml
+#
+# Single-container Jaeger v2 sink for local pi-route telemetry. Pinned to
+# 2.0.0 — fast-agent's reference doc uses :latest, which is fragile (cf.
+# the bitnami/zookeeper rug-pull that bit the signoz branch).
+#
+# All-in-one defaults to in-memory storage: traces last for the container's
+# lifetime and reset on restart. Adequate for a single-developer dev loop;
+# upgrade to the Badger backend if cross-restart retention becomes a need.
+#
+# Bring up:    docker compose -f jaeger/docker-compose.yaml up -d
+# Tear down:   docker compose -f jaeger/docker-compose.yaml down
+# UI:          http://localhost:16686
+# OTLP/HTTP:   http://localhost:4318
+# OTLP/gRPC:   http://localhost:4317
+
+services:
+  jaeger:
+    image: jaegertracing/jaeger:2.0.0
+    container_name: pi-route-jaeger
+    ports:
+      - "4317:4317"   # OTLP gRPC (parity; pi-route uses HTTP today)
+      - "4318:4318"   # OTLP HTTP
+      - "16686:16686" # Web UI
+    # Jaeger v2 binds the OTLP receivers to localhost-in-the-container by
+    # default, so Docker port-forwarding can't reach them. The --set flags
+    # rebind to 0.0.0.0 — matches the documented docker-run incantation in
+    # jaegertracing.io/docs/2.0/getting-started/.
+    command:
+      - --set
+      - receivers.otlp.protocols.http.endpoint=0.0.0.0:4318
+      - --set
+      - receivers.otlp.protocols.grpc.endpoint=0.0.0.0:4317
+    restart: unless-stopped
