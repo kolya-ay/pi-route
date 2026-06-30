@@ -15,8 +15,13 @@ const STATUS_BY_CODE: Record<string, ContentfulStatusCode> = {
 
 const InvalidBodySchema = z.object({ isInvalid: z.boolean() })
 
+// Structural acceptor: mountAdmin only calls `route()` on the host app, so
+// any Hono variant (full Env from telemetry/hono-env, or test minimal Vars)
+// fits without coupling to a specific Variables shape.
+type MountTarget = { route(path: string, sub: Hono): unknown }
+
 export const mountAdmin = (
-  app: Hono<{ Variables: { requestId: string } }>,
+  app: MountTarget,
   state: RouterState,
   opts: { authKey: string }
 ): void => {

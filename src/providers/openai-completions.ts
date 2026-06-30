@@ -70,9 +70,10 @@ export const createOpenAICompletionsProvider = (
       ...RETRY_OPTIONS
     })
     const metadata = makeMetadata(request, name, account, start)
+    const ctx = { costs: { inputCost: model.cost.input, outputCost: model.cost.output } }
 
     return request.stream
-      ? streamingResponse(eventStream, request, metadata)
-      : jsonResponse(eventStream, request, metadata)
+      ? streamingResponse(eventStream, request, metadata, ctx)
+      : jsonResponse(eventStream, request, metadata, ctx)
   }
 })

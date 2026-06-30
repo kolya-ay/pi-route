@@ -1,7 +1,12 @@
 // src/providers/pi-ai-runtime.ts
 
-import type { AssistantMessage, AssistantMessageEventStream } from '@mariozechner/pi-ai'
+import type {
+  AssistantMessage,
+  AssistantMessageEvent,
+  AssistantMessageEventStream
+} from '@mariozechner/pi-ai'
 
+import { wrapStreamForMetrics } from '../telemetry/stream-metrics'
 import type { Account, IncomingRequest, ProviderResponse } from '../types'
 
 import { formatJson, formatSse } from './to-sse'
@@ -33,30 +38,51 @@ export const makeMetadata = (
   ...('name' in account ? { account: account.name } : {})
 })
 
+// Costs are per-token rates lifted from the pi-ai catalog Model.
+export type StreamMetricsCtx = {
+  costs: { inputCost: number; outputCost: number }
+}
+
+const wrapIfTelHooks = (
+  eventStream: AssistantMessageEventStream,
+  request: IncomingRequest,
+  ctx: StreamMetricsCtx
+): AsyncIterable<AssistantMessageEvent> => {
+  if (request.telHooks === undefined) return eventStream
+  const { tel, span, capture } = request.telHooks
+  return wrapStreamForMetrics(eventStream, span, tel, ctx.costs, capture)
+}
+
 export const streamingResponse = (
   eventStream: AssistantMessageEventStream,
   request: IncomingRequest,
-  metadata: ProviderResponse['metadata']
-): ProviderResponse => ({
-  status: 200,
-  headers: new Headers({
-    'content-type': 'text/event-stream',
-    'cache-control': 'no-cache',
-    connection: 'keep-alive'
-  }),
-  body: formatSse(request.format, eventStream, request.id, request.model),
-  metadata
-})
+  metadata: ProviderResponse['metadata'],
+  ctx: StreamMetricsCtx
+): ProviderResponse => {
+  const events = wrapIfTelHooks(eventStream, request, ctx)
+  return {
+    status: 200,
+    headers: new Headers({
+      'content-type': 'text/event-stream',
+      'cache-control': 'no-cache',
+      connection: 'keep-alive'
+    }),
+    body: formatSse(request.format, events, request.id, request.model),
+    metadata
+  }
+}
 
 // Collect-and-serialize for non-streaming. Throws on mid-stream error so the
 // dispatch.ts catch-wrapper can surface a 502 + provider_error telemetry.
 export const jsonResponse = async (
   eventStream: AssistantMessageEventStream,
   request: IncomingRequest,
-  metadata: ProviderResponse['metadata']
+  metadata: ProviderResponse['metadata'],
+  ctx: StreamMetricsCtx
 ): Promise<ProviderResponse> => {
+  const events = wrapIfTelHooks(eventStream, request, ctx)
   let message: AssistantMessage | undefined
-  for await (const event of eventStream) {
+  for await (const event of events) {
     if (event.type === 'done') message = event.message
     if (event.type === 'error') {
       throw new Error(event.error.errorMessage ?? 'pi-ai stream error')

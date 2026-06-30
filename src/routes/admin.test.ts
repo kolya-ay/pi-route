@@ -6,10 +6,9 @@ import { Hono } from 'hono'
 import { readRuntimeState } from '../config/state'
 import { buildCatalog } from '../pipeline/catalog'
 import { createState, type RouterState } from '../state'
-import type { RouterOptions, TelemetryEmitter } from '../types'
+import type { RouterOptions } from '../types'
 import { mountAdmin } from './admin'
 
-const telemetry: TelemetryEmitter = { sinks: [], emit() {} }
 const authKey = 'secret'
 
 const baseOpts: RouterOptions = {
@@ -28,7 +27,7 @@ beforeEach(async () => {
 const mkApp = (
   options: RouterOptions = baseOpts
 ): { app: Hono<{ Variables: { requestId: string } }>; state: RouterState } => {
-  const state = createState(options, buildCatalog(options), { accounts: {} }, dir, telemetry)
+  const state = createState(options, buildCatalog(options), { accounts: {} }, dir)
   const app = new Hono<{ Variables: { requestId: string } }>()
   mountAdmin(app, state, { authKey })
   return { app, state }

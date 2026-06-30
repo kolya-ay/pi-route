@@ -5,14 +5,15 @@ import { mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createState } from '../state'
-import { createTelemetryEmitter } from '../telemetry/emitter'
-import type { CredentialFile, RouterOptions, TelemetryEvent } from '../types'
+import { createTel } from '../telemetry/tel'
+import { useTestExporter } from '../telemetry/test-fixture'
+import type { CredentialFile, RouterOptions } from '../types'
 import { readCredentials, refreshAndStore, writeCredentials } from './credentials'
 
-const mkState = (authDir: string, events: TelemetryEvent[] = []) => {
-  const telemetry = createTelemetryEmitter([{ emit: (e) => events.push(e) }])
-  return createState({} as RouterOptions, null as never, { accounts: {} }, authDir, telemetry)
-}
+const mkState = (authDir: string) =>
+  createState({} as RouterOptions, null as never, { accounts: {} }, authDir)
+
+const exporter = useTestExporter()
 
 let testDir: string
 
@@ -106,8 +107,7 @@ describe('refreshAndStore', () => {
       projectId: 'proj-123'
     })
 
-    const events: TelemetryEvent[] = []
-    const state = mkState(testDir, events)
+    const state = mkState(testDir)
     const credentials = state.credentials
 
     const originalFetch = globalThis.fetch
@@ -127,13 +127,19 @@ describe('refreshAndStore', () => {
     }) as typeof fetch
 
     try {
-      const result = await refreshAndStore(state, { credential: 'oauth', name: 'acct' })
+      const tel = createTel()
+      const result = await tel.withSpan('test.refresh', {}, async () =>
+        refreshAndStore(state, { credential: 'oauth', name: 'acct' }, tel)
+      )
       expect(result.access).toBe('new-access')
       expect(result.refresh).toBe('new-refresh')
       expect(result.projectId).toBe('proj-123') // preserved
       expect(credentials.get('acct')?.access).toBe('new-access')
-      expect(events).toHaveLength(1)
-      expect(events[0]?.type).toBe('account.refreshed')
+      const refreshedEvents = exporter
+        .getFinishedSpans()
+        .flatMap((s) => s.events)
+        .filter((e) => e.name === 'account.refreshed')
+      expect(refreshedEvents.length).toBeGreaterThan(0)
 
       const onDisk = await readCredentials(testDir, 'acct')
       expect(onDisk.access).toBe('new-access')
@@ -142,7 +148,7 @@ describe('refreshAndStore', () => {
     }
   })
 
-  it('emits account.refresh-failed and rethrows on refresh error', async () => {
+  it('rethrows on refresh error (account.refresh.failed is emitted by scheduler, not here)', async () => {
     const testDir = `${require('node:os').tmpdir()}/refresh-${crypto.randomUUID()}`
     await writeCredentials(testDir, 'acct', {
       provider: 'google-antigravity',
@@ -151,8 +157,7 @@ describe('refreshAndStore', () => {
       expires: 0
     })
 
-    const events: TelemetryEvent[] = []
-    const state = mkState(testDir, events)
+    const state = mkState(testDir)
 
     const originalFetch = globalThis.fetch
     globalThis.fetch = (async () =>
@@ -161,8 +166,18 @@ describe('refreshAndStore', () => {
       })) as unknown as typeof fetch
 
     try {
-      await expect(refreshAndStore(state, { credential: 'oauth', name: 'acct' })).rejects.toThrow()
-      expect(events[0]?.type).toBe('account.refresh-failed')
+      const tel = createTel()
+      await expect(
+        tel.withSpan('test.refresh', {}, async () =>
+          refreshAndStore(state, { credential: 'oauth', name: 'acct' }, tel)
+        )
+      ).rejects.toThrow()
+      // account.refresh.failed is now emitted by scheduler.ts, not credentials.ts.
+      const failedEvents = exporter
+        .getFinishedSpans()
+        .flatMap((s) => s.events)
+        .filter((e) => e.name === 'account.refresh.failed')
+      expect(failedEvents.length).toBe(0)
     } finally {
       globalThis.fetch = originalFetch
     }
@@ -210,7 +225,8 @@ describe('refreshAndStore: openai-codex-oauth', () => {
     }) as typeof fetch
 
     try {
-      const merged = await refreshAndStore(state, account)
+      const tel = createTel()
+      const merged = await refreshAndStore(state, account, tel)
       expect(merged.refresh).toBe('new-refresh')
       expect(merged.access).toBe(newAccess)
       expect(merged.provider).toBe('openai-codex')

@@ -29,8 +29,5 @@ export type {
   ProviderResponse,
   ProviderType,
   ResponseMetadata,
-  RouterOptions,
-  TelemetryEmitter,
-  TelemetryEvent,
-  TelemetrySink
+  RouterOptions
 } from './types'

@@ -131,18 +131,20 @@ const makeReq = (format: 'anthropic' | 'openai' | 'responses'): IncomingRequest 
   stream: true
 })
 
+const ctx = { costs: { inputCost: 0, outputCost: 0 } }
+
 describe('streamingResponse', () => {
   it('returns SSE headers + ReadableStream body for both formats', () => {
     const evA = createAssistantMessageEventStream()
     pushDone(evA, 'm-1')
-    const rA = streamingResponse(evA, makeReq('anthropic'), meta)
+    const rA = streamingResponse(evA, makeReq('anthropic'), meta, ctx)
     expect(rA.status).toBe(200)
     expect(rA.headers.get('content-type')).toBe('text/event-stream')
     expect(rA.body instanceof ReadableStream).toBe(true)
 
     const evO = createAssistantMessageEventStream()
     pushDone(evO, 'm-1')
-    const rO = streamingResponse(evO, makeReq('openai'), meta)
+    const rO = streamingResponse(evO, makeReq('openai'), meta, ctx)
     expect(rO.headers.get('content-type')).toBe('text/event-stream')
     expect(rO.body instanceof ReadableStream).toBe(true)
   })
@@ -152,7 +154,7 @@ describe('jsonResponse', () => {
   it('returns anthropic-shaped body on done event for anthropic format', async () => {
     const ev = createAssistantMessageEventStream()
     pushDone(ev, 'm-1')
-    const r = await jsonResponse(ev, makeReq('anthropic'), meta)
+    const r = await jsonResponse(ev, makeReq('anthropic'), meta, ctx)
     expect(r.headers.get('content-type')).toBe('application/json')
     const body = r.body as Record<string, unknown>
     expect(Array.isArray(body.content)).toBe(true)
@@ -163,7 +165,7 @@ describe('jsonResponse', () => {
   it('returns openai-shaped body on done event for openai format', async () => {
     const ev = createAssistantMessageEventStream()
     pushDone(ev, 'm-1')
-    const r = await jsonResponse(ev, makeReq('openai'), meta)
+    const r = await jsonResponse(ev, makeReq('openai'), meta, ctx)
     const body = r.body as Record<string, unknown>
     expect(Array.isArray(body.choices)).toBe(true)
     expect(body.content).toBeUndefined()
@@ -172,12 +174,12 @@ describe('jsonResponse', () => {
   it('throws with errorMessage on error event', async () => {
     const ev = createAssistantMessageEventStream()
     pushError(ev, 'm-1')
-    await expect(jsonResponse(ev, makeReq('openai'), meta)).rejects.toThrow('upstream blew up')
+    await expect(jsonResponse(ev, makeReq('openai'), meta, ctx)).rejects.toThrow('upstream blew up')
   })
 
   it('throws when stream ends without a done event', async () => {
     const ev = createAssistantMessageEventStream()
     queueMicrotask(() => ev.end())
-    await expect(jsonResponse(ev, makeReq('openai'), meta)).rejects.toThrow('No response')
+    await expect(jsonResponse(ev, makeReq('openai'), meta, ctx)).rejects.toThrow('No response')
   })
 })

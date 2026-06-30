@@ -4,6 +4,7 @@ import { chmodSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { getOAuthProvider } from '@mariozechner/pi-ai/oauth'
 import type { RouterState } from '../state'
+import type { Tel } from '../telemetry/tel'
 import type { Account, CredentialFile } from '../types'
 
 export type { CredentialFile } from '../types'
@@ -37,33 +38,24 @@ export const writeCredentials = async (
 
 export const refreshAndStore = async (
   state: RouterState,
-  account: Account & { credential: 'oauth' }
+  account: Account & { credential: 'oauth' },
+  tel: Tel
 ): Promise<CredentialFile> => {
   const current =
     state.credentials.get(account.name) ?? (await readCredentials(state.authDir, account.name))
   state.credentials.set(account.name, current)
 
-  try {
-    const provider = getOAuthProvider(current.provider)
-    if (!provider) {
-      throw new Error(`Cannot refresh: no OAuth provider registered for id '${current.provider}'`)
-    }
-    const refreshed = await provider.refreshToken(current)
-    const merged: CredentialFile = { ...current, ...refreshed }
-    await writeCredentials(state.authDir, account.name, merged)
-    state.credentials.set(account.name, merged)
-    state.telemetry.emit({
-      type: 'account.refreshed',
-      account: account.name,
-      expires: merged.expires
-    })
-    return merged
-  } catch (err) {
-    state.telemetry.emit({
-      type: 'account.refresh-failed',
-      account: account.name,
-      error: err instanceof Error ? err.message : String(err)
-    })
-    throw err
+  const provider = getOAuthProvider(current.provider)
+  if (!provider) {
+    throw new Error(`Cannot refresh: no OAuth provider registered for id '${current.provider}'`)
   }
+  const refreshed = await provider.refreshToken(current)
+  const merged: CredentialFile = { ...current, ...refreshed }
+  await writeCredentials(state.authDir, account.name, merged)
+  state.credentials.set(account.name, merged)
+  tel.event('account.refreshed', {
+    'pi.account': account.name,
+    'pi.expires': merged.expires
+  })
+  return merged
 }

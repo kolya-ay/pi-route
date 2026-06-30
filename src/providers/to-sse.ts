@@ -1,11 +1,6 @@
 // src/providers/to-sse.ts
 
-import type {
-  AssistantMessage,
-  AssistantMessageEvent,
-  AssistantMessageEventStream,
-  ToolCall
-} from '@mariozechner/pi-ai'
+import type { AssistantMessage, AssistantMessageEvent, ToolCall } from '@mariozechner/pi-ai'
 
 import type { IncomingRequest } from '../types'
 
@@ -726,7 +721,7 @@ export const openaiMessageToJson = (
 
 export const formatSse = (
   format: IncomingRequest['format'],
-  events: AssistantMessageEventStream,
+  events: AsyncIterable<AssistantMessageEvent>,
   requestId: string,
   requestedModel: string
 ): ReadableStream =>

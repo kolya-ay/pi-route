@@ -1,6 +1,10 @@
 // src/types.ts
 
 import type { OAuthCredentials } from '@mariozechner/pi-ai/oauth'
+import type { Span } from '@opentelemetry/api'
+
+import type { CaptureOpts } from './telemetry/capture'
+import type { Tel } from './telemetry/tel'
 
 // === Provider ===
 
@@ -20,12 +24,22 @@ export type Provider = {
   dispatch(request: IncomingRequest, account: Account, apiKey: string): Promise<ProviderResponse>
 }
 
+// Telemetry hooks threaded from dispatch.ts to providers so pi-ai-runtime can
+// wrap event streams with TTFT/tokens/cost recording and optional prompt
+// capture. Optional — non-pi-ai providers (passthrough, antigravity) ignore it.
+export type TelHooks = {
+  tel: Tel
+  span: Span
+  capture: CaptureOpts
+}
+
 export type IncomingRequest = {
   id: string
   format: 'anthropic' | 'openai' | 'responses'
   rawRequest: Request
   model: string
   stream: boolean
+  telHooks?: TelHooks
 }
 
 export type ProviderResponse = {
@@ -55,88 +69,6 @@ export type Account = { disabled?: boolean | undefined } & (
   | { credential: 'key'; key: string }
   | { credential: 'oauth'; name: string; projectId?: string | undefined }
 )
-
-// === Telemetry ===
-
-export type TelemetrySink = { emit(event: TelemetryEvent): void }
-
-export type TelemetryEmitter = { sinks: TelemetrySink[]; emit(event: TelemetryEvent): void }
-
-export type TelemetryEvent =
-  | RequestStartEvent
-  | RequestEndEvent
-  | ProviderErrorEvent
-  | RateLimitEvent
-  | ProviderFallbackEvent
-  | AccountRefreshedEvent
-  | AccountRefreshFailedEvent
-  | AccountRefreshGivenUpEvent
-
-export type AccountRefreshedEvent = {
-  type: 'account.refreshed'
-  account: string
-  expires: number
-}
-
-export type AccountRefreshFailedEvent = {
-  type: 'account.refresh-failed'
-  account: string
-  error: string
-}
-
-export type AccountRefreshGivenUpEvent = {
-  type: 'account.refresh-given-up'
-  account: string
-  attempts: number
-}
-
-export type RequestStartEvent = {
-  type: 'request_start'
-  requestId: string
-  timestamp: number
-  format: 'anthropic' | 'openai' | 'responses'
-  model: string
-  stream: boolean
-}
-
-export type RequestEndEvent = {
-  type: 'request_end'
-  requestId: string
-  timestamp: number
-  status: number
-  provider: string
-  model: string
-  account?: string | undefined
-  tokens?: { input: number; output: number; cacheRead?: number; cacheWrite?: number } | undefined
-  cost?: { input: number; output: number; total: number } | undefined
-  latencyMs: number
-  error?: string | undefined
-}
-
-export type ProviderErrorEvent = {
-  type: 'provider_error'
-  requestId: string
-  provider: string
-  account?: string | undefined
-  status?: number | undefined
-  message: string
-}
-
-export type RateLimitEvent = {
-  type: 'ratelimit_hit'
-  provider: string
-  account: string
-  model: string
-  retryAfterMs: number
-}
-
-export type ProviderFallbackEvent = {
-  type: 'provider_fallback'
-  requestId: string
-  from: string
-  to: string
-  reason: string
-}
 
 // === Config ===
 

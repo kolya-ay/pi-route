@@ -1,7 +1,7 @@
 import { describe, expect, it, mock } from 'bun:test'
 import type { RouterState } from '../state'
 import { createState } from '../state'
-import { createTelemetryEmitter } from '../telemetry/emitter'
+import { createTel } from '../telemetry/tel'
 import type { Account, RouterOptions } from '../types'
 import { writeCredentials } from './credentials'
 import { resolveKey } from './resolve'
@@ -13,13 +13,15 @@ const baseOptions: RouterOptions = {
 }
 
 const mkState = (authDir: string): RouterState =>
-  createState(baseOptions, null as never, { accounts: {} }, authDir, createTelemetryEmitter([]))
+  createState(baseOptions, null as never, { accounts: {} }, authDir)
+
+const tel = createTel()
 
 describe('resolveKey', () => {
   it('key credential returns the key field', async () => {
     const state = mkState('/tmp')
     const account: Account = { credential: 'key', key: 'sk-test' }
-    expect(await resolveKey(state, account)).toBe('sk-test')
+    expect(await resolveKey(state, account, tel)).toBe('sk-test')
   })
 
   it('antigravity oauth account returns JSON {token, projectId} using cached non-expired credentials', async () => {
@@ -33,7 +35,7 @@ describe('resolveKey', () => {
     })
     const state = mkState(dir)
     const account: Account = { credential: 'oauth', name: 'acct' }
-    const json = await resolveKey(state, account)
+    const json = await resolveKey(state, account, tel)
     expect(JSON.parse(json)).toEqual({ token: 'access-abc', projectId: 'proj-xyz' })
   })
 
@@ -47,7 +49,7 @@ describe('resolveKey', () => {
     })
     const state = mkState(dir)
     const account: Account = { credential: 'oauth', name: 'acct' }
-    const result = await resolveKey(state, account)
+    const result = await resolveKey(state, account, tel)
     expect(result).toBe('raw-access-tok')
   })
 
@@ -74,7 +76,7 @@ describe('resolveKey', () => {
     try {
       const state = mkState(dir)
       const account: Account = { credential: 'oauth', name: 'acct' }
-      const result = await resolveKey(state, account)
+      const result = await resolveKey(state, account, tel)
       expect(refreshStub).toHaveBeenCalledTimes(1)
       expect(result).toBe('new-access')
     } finally {

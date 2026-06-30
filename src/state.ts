@@ -1,6 +1,6 @@
 import type { RuntimeState } from './config/state'
 import type { Catalog } from './pipeline/catalog'
-import type { CredentialFile, RouterOptions, TelemetryEmitter } from './types'
+import type { CredentialFile, RouterOptions } from './types'
 
 export type RouterState = {
   options: RouterOptions
@@ -10,15 +10,13 @@ export type RouterState = {
   timers: Map<string, ReturnType<typeof setTimeout>>
   refreshFailures: Map<string, number>
   authDir: string
-  telemetry: TelemetryEmitter
 }
 
 export const createState = (
   options: RouterOptions,
   catalog: Catalog,
   runtime: RuntimeState,
-  authDir: string,
-  telemetry: TelemetryEmitter
+  authDir: string
 ): RouterState => ({
   options,
   catalog,
@@ -26,6 +24,5 @@ export const createState = (
   authDir,
   credentials: new Map(),
   timers: new Map(),
-  refreshFailures: new Map(),
-  telemetry
+  refreshFailures: new Map()
 })

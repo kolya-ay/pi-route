@@ -1,9 +1,14 @@
 import { getOAuthProvider } from '@mariozechner/pi-ai/oauth'
 import type { RouterState } from '../state'
+import type { Tel } from '../telemetry/tel'
 import type { Account } from '../types'
 import { readCredentials, refreshAndStore } from './credentials'
 
-export const resolveKey = async (state: RouterState, account: Account): Promise<string> => {
+export const resolveKey = async (
+  state: RouterState,
+  account: Account,
+  tel: Tel
+): Promise<string> => {
   if (account.credential === 'key') return account.key
 
   let cred = state.credentials.get(account.name)
@@ -18,7 +23,7 @@ export const resolveKey = async (state: RouterState, account: Account): Promise<
   }
 
   if (Date.now() >= cred.expires) {
-    cred = await refreshAndStore(state, account)
+    cred = await refreshAndStore(state, account, tel)
   }
 
   // Antigravity supports a per-provider projectId override from router.yaml

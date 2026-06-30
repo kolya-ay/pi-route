@@ -37,4 +37,20 @@ describe('createApp', () => {
     const r = await router.app.request('/health')
     expect(r.status).toBe(200)
   })
+
+  test('emits an x-request-id header even when client does not provide one', async () => {
+    const router = await createApp()
+    const res = await router.app.request('/v1/models', {
+      headers: { authorization: 'Bearer t' }
+    })
+    expect(res.headers.get('x-request-id')).toMatch(/[0-9a-f-]{8,}/)
+  })
+
+  test('honors an inbound X-Request-Id header', async () => {
+    const router = await createApp()
+    const res = await router.app.request('/v1/models', {
+      headers: { authorization: 'Bearer t', 'x-request-id': 'my-id-42' }
+    })
+    expect(res.headers.get('x-request-id')).toBe('my-id-42')
+  })
 })

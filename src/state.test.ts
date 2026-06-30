@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { buildCatalog } from './pipeline/catalog'
 import { createState } from './state'
-import { createTelemetryEmitter } from './telemetry/emitter'
 import type { RouterOptions } from './types'
 
 const minimalOptions: RouterOptions = {
@@ -13,11 +12,10 @@ const minimalOptions: RouterOptions = {
 }
 
 describe('createState', () => {
-  it('returns state with provided options, empty Maps, and wired hooks', () => {
-    const telemetry = createTelemetryEmitter([])
+  it('returns state with provided options and empty Maps', () => {
     const catalog = buildCatalog(minimalOptions)
     const runtime = { accounts: {} }
-    const state = createState(minimalOptions, catalog, runtime, '/tmp/auth', telemetry)
+    const state = createState(minimalOptions, catalog, runtime, '/tmp/auth')
     expect(state.options).toBe(minimalOptions)
     expect(state.catalog).toBe(catalog)
     expect(state.runtime).toBe(runtime)
@@ -25,6 +23,5 @@ describe('createState', () => {
     expect(state.credentials.size).toBe(0)
     expect(state.timers.size).toBe(0)
     expect(state.refreshFailures.size).toBe(0)
-    expect(state.telemetry).toBe(telemetry)
   })
 })

@@ -5,10 +5,8 @@ import { join } from 'node:path'
 import { readRuntimeState } from '../config/state'
 import { buildCatalog } from '../pipeline/catalog'
 import { createState, type RouterState } from '../state'
-import type { RouterOptions, TelemetryEmitter } from '../types'
+import type { RouterOptions } from '../types'
 import { getAccount, listAccounts, setAccountInvalid } from './accounts'
-
-const telemetry: TelemetryEmitter = { sinks: [], emit() {} }
 
 const baseOpts: RouterOptions = {
   providers: {
@@ -24,7 +22,7 @@ beforeEach(async () => {
 })
 
 const mkState = (options: RouterOptions = baseOpts): RouterState =>
-  createState(options, buildCatalog(options), { accounts: {} }, dir, telemetry)
+  createState(options, buildCatalog(options), { accounts: {} }, dir)
 
 describe('admin/accounts', () => {
   test('listAccounts returns one entry per provider', () => {
