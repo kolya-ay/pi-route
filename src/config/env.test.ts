@@ -142,3 +142,34 @@ describe('readEnvConfig telemetry fields', () => {
     expect(() => readEnvConfig()).toThrow(/PI_ROUTE_CAPTURE_MAX_BYTES/)
   })
 })
+
+describe('readEnvConfig — maxBodyBytes', () => {
+  const originalEnv = { ...process.env }
+  beforeEach(() => {
+    delete process.env.PI_ROUTE_MAX_BODY_BYTES
+  })
+  afterEach(() => {
+    process.env = { ...originalEnv }
+  })
+
+  test('defaults to 50 MB when PI_ROUTE_MAX_BODY_BYTES is unset', () => {
+    const env = readEnvConfig()
+    expect(env.maxBodyBytes).toBe(50 * 1024 * 1024)
+  })
+
+  test('honors PI_ROUTE_MAX_BODY_BYTES when set to a valid integer', () => {
+    process.env.PI_ROUTE_MAX_BODY_BYTES = '1048576'
+    const env = readEnvConfig()
+    expect(env.maxBodyBytes).toBe(1_048_576)
+  })
+
+  test('throws when PI_ROUTE_MAX_BODY_BYTES is below minimum (1024)', () => {
+    process.env.PI_ROUTE_MAX_BODY_BYTES = '512'
+    expect(() => readEnvConfig()).toThrow(/PI_ROUTE_MAX_BODY_BYTES/)
+  })
+
+  test('throws when PI_ROUTE_MAX_BODY_BYTES is not an integer', () => {
+    process.env.PI_ROUTE_MAX_BODY_BYTES = 'abc'
+    expect(() => readEnvConfig()).toThrow(/PI_ROUTE_MAX_BODY_BYTES/)
+  })
+})

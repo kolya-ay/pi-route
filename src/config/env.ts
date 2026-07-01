@@ -15,6 +15,7 @@ export type EnvConfig = {
   capturePrompts: boolean
   captureMaxBytes: number
   serviceName: string
+  maxBodyBytes: number
 }
 
 const parsePort = (raw: string | undefined): number => {
@@ -44,6 +45,15 @@ const parseCaptureMaxBytes = (raw: string | undefined): number => {
   return n
 }
 
+const parseMaxBodyBytes = (raw: string | undefined): number => {
+  if (raw === undefined) return 50 * 1024 * 1024
+  const n = Number(raw)
+  if (!Number.isInteger(n) || n < 1024) {
+    throw new Error(`PI_ROUTE_MAX_BODY_BYTES must be an integer >= 1024, got "${raw}"`)
+  }
+  return n
+}
+
 const resolveOtlpUrl = (): string => {
   if (process.env.PI_ROUTE_OTLP_URL) return process.env.PI_ROUTE_OTLP_URL
   const port = process.env.PI_ROUTE_OTLP_PORT
@@ -67,7 +77,8 @@ export const readEnvConfig = (): EnvConfig => {
     otlpUrl: resolveOtlpUrl(),
     capturePrompts: process.env.PI_ROUTE_CAPTURE_PROMPTS === '1',
     captureMaxBytes: parseCaptureMaxBytes(process.env.PI_ROUTE_CAPTURE_MAX_BYTES),
-    serviceName: process.env.PI_ROUTE_SERVICE_NAME ?? 'pi-route'
+    serviceName: process.env.PI_ROUTE_SERVICE_NAME ?? 'pi-route',
+    maxBodyBytes: parseMaxBodyBytes(process.env.PI_ROUTE_MAX_BODY_BYTES)
   }
 }
 
