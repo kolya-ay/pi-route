@@ -53,4 +53,13 @@ describe('createApp', () => {
     })
     expect(res.headers.get('x-request-id')).toBe('my-id-42')
   })
+
+  test('does not compress responses (no content-encoding on /v1/models)', async () => {
+    const router = await createApp()
+    const r = await router.app.request('/v1/models', {
+      headers: { 'accept-encoding': 'gzip, deflate, br' }
+    })
+    expect(r.status).toBe(200)
+    expect(r.headers.get('content-encoding')).toBeNull()
+  })
 })

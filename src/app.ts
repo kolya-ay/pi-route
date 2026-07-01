@@ -1,6 +1,7 @@
 // src/app.ts
 
 import { httpInstrumentationMiddleware as otel } from '@hono/otel'
+import { bodyLimit } from 'hono/body-limit'
 import { contextStorage } from 'hono/context-storage'
 import { cors } from 'hono/cors'
 import { requestId } from 'hono/request-id'
@@ -8,6 +9,7 @@ import { timing } from 'hono/timing'
 
 import { createAuthMiddleware } from './auth/middleware'
 import { scheduleRefresh } from './auth/scheduler'
+import { decompressRequest } from './compression'
 import { readEnvConfig } from './config/env'
 import { loadConfig } from './config/loader'
 import { buildCatalog } from './pipeline/catalog'
@@ -50,26 +52,8 @@ export const createApp = async (
   const registry = createProviderRegistry(state)
 
   app.use('*', cors())
-  app.use('*', async (c, next) => {
-    const encoding = c.req.header('content-encoding')?.toLowerCase()
-    if (!encoding || (encoding !== 'zstd' && encoding !== 'gzip' && encoding !== 'deflate'))
-      return next()
-    const body = c.req.raw.body
-    if (!body) return next()
-    const decompressed = await new Response(
-      body.pipeThrough(new DecompressionStream(encoding as CompressionFormat))
-    ).bytes()
-    const newHeaders = new Headers(c.req.raw.headers)
-    newHeaders.delete('content-encoding')
-    newHeaders.delete('content-length')
-    c.req.raw = new Request(c.req.raw.url, {
-      method: c.req.raw.method,
-      headers: newHeaders,
-      body: decompressed,
-      duplex: 'half'
-    } as RequestInit)
-    return next()
-  })
+  app.use('*', decompressRequest({ maxBodyBytes: env.maxBodyBytes }))
+  app.use('/v1/*', bodyLimit({ maxSize: env.maxBodyBytes }))
   app.use('/v1/*', requestId())
   app.use('/v1/*', contextStorage())
   app.use('/v1/*', timing())
