@@ -18,8 +18,9 @@ const resolve = (o: RouterOptions, model: string, req: { thinking?: boolean } = 
 
 const first = (o: RouterOptions, model: string, req: { thinking?: boolean } = {}) => {
   const list = resolve(o, model, req)
-  if (list.length === 0) throw new Error('no candidates')
-  return list[0]!
+  const selected = list[0]
+  if (!selected) throw new Error('no candidates')
+  return selected
 }
 
 describe('resolveCandidates', () => {
@@ -170,7 +171,9 @@ describe('resolveCandidates', () => {
     })
     const list = resolve(o, 'pool/claude-opus-4-7')
     expect(list).toHaveLength(1)
-    expect(['claude-personal', 'claude-work']).toContain(list[0]!.provider)
-    expect(list[0]!.modelId).toBe('claude-opus-4-7')
+    const firstCandidate = list[0]
+    if (!firstCandidate) throw new Error('missing candidate')
+    expect(['claude-personal', 'claude-work']).toContain(firstCandidate.provider)
+    expect(firstCandidate.modelId).toBe('claude-opus-4-7')
   })
 })

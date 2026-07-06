@@ -56,7 +56,8 @@ export const buildCatalog = (opts: RouterOptions): Catalog => {
       // Only handle templates of the form '<prefix>/$1' (tail propagation).
       const m = /^([^*?[]+)\/\$1$/.exec(item)
       if (!m) continue
-      const prefix = m[1]!
+      const prefix = m[1]
+      if (!prefix) continue
       for (const leaf of leafAddresses) {
         if (leaf.startsWith(`${prefix}/`)) {
           const tail = leaf.slice(prefix.length + 1)

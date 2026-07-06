@@ -287,7 +287,7 @@ describe('responsesToContext', () => {
       ]
     })
     expect(ctx.tools).toHaveLength(1)
-    expect(ctx.tools![0]).toMatchObject({ name: 'get_weather' })
+    expect(ctx.tools?.[0]).toMatchObject({ name: 'get_weather' })
   })
 
   it('ignores unsupported tool types (web_search, file_search)', () => {
@@ -297,7 +297,7 @@ describe('responsesToContext', () => {
       tools: [{ type: 'web_search' }, { type: 'function', name: 'get_weather', parameters: {} }]
     })
     expect(ctx.tools).toHaveLength(1)
-    expect(ctx.tools![0]?.name).toBe('get_weather')
+    expect(ctx.tools?.[0]?.name).toBe('get_weather')
   })
 
   it('flattens array-shaped function_call_output to a string', () => {

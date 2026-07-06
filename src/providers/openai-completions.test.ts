@@ -292,7 +292,8 @@ describe('createOpenAICompletionsProvider', () => {
       await p.dispatch(req, account, 'k')
 
       expect(captured.length).toBeGreaterThan(0)
-      const body = captured[0]!
+      const body = captured[0]
+      if (!body) throw new Error('missing captured body')
       expect(body).not.toContain('"type":"input_text"')
 
       const parsed = JSON.parse(body) as {
@@ -300,8 +301,9 @@ describe('createOpenAICompletionsProvider', () => {
       }
       const userMsg = parsed.messages.find((m) => m.role === 'user')
       expect(userMsg).toBeDefined()
-      expect(Array.isArray(userMsg!.content)).toBe(true)
-      for (const part of userMsg!.content as Array<{ type: string }>) {
+      expect(Array.isArray(userMsg?.content)).toBe(true)
+      if (!userMsg || !Array.isArray(userMsg.content)) throw new Error('missing user content')
+      for (const part of userMsg.content as Array<{ type: string }>) {
         expect(part.type).toBe('text')
       }
     } finally {

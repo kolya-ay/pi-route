@@ -35,9 +35,12 @@ const pickStrategy = (
   counter: { i: number }
 ): string => {
   if (candidates.length === 0) throw new Error('no candidates')
-  if (strategy === 'sticky' || strategy === 'fill-first') return candidates[0]!
+  const first = candidates[0]
+  if (!first) throw new Error('no candidates')
+  if (strategy === 'sticky' || strategy === 'fill-first') return first
   // round-robin
-  const v = candidates[counter.i % candidates.length]!
+  const v = candidates[counter.i % candidates.length]
+  if (!v) throw new Error('no candidates')
   counter.i += 1
   return v
 }

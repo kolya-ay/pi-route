@@ -8,7 +8,7 @@ describe('parseConfig — providers', () => {
         cerebras: { type: 'cerebras', account: { credential: 'key', key: 'sk-foo' } }
       }
     })
-    expect(opts.providers.cerebras!.account).toEqual({ credential: 'key', key: 'sk-foo' })
+    expect(opts.providers.cerebras?.account).toEqual({ credential: 'key', key: 'sk-foo' })
   })
   test('parses an oauth-credential provider', () => {
     const opts = parseConfig({
@@ -19,7 +19,8 @@ describe('parseConfig — providers', () => {
         }
       }
     })
-    const a = opts.providers.antigravity!.account
+    const a = opts.providers.antigravity?.account
+    if (!a) throw new Error('antigravity provider missing')
     expect(a.credential).toBe('oauth')
     if (a.credential === 'oauth') expect(a.name).toBe('user@gmail.com')
   })
@@ -91,7 +92,8 @@ describe('parseConfig — pipeline value shapes', () => {
       }
     })
     expect(parsed.pipeline).toHaveLength(1)
-    const entry = parsed.pipeline[0]!
+    const entry = parsed.pipeline[0]
+    if (!entry) throw new Error('pipeline entry missing')
     expect(entry.kind).toBe('pool')
     if (entry.kind !== 'pool') throw new Error('unreachable')
     expect(entry.strategy).toBe('failover')

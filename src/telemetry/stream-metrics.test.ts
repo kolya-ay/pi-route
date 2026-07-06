@@ -51,12 +51,13 @@ describe('wrapStreamForMetrics', () => {
       })
       await drain(wrapped)
     })
-    const attrs = exporter.getFinishedSpans()[0]!.attributes
+    const attrs = exporter.getFinishedSpans()[0]?.attributes
+    if (!attrs) throw new Error('missing finished span attributes')
     expect(attrs['pi.time_to_first_token_ms']).toBeGreaterThanOrEqual(0)
-    expect(attrs['gen_ai.usage.input_tokens']).toBe(100)
-    expect(attrs['gen_ai.usage.output_tokens']).toBe(50)
-    expect(attrs['gen_ai.usage.cost_usd']).toBeCloseTo(100 * 0.000001 + 50 * 0.000002)
-    expect(typeof attrs['pi.output_tokens_per_second']).toBe('number')
+    expect(attrs?.['gen_ai.usage.input_tokens']).toBe(100)
+    expect(attrs?.['gen_ai.usage.output_tokens']).toBe(50)
+    expect(attrs?.['gen_ai.usage.cost_usd']).toBeCloseTo(100 * 0.000001 + 50 * 0.000002)
+    expect(typeof attrs?.['pi.output_tokens_per_second']).toBe('number')
   })
 
   it('passes through every upstream event unchanged', async () => {
@@ -88,8 +89,8 @@ describe('wrapStreamForMetrics', () => {
       })
       await drain(wrapped)
     })
-    const attrs = exporter.getFinishedSpans()[0]!.attributes
-    expect(attrs['pi.time_to_first_token_ms']).toBeGreaterThanOrEqual(0)
+    const attrs = exporter.getFinishedSpans()[0]?.attributes
+    expect(attrs?.['pi.time_to_first_token_ms']).toBeGreaterThanOrEqual(0)
   })
 
   it('records 0 tokens/sec when no text chunks before done', async () => {
@@ -102,7 +103,8 @@ describe('wrapStreamForMetrics', () => {
       })
       await drain(wrapped)
     })
-    const attrs = exporter.getFinishedSpans()[0]!.attributes
+    const attrs = exporter.getFinishedSpans()[0]?.attributes
+    if (!attrs) throw new Error('missing finished span attributes')
     // output is 0 so tps must be 0 (or finite, not NaN/Infinity)
     expect(Number.isFinite(attrs['pi.output_tokens_per_second'] as number)).toBe(true)
     expect(attrs['pi.output_tokens_per_second']).toBe(0)
@@ -122,7 +124,9 @@ describe('wrapStreamForMetrics', () => {
       })
       await drain(wrapped)
     })
-    const tps = exporter.getFinishedSpans()[0]!.attributes['pi.output_tokens_per_second'] as number
+    const attrs = exporter.getFinishedSpans()[0]?.attributes
+    if (!attrs) throw new Error('missing finished span attributes')
+    const tps = attrs['pi.output_tokens_per_second'] as number
     // 50 output tokens / >=10ms elapsed ≈ <5000 tps. If lastChunk were never updated,
     // elapsed would fall through to Math.max(0.001, 0) and tps = 50000.
     expect(tps).toBeLessThan(10_000)

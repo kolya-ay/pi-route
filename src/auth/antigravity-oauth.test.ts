@@ -16,6 +16,12 @@ import {
 // `typeof fetch` requires, so we cast through `unknown`.
 const asFetch = (fn: ReturnType<typeof mock>) => fn as unknown as typeof fetch
 
+const takeResponse = (responses: Response[]): Response => {
+  const response = responses.shift()
+  if (!response) throw new Error('missing mocked response')
+  return response
+}
+
 describe('buildAuthUrl', () => {
   it('produces a valid Google OAuth URL with required params', () => {
     const url = new URL(buildAuthUrl('test-state-123'))
@@ -32,7 +38,8 @@ describe('buildAuthUrl', () => {
 
   it('includes all required scopes', () => {
     const url = new URL(buildAuthUrl('s'))
-    const scope = url.searchParams.get('scope')!
+    const scope = url.searchParams.get('scope')
+    if (!scope) throw new Error('scope missing')
     expect(scope).toContain('cloud-platform')
     expect(scope).toContain('userinfo.email')
     expect(scope).toContain('userinfo.profile')
@@ -148,7 +155,7 @@ describe('discoverProject', () => {
         response: { cloudaicompanionProject: { id: 'fresh-project-abc' } }
       })
     ]
-    const mockFetch = mock(async () => responses.shift()!)
+    const mockFetch = mock(async () => takeResponse(responses))
 
     const projectId = await discoverProject('token', asFetch(mockFetch))
     expect(projectId).toBe('fresh-project-abc')
@@ -169,7 +176,7 @@ describe('discoverProject', () => {
         response: { cloudaicompanionProject: 'p' }
       })
     ]
-    const mockFetch = mock(async () => responses.shift()!)
+    const mockFetch = mock(async () => takeResponse(responses))
     await discoverProject('token', asFetch(mockFetch))
     const [, onboardInit] = mockFetch.mock.calls[1] as unknown as [string, RequestInit]
     expect((JSON.parse(onboardInit.body as string) as { tierId: string }).tierId).toBe('free-tier')
@@ -181,7 +188,7 @@ describe('discoverProject', () => {
       Response.json({ name: 'operations/o', done: true, response: {} }),
       Response.json({ cloudaicompanionProject: 'late-project' })
     ]
-    const mockFetch = mock(async () => responses.shift()!)
+    const mockFetch = mock(async () => takeResponse(responses))
     const projectId = await discoverProject('token', asFetch(mockFetch))
     expect(projectId).toBe('late-project')
     expect(mockFetch).toHaveBeenCalledTimes(3)
@@ -195,7 +202,7 @@ describe('discoverProject', () => {
       Response.json({ name: 'operations/o', done: true, response: { someField: 'unknown' } }),
       Response.json({})
     ]
-    const mockFetch = mock(async () => responses.shift()!)
+    const mockFetch = mock(async () => takeResponse(responses))
     await expect(discoverProject('token', asFetch(mockFetch))).rejects.toThrow(
       /LRO response: \{"someField":"unknown"\}/
     )
@@ -206,7 +213,7 @@ describe('discoverProject', () => {
       Response.json({}),
       Response.json({ name: 'operations/o', done: true, error: { message: 'ineligible' } })
     ]
-    const mockFetch = mock(async () => responses.shift()!)
+    const mockFetch = mock(async () => takeResponse(responses))
     await expect(discoverProject('token', asFetch(mockFetch))).rejects.toThrow('ineligible')
   })
 
@@ -260,7 +267,8 @@ describe('loginAntigravity', () => {
           authUrl = url
           // Simulate browser callback by extracting state and hitting the local server
           const parsed = new URL(url)
-          const state = parsed.searchParams.get('state')!
+          const state = parsed.searchParams.get('state')
+          if (!state) throw new Error('missing oauth state')
           setTimeout(async () => {
             await globalThis.fetch(
               `http://localhost:51121/oauth-callback?code=test-code&state=${state}`

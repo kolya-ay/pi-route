@@ -271,7 +271,9 @@ const extractResponsesInputContent = (content: unknown): string | TextContent[] 
     // input_image dropped silently in v1
   }
   if (parts.length === 0) return ''
-  if (parts.length === 1) return parts[0]!.text
+  const firstPart = parts[0]
+  if (!firstPart) return ''
+  if (parts.length === 1) return firstPart.text
   return parts
 }
 

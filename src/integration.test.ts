@@ -19,8 +19,10 @@ afterEach(async () => {
 
 describe('integration — config shapes load and dispatch wiring works', () => {
   test('config with aliases + pools loads', async () => {
+    const configPath = process.env.PI_ROUTE_CONFIG
+    if (!configPath) throw new Error('PI_ROUTE_CONFIG missing')
     await writeFile(
-      process.env.PI_ROUTE_CONFIG!,
+      configPath,
       `
 providers:
   c1:
@@ -45,8 +47,10 @@ pipeline:
   })
 
   test('expose filter narrows /v1/models', async () => {
+    const configPath = process.env.PI_ROUTE_CONFIG
+    if (!configPath) throw new Error('PI_ROUTE_CONFIG missing')
     await writeFile(
-      process.env.PI_ROUTE_CONFIG!,
+      configPath,
       `
 providers:
   c1:

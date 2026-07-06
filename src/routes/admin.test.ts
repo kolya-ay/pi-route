@@ -48,8 +48,8 @@ describe('admin HTTP', () => {
     expect(r.status).toBe(200)
     const body = (await r.json()) as Record<string, unknown>[]
     expect(body).toHaveLength(1)
-    expect(body[0]!.name).toBe('foo')
-    expect(body[0]!.type).toBe('cerebras')
+    expect(body[0]?.name).toBe('foo')
+    expect(body[0]?.type).toBe('cerebras')
   })
 
   test('GET /admin/accounts/:name returns one entry', async () => {
@@ -74,9 +74,9 @@ describe('admin HTTP', () => {
       body: JSON.stringify({ isInvalid: true })
     })
     expect(r.status).toBe(204)
-    expect(state.runtime.accounts.foo!.isInvalid).toBe(true)
+    expect(state.runtime.accounts.foo?.isInvalid).toBe(true)
     const onDisk = await readRuntimeState(dir)
-    expect(onDisk.accounts.foo!.isInvalid).toBe(true)
+    expect(onDisk.accounts.foo?.isInvalid).toBe(true)
   })
 
   test('PATCH /admin/accounts/:name/invalid validates body', async () => {

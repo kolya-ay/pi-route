@@ -47,7 +47,7 @@ describe('/v1/models — client compatibility', () => {
     for (const e of knownLeaves) {
       const lastSegment = e.id.split('/').pop()
       expect(lastSegment).toBeDefined()
-      expect(lastSegment!.length).toBeGreaterThan(0)
+      expect(lastSegment?.length).toBeGreaterThan(0)
     }
   })
 
@@ -59,10 +59,10 @@ describe('/v1/models — client compatibility', () => {
     }
     const known = body.data.filter((e) => e.context_length !== undefined)
     if (known.length === 0) return // pi-ai's cerebras catalog may be empty in some installs
-    expect(known[0]!.context_length).toBeGreaterThan(0)
-    if (known[0]!.pricing?.prompt !== undefined) {
-      expect(typeof known[0]!.pricing.prompt).toBe('string')
-      expect(parseFloat(known[0]!.pricing.prompt)).toBeLessThan(1)
+    expect(known[0]?.context_length).toBeGreaterThan(0)
+    if (known[0]?.pricing?.prompt !== undefined) {
+      expect(typeof known[0]?.pricing.prompt).toBe('string')
+      expect(parseFloat(known[0]?.pricing.prompt ?? '')).toBeLessThan(1)
     }
   })
 })

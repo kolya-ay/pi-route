@@ -24,7 +24,8 @@ type ModelEntry = {
 }
 
 const buildEntry = (opts: RouterOptions, catalog: Catalog, address: string): ModelEntry => {
-  const owned_by = address.includes('/') ? address.split('/')[0]! : address
+  const [ownedBy] = address.split('/')
+  const owned_by = address.includes('/') ? (ownedBy ?? address) : address
   const leaf = catalog.leafFor.get(address) ?? address
   const slash = leaf.indexOf('/')
   const providerName = slash === -1 ? leaf : leaf.slice(0, slash)

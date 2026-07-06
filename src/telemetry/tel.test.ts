@@ -35,8 +35,8 @@ describe('Tel facade — InMemory exporter for assertions', () => {
     )
     const spans = exporter.getFinishedSpans()
     expect(spans.length).toBe(1)
-    expect(spans[0]!.name).toBe('gen_ai.dispatch_attempt')
-    expect(spans[0]!.attributes['gen_ai.provider.name']).toBe('anthropic')
+    expect(spans[0]?.name).toBe('gen_ai.dispatch_attempt')
+    expect(spans[0]?.attributes['gen_ai.provider.name']).toBe('anthropic')
   })
 
   it('event adds a span event to the active span', async () => {
@@ -45,9 +45,9 @@ describe('Tel facade — InMemory exporter for assertions', () => {
       tel.event('provider_fallback', { 'pi.from': 'a', 'pi.to': 'b' })
     })
     const spans = exporter.getFinishedSpans()
-    expect(spans[0]!.events.length).toBe(1)
-    expect(spans[0]!.events[0]!.name).toBe('provider_fallback')
-    expect(spans[0]!.events[0]!.attributes!['pi.from']).toBe('a')
+    expect(spans[0]?.events.length).toBe(1)
+    expect(spans[0]?.events[0]?.name).toBe('provider_fallback')
+    expect(spans[0]?.events[0]?.attributes?.['pi.from']).toBe('a')
   })
 
   it('withSpan sets ERROR status when fn throws', async () => {
@@ -58,7 +58,7 @@ describe('Tel facade — InMemory exporter for assertions', () => {
       })
     ).rejects.toThrow('boom')
     const spans = exporter.getFinishedSpans()
-    expect(spans[0]!.status.code).toBe(SpanStatusCode.ERROR)
+    expect(spans[0]?.status.code).toBe(SpanStatusCode.ERROR)
   })
 
   it('recordTTFT sets pi.time_to_first_token_ms attribute', async () => {
@@ -66,7 +66,7 @@ describe('Tel facade — InMemory exporter for assertions', () => {
     await tel.withSpan('outer', {}, async (span) => {
       tel.recordTTFT(span, 123)
     })
-    expect(exporter.getFinishedSpans()[0]!.attributes['pi.time_to_first_token_ms']).toBe(123)
+    expect(exporter.getFinishedSpans()[0]?.attributes['pi.time_to_first_token_ms']).toBe(123)
   })
 
   it('recordCompletion sets usage, cost, and tokens-per-sec attributes', async () => {
@@ -74,11 +74,11 @@ describe('Tel facade — InMemory exporter for assertions', () => {
     await tel.withSpan('outer', {}, async (span) => {
       tel.recordCompletion(span, { input: 100, output: 50 }, 0.0042, 25)
     })
-    const attrs = exporter.getFinishedSpans()[0]!.attributes
-    expect(attrs['gen_ai.usage.input_tokens']).toBe(100)
-    expect(attrs['gen_ai.usage.output_tokens']).toBe(50)
-    expect(attrs['gen_ai.usage.cost_usd']).toBe(0.0042)
-    expect(attrs['pi.output_tokens_per_second']).toBe(25)
+    const attrs = exporter.getFinishedSpans()[0]?.attributes
+    expect(attrs?.['gen_ai.usage.input_tokens']).toBe(100)
+    expect(attrs?.['gen_ai.usage.output_tokens']).toBe(50)
+    expect(attrs?.['gen_ai.usage.cost_usd']).toBe(0.0042)
+    expect(attrs?.['pi.output_tokens_per_second']).toBe(25)
   })
 
   it('recordCompletion captures cacheRead=0 (not dropped) and cacheWrite when set', async () => {
@@ -86,8 +86,8 @@ describe('Tel facade — InMemory exporter for assertions', () => {
     await tel.withSpan('outer', {}, async (span) => {
       tel.recordCompletion(span, { input: 1, output: 1, cacheRead: 0, cacheWrite: 10 }, 0, 0)
     })
-    const attrs = exporter.getFinishedSpans()[0]!.attributes
-    expect(attrs['pi.usage.cache_read_tokens']).toBe(0)
-    expect(attrs['pi.usage.cache_write_tokens']).toBe(10)
+    const attrs = exporter.getFinishedSpans()[0]?.attributes
+    expect(attrs?.['pi.usage.cache_read_tokens']).toBe(0)
+    expect(attrs?.['pi.usage.cache_write_tokens']).toBe(10)
   })
 })

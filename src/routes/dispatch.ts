@@ -92,21 +92,25 @@ export const createDispatchHandler = (deps: DispatchDeps) => {
     if (candidates.length === 0) return c.json({ error: 'No routing decision' }, 502)
 
     let lastErr: unknown = null
-    let lastProvider = candidates[0]!.provider
+    const firstCandidate = candidates[0]
+    if (!firstCandidate) return c.json({ error: 'No routing decision' }, 502)
+    let lastProvider = firstCandidate.provider
 
     // Pre-failover, gate paths (registry-miss / account.disabled / runtime.isInvalid)
     // returned 500/503 directly. The loop-uniform 502 is the intentional cost of
     // `strategy: failover`'s "any failure advances" rule.
     startTime(c, 'upstream')
     for (let i = 0; i < candidates.length; i += 1) {
-      const decision = candidates[i]!
+      const decision = candidates[i]
+      if (!decision) continue
       lastProvider = decision.provider
 
       const emitFallback = (reason: string): void => {
-        if (i + 1 < candidates.length && rootSpan) {
+        const nextDecision = candidates[i + 1]
+        if (nextDecision && rootSpan) {
           rootSpan.addEvent('provider_fallback', {
             'pi.from': `${decision.provider}/${decision.modelId}`,
-            'pi.to': `${candidates[i + 1]!.provider}/${candidates[i + 1]!.modelId}`,
+            'pi.to': `${nextDecision.provider}/${nextDecision.modelId}`,
             'pi.reason': reason
           })
         }
@@ -126,7 +130,8 @@ export const createDispatchHandler = (deps: DispatchDeps) => {
         emitFallback(gateError)
         continue
       }
-      const safeEntry = entry!
+      if (!entry) continue
+      const safeEntry = entry
 
       const finalModel = decision.modelId
       const finalBody =

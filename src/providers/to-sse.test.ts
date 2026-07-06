@@ -56,6 +56,11 @@ const parseDataLines = (lines: string[]): unknown[] =>
     .filter((data) => data !== '[DONE]')
     .map((data) => JSON.parse(data) as unknown)
 
+const requireLine = (line: string | undefined): string => {
+  if (line === undefined) throw new Error('missing SSE data line')
+  return line
+}
+
 const toAsyncIterable = async function* (
   events: AssistantMessageEvent[]
 ): AsyncIterable<AssistantMessageEvent> {
@@ -124,14 +129,14 @@ describe('createAnthropicSseStream - contentIndex state machine', () => {
       'message_delta',
       'message_stop'
     ])
-    expect((evts[1]!.data as Record<string, unknown>).index).toBe(0)
-    expect((evts[1]!.data as Record<string, unknown>).content_block).toMatchObject({
+    expect((evts[1]?.data as Record<string, unknown>).index).toBe(0)
+    expect((evts[1]?.data as Record<string, unknown>).content_block).toMatchObject({
       type: 'thinking'
     })
-    expect((evts[3]!.data as Record<string, unknown>).index).toBe(0) // auto-close for thinking
-    expect((evts[4]!.data as Record<string, unknown>).index).toBe(1)
-    expect((evts[4]!.data as Record<string, unknown>).content_block).toMatchObject({ type: 'text' })
-    expect((evts[6]!.data as Record<string, unknown>).index).toBe(1)
+    expect((evts[3]?.data as Record<string, unknown>).index).toBe(0) // auto-close for thinking
+    expect((evts[4]?.data as Record<string, unknown>).index).toBe(1)
+    expect((evts[4]?.data as Record<string, unknown>).content_block).toMatchObject({ type: 'text' })
+    expect((evts[6]?.data as Record<string, unknown>).index).toBe(1)
   })
 
   it('done while block open: emits content_block_stop before message_delta', async () => {
@@ -154,7 +159,7 @@ describe('createAnthropicSseStream - contentIndex state machine', () => {
       'message_delta',
       'message_stop'
     ])
-    expect((evts[3]!.data as Record<string, unknown>).index).toBe(0)
+    expect((evts[3]?.data as Record<string, unknown>).index).toBe(0)
   })
 
   it('error mid-stream while block open: emits content_block_stop then error', async () => {
@@ -179,8 +184,8 @@ describe('createAnthropicSseStream - contentIndex state machine', () => {
       'content_block_stop', // auto-emitted before error
       'error'
     ])
-    expect((evts[3]!.data as Record<string, unknown>).index).toBe(0)
-    expect((evts[4]!.data as Record<string, unknown>).type).toBe('error')
+    expect((evts[3]?.data as Record<string, unknown>).index).toBe(0)
+    expect((evts[4]?.data as Record<string, unknown>).type).toBe('error')
   })
 })
 
@@ -208,7 +213,7 @@ describe('createAnthropicSseStream', () => {
     // message_start
     const startLine = lines.find((l) => l.startsWith('data: ') && l.includes('"message_start"'))
     expect(startLine).toBeDefined()
-    const startData = JSON.parse(startLine!.slice(6))
+    const startData = JSON.parse(requireLine(startLine).slice(6))
     expect(startData.type).toBe('message_start')
     expect(startData.message.id).toBe('req-1')
     expect(startData.message.model).toBe('claude-sonnet-4-20250514')
@@ -220,7 +225,7 @@ describe('createAnthropicSseStream', () => {
       (l) => l.startsWith('data: ') && l.includes('"content_block_start"')
     )
     expect(blockStartLine).toBeDefined()
-    const blockStartData = JSON.parse(blockStartLine!.slice(6))
+    const blockStartData = JSON.parse(requireLine(blockStartLine).slice(6))
     expect(blockStartData.index).toBe(0)
     expect(blockStartData.content_block.type).toBe('text')
 
@@ -229,10 +234,10 @@ describe('createAnthropicSseStream', () => {
       (l) => l.startsWith('data: ') && l.includes('"content_block_delta"')
     )
     expect(deltaLines).toHaveLength(2)
-    const delta1 = JSON.parse(deltaLines[0]!.slice(6))
+    const delta1 = JSON.parse(requireLine(deltaLines[0]).slice(6))
     expect(delta1.delta.type).toBe('text_delta')
     expect(delta1.delta.text).toBe('Hello')
-    const delta2 = JSON.parse(deltaLines[1]!.slice(6))
+    const delta2 = JSON.parse(requireLine(deltaLines[1]).slice(6))
     expect(delta2.delta.text).toBe(' world')
 
     // content_block_stop
@@ -246,7 +251,7 @@ describe('createAnthropicSseStream', () => {
       (l) => l.startsWith('data: ') && l.includes('"message_delta"')
     )
     expect(messageDeltaLine).toBeDefined()
-    const messageDeltaData = JSON.parse(messageDeltaLine!.slice(6))
+    const messageDeltaData = JSON.parse(requireLine(messageDeltaLine).slice(6))
     expect(messageDeltaData.delta.stop_reason).toBe('end_turn')
     expect(messageDeltaData.usage.output_tokens).toBe(50)
 
@@ -282,7 +287,7 @@ describe('createAnthropicSseStream', () => {
       (l) => l.startsWith('data: ') && l.includes('"content_block_start"')
     )
     expect(blockStarts).toHaveLength(2)
-    const thinkingStart = JSON.parse(blockStarts[0]!.slice(6))
+    const thinkingStart = JSON.parse(requireLine(blockStarts[0]).slice(6))
     expect(thinkingStart.index).toBe(0)
     expect(thinkingStart.content_block.type).toBe('thinking')
 
@@ -291,11 +296,11 @@ describe('createAnthropicSseStream', () => {
       (l) => l.startsWith('data: ') && l.includes('"thinking_delta"')
     )
     expect(thinkingDelta).toBeDefined()
-    const thinkingDeltaData = JSON.parse(thinkingDelta!.slice(6))
+    const thinkingDeltaData = JSON.parse(requireLine(thinkingDelta).slice(6))
     expect(thinkingDeltaData.delta.thinking).toBe('Let me think...')
 
     // text block should be index 1
-    const textStart = JSON.parse(blockStarts[1]!.slice(6))
+    const textStart = JSON.parse(requireLine(blockStarts[1]).slice(6))
     expect(textStart.index).toBe(1)
     expect(textStart.content_block.type).toBe('text')
   })
@@ -335,7 +340,7 @@ describe('createAnthropicSseStream', () => {
       (l) => l.startsWith('data: ') && l.includes('"content_block_start"')
     )
     expect(blockStart).toBeDefined()
-    const blockStartData = JSON.parse(blockStart!.slice(6))
+    const blockStartData = JSON.parse(requireLine(blockStart).slice(6))
     expect(blockStartData.content_block.type).toBe('tool_use')
     expect(blockStartData.content_block.id).toBe('tool_1')
     expect(blockStartData.content_block.name).toBe('get_weather')
@@ -345,12 +350,12 @@ describe('createAnthropicSseStream', () => {
       (l) => l.startsWith('data: ') && l.includes('"input_json_delta"')
     )
     expect(inputDeltas).toHaveLength(2)
-    const id1 = JSON.parse(inputDeltas[0]!.slice(6))
+    const id1 = JSON.parse(requireLine(inputDeltas[0]).slice(6))
     expect(id1.delta.partial_json).toBe('{"loc')
 
     // stop reason should be tool_use
     const messageDelta = lines.find((l) => l.startsWith('data: ') && l.includes('"message_delta"'))
-    const messageDeltaData = JSON.parse(messageDelta!.slice(6))
+    const messageDeltaData = JSON.parse(requireLine(messageDelta).slice(6))
     expect(messageDeltaData.delta.stop_reason).toBe('tool_use')
   })
 
@@ -365,7 +370,7 @@ describe('createAnthropicSseStream', () => {
       const messageDelta = lines.find(
         (l) => l.startsWith('data: ') && l.includes('"message_delta"')
       )
-      const data = JSON.parse(messageDelta!.slice(6))
+      const data = JSON.parse(requireLine(messageDelta).slice(6))
       expect(data.delta.stop_reason).toBe(expected)
     }
 
@@ -389,7 +394,7 @@ describe('createAnthropicSseStream', () => {
 
     const errorLine = lines.find((l) => l.startsWith('data: ') && l.includes('"error"'))
     expect(errorLine).toBeDefined()
-    const errorData = JSON.parse(errorLine!.slice(6))
+    const errorData = JSON.parse(requireLine(errorLine).slice(6))
     expect(errorData.type).toBe('error')
     expect(errorData.error.type).toBe('api_error')
     expect(errorData.error.message).toBe('Something went wrong')
@@ -415,15 +420,15 @@ describe('createAnthropicSseStream', () => {
       (l) => l.startsWith('data: ') && l.includes('"content_block_start"')
     )
     expect(blockStarts).toHaveLength(2)
-    expect(JSON.parse(blockStarts[0]!.slice(6)).index).toBe(0)
-    expect(JSON.parse(blockStarts[1]!.slice(6)).index).toBe(1)
+    expect(JSON.parse(requireLine(blockStarts[0]).slice(6)).index).toBe(0)
+    expect(JSON.parse(requireLine(blockStarts[1]).slice(6)).index).toBe(1)
 
     const blockStops = lines.filter(
       (l) => l.startsWith('data: ') && l.includes('"content_block_stop"')
     )
     expect(blockStops).toHaveLength(2)
-    expect(JSON.parse(blockStops[0]!.slice(6)).index).toBe(0)
-    expect(JSON.parse(blockStops[1]!.slice(6)).index).toBe(1)
+    expect(JSON.parse(requireLine(blockStops[0]).slice(6)).index).toBe(0)
+    expect(JSON.parse(requireLine(blockStops[1]).slice(6)).index).toBe(1)
   })
 })
 
@@ -450,7 +455,8 @@ describe('createOpenAiSseStream', () => {
     expect(firstChunk.id).toBe('req-1')
     expect(firstChunk.object).toBe('chat.completion.chunk')
     expect(firstChunk.model).toBe('gpt-4')
-    const firstChoice = (firstChunk.choices as Record<string, unknown>[])[0]!
+    const firstChoice = (firstChunk.choices as Record<string, unknown>[])[0]
+    if (!firstChoice) throw new Error('missing first choice')
     expect((firstChoice.delta as Record<string, unknown>).role).toBe('assistant')
 
     // Text deltas
@@ -459,12 +465,12 @@ describe('createOpenAiSseStream', () => {
       return choices?.[0]?.delta && 'content' in (choices[0].delta as Record<string, unknown>)
     })
     expect(textChunks).toHaveLength(2)
-    const tc1Choices = textChunks[0]!.choices as Record<string, unknown>[]
-    expect((tc1Choices[0]!.delta as Record<string, unknown>).content).toBe('Hello')
+    const tc1Choices = textChunks[0]?.choices as Record<string, unknown>[]
+    expect((tc1Choices[0]?.delta as Record<string, unknown>).content).toBe('Hello')
 
     // Final chunk with finish_reason
     const lastDataLine = lines.filter((l) => l.startsWith('data: ') && !l.includes('[DONE]')).at(-1)
-    const lastChunk = JSON.parse(lastDataLine!.slice(6))
+    const lastChunk = JSON.parse(requireLine(lastDataLine).slice(6))
     const lastChoice = lastChunk.choices[0]
     expect(lastChoice.finish_reason).toBe('stop')
 
@@ -536,11 +542,11 @@ describe('createOpenAiSseStream', () => {
       return delta?.tool_calls !== undefined
     })
     expect(toolStartChunk).toBeDefined()
-    const toolStartDelta = (toolStartChunk!.choices as Record<string, unknown>[])[0]!
-      .delta as Record<string, unknown>
+    const toolStartDelta = (toolStartChunk?.choices as Record<string, unknown>[])[0]
+      ?.delta as Record<string, unknown>
     const toolCalls = toolStartDelta.tool_calls as Record<string, unknown>[]
-    expect(toolCalls[0]!.id).toBe('call_1')
-    expect((toolCalls[0]!.function as Record<string, unknown>).name).toBe('get_weather')
+    expect(toolCalls[0]?.id).toBe('call_1')
+    expect((toolCalls[0]?.function as Record<string, unknown>).name).toBe('get_weather')
 
     // toolcall_delta -> arguments
     const toolDeltaChunks = dataChunks.filter((c) => {
@@ -557,7 +563,7 @@ describe('createOpenAiSseStream', () => {
 
     // finish_reason should be tool_calls
     const lastDataLine = lines.filter((l) => l.startsWith('data: ') && !l.includes('[DONE]')).at(-1)
-    const lastChunk = JSON.parse(lastDataLine!.slice(6))
+    const lastChunk = JSON.parse(requireLine(lastDataLine).slice(6))
     expect(lastChunk.choices[0].finish_reason).toBe('tool_calls')
   })
 
@@ -572,7 +578,7 @@ describe('createOpenAiSseStream', () => {
       const lastDataLine = lines
         .filter((l) => l.startsWith('data: ') && !l.includes('[DONE]'))
         .at(-1)
-      const data = JSON.parse(lastDataLine!.slice(6))
+      const data = JSON.parse(requireLine(lastDataLine).slice(6))
       expect(data.choices[0].finish_reason).toBe(expected)
     }
 
@@ -596,7 +602,7 @@ describe('createOpenAiSseStream', () => {
 
     const errorLine = lines.find((l) => l.startsWith('data: ') && l.includes('"api_error"'))
     expect(errorLine).toBeDefined()
-    const errorData = JSON.parse(errorLine!.slice(6))
+    const errorData = JSON.parse(requireLine(errorLine).slice(6))
     expect(errorData.error.message).toBe('Bad request')
     expect(errorData.error.type).toBe('api_error')
 
@@ -625,8 +631,8 @@ describe('anthropicMessageToJson', () => {
 
     const content = result.content as Record<string, unknown>[]
     expect(content).toHaveLength(1)
-    expect(content[0]!.type).toBe('text')
-    expect(content[0]!.text).toBe('Hello world')
+    expect(content[0]?.type).toBe('text')
+    expect(content[0]?.text).toBe('Hello world')
 
     const usage = result.usage as Record<string, unknown>
     expect(usage.input_tokens).toBe(100)
@@ -646,10 +652,10 @@ describe('anthropicMessageToJson', () => {
     const result = anthropicMessageToJson(message, 'req-2', 'model')
     const content = result.content as Record<string, unknown>[]
     expect(content).toHaveLength(2)
-    expect(content[0]!.type).toBe('thinking')
-    expect(content[0]!.thinking).toBe('Let me reason...')
-    expect(content[1]!.type).toBe('text')
-    expect(content[1]!.text).toBe('The answer is 42.')
+    expect(content[0]?.type).toBe('thinking')
+    expect(content[0]?.thinking).toBe('Let me reason...')
+    expect(content[1]?.type).toBe('text')
+    expect(content[1]?.text).toBe('The answer is 42.')
   })
 
   it('converts tool use', () => {
@@ -665,10 +671,10 @@ describe('anthropicMessageToJson', () => {
 
     const content = result.content as Record<string, unknown>[]
     expect(content).toHaveLength(1)
-    expect(content[0]!.type).toBe('tool_use')
-    expect(content[0]!.id).toBe('tool_1')
-    expect(content[0]!.name).toBe('search')
-    expect(content[0]!.input).toEqual({ query: 'weather' })
+    expect(content[0]?.type).toBe('tool_use')
+    expect(content[0]?.id).toBe('tool_1')
+    expect(content[0]?.name).toBe('search')
+    expect(content[0]?.input).toEqual({ query: 'weather' })
   })
 
   it('maps length stop reason', () => {
@@ -693,7 +699,8 @@ describe('openaiMessageToJson', () => {
 
     const choices = result.choices as Record<string, unknown>[]
     expect(choices).toHaveLength(1)
-    const choice = choices[0]!
+    const choice = choices[0]
+    if (!choice) throw new Error('missing choice')
     expect(choice.index).toBe(0)
     expect(choice.finish_reason).toBe('stop')
 
@@ -719,15 +726,15 @@ describe('openaiMessageToJson', () => {
 
     const result = openaiMessageToJson(message, 'req-2', 'gpt-4')
     const choices = result.choices as Record<string, unknown>[]
-    const msg = choices[0]!.message as Record<string, unknown>
+    const msg = choices[0]?.message as Record<string, unknown>
     expect(msg.content).toBe('Using a tool')
-    expect(choices[0]!.finish_reason).toBe('tool_calls')
+    expect(choices[0]?.finish_reason).toBe('tool_calls')
 
     const toolCalls = msg.tool_calls as Record<string, unknown>[]
     expect(toolCalls).toHaveLength(1)
-    expect(toolCalls[0]!.id).toBe('call_1')
-    expect(toolCalls[0]!.type).toBe('function')
-    const fn = toolCalls[0]!.function as Record<string, unknown>
+    expect(toolCalls[0]?.id).toBe('call_1')
+    expect(toolCalls[0]?.type).toBe('function')
+    const fn = toolCalls[0]?.function as Record<string, unknown>
     expect(fn.name).toBe('search')
     expect(fn.arguments).toBe('{"q":"test"}')
   })
@@ -739,7 +746,7 @@ describe('openaiMessageToJson', () => {
     })
 
     const result = openaiMessageToJson(message, 'req-3', 'gpt-4')
-    const msg = (result.choices as Record<string, unknown>[])[0]!.message as Record<string, unknown>
+    const msg = (result.choices as Record<string, unknown>[])[0]?.message as Record<string, unknown>
     expect(msg.content).toBeNull()
   })
 
@@ -752,7 +759,7 @@ describe('openaiMessageToJson', () => {
     })
 
     const result = openaiMessageToJson(message, 'req-4', 'gpt-4')
-    const msg = (result.choices as Record<string, unknown>[])[0]!.message as Record<string, unknown>
+    const msg = (result.choices as Record<string, unknown>[])[0]?.message as Record<string, unknown>
     expect(msg.content).toBe('Part 1Part 2')
   })
 
@@ -760,7 +767,7 @@ describe('openaiMessageToJson', () => {
     const test = (stopReason: 'stop' | 'length' | 'toolUse', expected: string) => {
       const message = makePartial({ stopReason })
       const result = openaiMessageToJson(message, 'r', 'm')
-      expect((result.choices as Record<string, unknown>[])[0]!.finish_reason).toBe(expected)
+      expect((result.choices as Record<string, unknown>[])[0]?.finish_reason).toBe(expected)
     }
     test('stop', 'stop')
     test('toolUse', 'tool_calls')
@@ -776,7 +783,7 @@ describe('openaiMessageToJson', () => {
     })
 
     const result = openaiMessageToJson(message, 'req-5', 'gpt-4')
-    const msg = (result.choices as Record<string, unknown>[])[0]!.message as Record<string, unknown>
+    const msg = (result.choices as Record<string, unknown>[])[0]?.message as Record<string, unknown>
     expect(msg.content).toBe('visible')
   })
 })
@@ -908,11 +915,11 @@ describe('responsesMessageToJson', () => {
     expect(out.status).toBe('completed')
     const output = out.output as Record<string, unknown>[]
     expect(output).toHaveLength(1)
-    expect(output[0]!.type).toBe('message')
-    expect(output[0]!.role).toBe('assistant')
-    const content = output[0]!.content as Record<string, unknown>[]
-    expect(content[0]!.type).toBe('output_text')
-    expect(content[0]!.text).toBe('Hello world')
+    expect(output[0]?.type).toBe('message')
+    expect(output[0]?.role).toBe('assistant')
+    const content = output[0]?.content as Record<string, unknown>[]
+    expect(content[0]?.type).toBe('output_text')
+    expect(content[0]?.text).toBe('Hello world')
   })
 
   it('includes usage when present', () => {
@@ -940,9 +947,9 @@ describe('responsesMessageToJson', () => {
     const output = out.output as Record<string, unknown>[]
     const fcItem = output.find((item) => item.type === 'function_call')
     expect(fcItem).toBeDefined()
-    expect(fcItem!.call_id).toBe('call_x')
-    expect(fcItem!.name).toBe('fn')
-    expect(fcItem!.arguments).toBe('{"a":1}')
-    expect(fcItem!.status).toBe('completed')
+    expect(fcItem?.call_id).toBe('call_x')
+    expect(fcItem?.name).toBe('fn')
+    expect(fcItem?.arguments).toBe('{"a":1}')
+    expect(fcItem?.status).toBe('completed')
   })
 })

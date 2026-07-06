@@ -28,7 +28,7 @@ providers:
     account: { credential: key, key: sk-test }
 `)
     const { options } = await loadConfig(p, dir)
-    expect(options.providers.cerebras!.type).toBe('cerebras')
+    expect(options.providers.cerebras?.type).toBe('cerebras')
   })
 
   test('interpolates env vars', async () => {
@@ -40,7 +40,8 @@ providers:
     account: { credential: key, key: $MY_TEST_KEY }
 `)
     const { options } = await loadConfig(p, dir)
-    const a = options.providers.c!.account
+    const a = options.providers.c?.account
+    if (!a) throw new Error('provider c missing')
     if (a.credential === 'key') expect(a.key).toBe('real-key')
   })
 
@@ -55,9 +56,10 @@ pipeline:
 `)
     const { options } = await loadConfig(p, dir)
     expect(options.pipeline.map((e) => e.name)).toEqual(['opus', 'claude-pool', 'fancy'])
-    expect(options.pipeline[0]!.kind).toBe('alias')
-    expect(options.pipeline[1]!.kind).toBe('pool')
-    const fancy = options.pipeline[2]!
+    expect(options.pipeline[0]?.kind).toBe('alias')
+    expect(options.pipeline[1]?.kind).toBe('pool')
+    const fancy = options.pipeline[2]
+    if (!fancy) throw new Error('fancy pipeline entry missing')
     if (fancy.kind === 'pool') expect(fancy.strategy).toBe('sticky')
   })
 

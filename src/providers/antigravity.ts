@@ -137,7 +137,8 @@ export const parseCloudCodeChunk = (chunk: Record<string, unknown>): ParsedPart[
   const candidates = response.candidates as Record<string, unknown>[] | undefined
   if (!candidates || candidates.length === 0) return []
 
-  const candidate = candidates[0]!
+  const candidate = candidates[0]
+  if (!candidate) return []
   const content = candidate.content as
     | { role: string; parts: Record<string, unknown>[] }
     | undefined
@@ -236,7 +237,9 @@ const fetchWithRetry = async (
         const response = await fetch(`${endpoint}${url}`, init)
         if (response.ok) return response
         if (response.status >= 500 && attempt < RETRY_DELAYS_MS.length) {
-          await sleep(RETRY_DELAYS_MS[attempt]!)
+          const delay = RETRY_DELAYS_MS[attempt]
+          if (delay === undefined) break
+          await sleep(delay)
           continue
         }
         // Non-retryable error or exhausted retries on this endpoint
@@ -245,7 +248,9 @@ const fetchWithRetry = async (
       } catch (error) {
         if (error instanceof TypeError && attempt < RETRY_DELAYS_MS.length) {
           // Network error, retry
-          await sleep(RETRY_DELAYS_MS[attempt]!)
+          const delay = RETRY_DELAYS_MS[attempt]
+          if (delay === undefined) break
+          await sleep(delay)
           continue
         }
         if (error instanceof TypeError) break // try fallback endpoint
