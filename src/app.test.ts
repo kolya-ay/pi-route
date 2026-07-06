@@ -19,6 +19,7 @@ beforeEach(async () => {
 afterEach(async () => {
   delete process.env.PI_ROUTE_CONFIG
   delete process.env.PI_ROUTE_AUTH
+  delete process.env.PI_ROUTE_TOKEN
   await rm(dir, { recursive: true, force: true })
 })
 
@@ -61,5 +62,15 @@ describe('createApp', () => {
     })
     expect(r.status).toBe(200)
     expect(r.headers.get('content-encoding')).toBeNull()
+  })
+
+  test('/v1/limits is mounted under authenticated /v1/* routes', async () => {
+    process.env.PI_ROUTE_TOKEN = 't'
+    const router = await createApp()
+    const response = await router.app.request('/v1/limits', {
+      headers: { authorization: 'Bearer t' }
+    })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ providers: [] })
   })
 })

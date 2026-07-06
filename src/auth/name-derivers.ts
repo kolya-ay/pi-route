@@ -1,16 +1,7 @@
 // src/auth/name-derivers.ts
 
 import type { OAuthCredentials } from '@mariozechner/pi-ai/oauth'
-
-const decodeJwt = (token: string): Record<string, unknown> | null => {
-  const parts = token.split('.')
-  if (parts.length !== 3) return null
-  try {
-    return JSON.parse(atob(parts[1] ?? '')) as Record<string, unknown>
-  } catch {
-    return null
-  }
-}
+import { decodeJwt } from './jwt'
 
 // OpenAI's access-token JWT follows Auth0's namespaced custom-claims convention:
 // user-identifying fields live under the URL-keyed `profile` object, not at the

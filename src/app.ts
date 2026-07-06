@@ -17,6 +17,7 @@ import { createProviderRegistry } from './providers/registry'
 import { mountAdmin } from './routes/admin'
 import { createChatCompletionsRoute } from './routes/chat-completions'
 import { createHealthRoute } from './routes/health'
+import { createLimitsRoute } from './routes/limits'
 import { createMessagesRoute } from './routes/messages'
 import { createModelsRoute } from './routes/models'
 import { createResponsesRoute } from './routes/responses'
@@ -73,6 +74,7 @@ export const createApp = async (
   app.route('/v1/models', createModelsRoute(state.options, state.catalog))
   app.route('/v1/messages', createMessagesRoute(registry))
   app.route('/v1/chat/completions', createChatCompletionsRoute(registry))
+  app.route('/v1/limits', createLimitsRoute(state, tel))
   app.route('/v1/responses', createResponsesRoute(registry))
 
   if (opts.admin !== undefined) {

@@ -1,6 +1,13 @@
-import { describe, expect, it, mock } from 'bun:test'
+import { afterEach, describe, expect, it, mock } from 'bun:test'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { AssistantMessageEventStream } from '@mariozechner/pi-ai'
-import type { Account, IncomingRequest } from '../types'
+import { writeCredentials } from '../auth/credentials'
+import { collectLimitsSnapshot } from '../limits'
+import { createState } from '../state'
+import { createTel } from '../telemetry/tel'
+import type { Account, IncomingRequest, RouterOptions } from '../types'
 import { createOpenAICodexProvider } from './openai-codex'
 
 const makeRequest = (opts: { stream: boolean }): IncomingRequest => ({
@@ -19,6 +26,28 @@ const makeRequest = (opts: { stream: boolean }): IncomingRequest => ({
 })
 
 const account: Account = { credential: 'oauth', name: 'me@example.com' }
+
+const originalFetch = globalThis.fetch
+let limitsDir: string | null = null
+
+const makeLimitsState = (account: Account, authDir: string) => {
+  const options: RouterOptions = {
+    providers: {
+      codex: { type: 'openai-codex', account }
+    },
+    pipeline: [],
+    expose: []
+  }
+  return createState(options, null as never, { accounts: {} }, authDir)
+}
+
+afterEach(async () => {
+  globalThis.fetch = originalFetch
+  if (limitsDir) {
+    await rm(limitsDir, { recursive: true, force: true })
+    limitsDir = null
+  }
+})
 
 const stubCodexStream = async (
   handler: (model: unknown, ctx: unknown, opts: unknown) => unknown
@@ -126,5 +155,183 @@ describe('createOpenAICodexProvider', () => {
     } finally {
       restore()
     }
+  })
+})
+
+describe('openai-codex limits snapshot', () => {
+  it('returns unauthenticated when Codex usage has no oauth account', async () => {
+    limitsDir = await mkdtemp(join(tmpdir(), 'pi-codex-limits-'))
+    const snapshot = await collectLimitsSnapshot(
+      makeLimitsState({ credential: 'key', key: 'sk-codex' }, limitsDir),
+      createTel()
+    )
+
+    expect(snapshot.providers).toEqual([
+      {
+        name: 'codex',
+        type: 'openai-codex',
+        display_name: 'Codex',
+        status: 'unauthenticated',
+        plan: null,
+        session: null,
+        weekly: null,
+        credits: null,
+        error_message: 'OAuth login required for Codex usage.',
+        last_updated: null
+      }
+    ])
+  })
+
+  it('sends ChatGPT-Account-Id from the decoded JWT when present', async () => {
+    limitsDir = await mkdtemp(join(tmpdir(), 'pi-codex-limits-'))
+    await writeCredentials(limitsDir, 'codex-oauth', {
+      provider: 'openai-codex',
+      refresh: 'refresh-2',
+      access:
+        'header.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjdC0xIn19.sig',
+      expires: Date.now() + 60_000
+    })
+
+    let accountId: string | null = null
+    globalThis.fetch = (async (_input: Request | string | URL, init?: RequestInit) => {
+      const headers = init?.headers ? new Headers(init.headers) : new Headers()
+      accountId = headers.get('ChatGPT-Account-Id')
+      return new Response(
+        JSON.stringify({
+          plan_type: 'pro',
+          rate_limit: {
+            primary_window: { used_percent: 10, reset_at: '2026-07-05T10:00:00.000Z' },
+            secondary_window: { used_percent: 20, reset_at: '2026-07-10T00:00:00.000Z' }
+          },
+          credits: { has_credits: false, balance: 0 }
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    }) as unknown as typeof fetch
+
+    await collectLimitsSnapshot(
+      makeLimitsState({ credential: 'oauth', name: 'codex-oauth' }, limitsDir),
+      createTel()
+    )
+
+    if (!accountId) throw new Error('missing ChatGPT-Account-Id header')
+    expect(accountId === 'acct-1').toBe(true)
+  })
+
+  it('returns an error entry for a 401 Codex usage response', async () => {
+    limitsDir = await mkdtemp(join(tmpdir(), 'pi-codex-limits-'))
+    await writeCredentials(limitsDir, 'codex-oauth', {
+      provider: 'openai-codex',
+      refresh: 'refresh-2',
+      access: 'header.payload.sig',
+      expires: Date.now() + 60_000
+    })
+    globalThis.fetch = (async () =>
+      new Response('unauthorized', { status: 401 })) as unknown as typeof fetch
+
+    const snapshot = await collectLimitsSnapshot(
+      makeLimitsState({ credential: 'oauth', name: 'codex-oauth' }, limitsDir),
+      createTel()
+    )
+
+    expect(snapshot.providers[0]).toMatchObject({
+      name: 'codex',
+      status: 'error',
+      error_message: 'Re-authenticate in the Codex CLI.'
+    })
+  })
+
+  it('returns an error entry for a 403 Codex usage response', async () => {
+    limitsDir = await mkdtemp(join(tmpdir(), 'pi-codex-limits-'))
+    await writeCredentials(limitsDir, 'codex-oauth', {
+      provider: 'openai-codex',
+      refresh: 'refresh-2',
+      access: 'header.payload.sig',
+      expires: Date.now() + 60_000
+    })
+    globalThis.fetch = (async () =>
+      new Response('forbidden', { status: 403 })) as unknown as typeof fetch
+
+    const snapshot = await collectLimitsSnapshot(
+      makeLimitsState({ credential: 'oauth', name: 'codex-oauth' }, limitsDir),
+      createTel()
+    )
+
+    expect(snapshot.providers[0]).toMatchObject({
+      name: 'codex',
+      status: 'error',
+      error_message: 'Re-authenticate in the Codex CLI.'
+    })
+  })
+
+  it('returns an error entry when Codex usage JSON is invalid', async () => {
+    limitsDir = await mkdtemp(join(tmpdir(), 'pi-codex-limits-'))
+    await writeCredentials(limitsDir, 'codex-oauth', {
+      provider: 'openai-codex',
+      refresh: 'refresh-2',
+      access: 'header.payload.sig',
+      expires: Date.now() + 60_000
+    })
+    globalThis.fetch = (async () =>
+      new Response('not-json', {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })) as unknown as typeof fetch
+
+    const snapshot = await collectLimitsSnapshot(
+      makeLimitsState({ credential: 'oauth', name: 'codex-oauth' }, limitsDir),
+      createTel()
+    )
+
+    expect(snapshot.providers[0]).toMatchObject({
+      name: 'codex',
+      status: 'error',
+      error_message: "Couldn't read usage."
+    })
+  })
+
+  it('maps primary and secondary usage and ignores code_review_rate_limit', async () => {
+    limitsDir = await mkdtemp(join(tmpdir(), 'pi-codex-limits-'))
+    await writeCredentials(limitsDir, 'codex-oauth', {
+      provider: 'openai-codex',
+      refresh: 'refresh-2',
+      access: 'header.payload.sig',
+      expires: Date.now() + 60_000
+    })
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          plan_type: 'plus',
+          rate_limit: {
+            primary_window: { used_percent: 45, reset_at: '2026-07-05T10:00:00.000Z' },
+            secondary_window: { used_percent: 67, reset_at: '2026-07-10T00:00:00.000Z' }
+          },
+          code_review_rate_limit: {
+            used_percent: 99,
+            reset_at: '2099-01-01T00:00:00.000Z'
+          },
+          credits: { has_credits: true, balance: 7 }
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )) as unknown as typeof fetch
+
+    const snapshot = await collectLimitsSnapshot(
+      makeLimitsState({ credential: 'oauth', name: 'codex-oauth' }, limitsDir),
+      createTel()
+    )
+
+    expect(snapshot.providers[0]).toMatchObject({
+      name: 'codex',
+      type: 'openai-codex',
+      display_name: 'Codex',
+      status: 'ok',
+      plan: 'Plus',
+      session: { used_percent: 45, resets_at: '2026-07-05T10:00:00.000Z' },
+      weekly: { used_percent: 67, resets_at: '2026-07-10T00:00:00.000Z' },
+      credits: { used: 7, cap: 0, currency: 'USD' },
+      error_message: null
+    })
+    expect(snapshot.providers[0]?.weekly?.used_percent).not.toBe(99)
+    expect(typeof snapshot.providers[0]?.last_updated).toBe('string')
   })
 })
