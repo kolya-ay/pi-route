@@ -29,13 +29,19 @@ export const createPassthroughProvider = (
     }
 
     const originalUrl = new URL(request.rawRequest.url)
-    // Strip pi-route's /v1 API-root prefix to get the endpoint tail, then join
-    // onto the provider's base URL preserving the base's path (e.g. /api/v1
-    // for openrouter). `new URL(absolutePath, base)` would REPLACE the base
-    // path; relative-tail + trailing-slash base appends correctly.
-    const endpointTail = originalUrl.pathname.replace(/^\/v1\//, '')
+    const base = new URL(baseUrl)
+    // Bare-origin upstreams expect the original /v1/... path. Upstreams with a
+    // non-root base path (e.g. /api/v1) need only the endpoint tail appended.
+    const basePath = base.pathname.replace(/\/$/, '')
+    const endpointPath =
+      basePath === '' || basePath === '/'
+        ? originalUrl.pathname
+        : originalUrl.pathname.replace(/^\/v1\//, '')
     const baseWithSlash = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`
-    const rewrittenUrl = new URL(endpointTail + originalUrl.search, baseWithSlash).toString()
+    const rewrittenUrl = new URL(
+      endpointPath.replace(/^\//, '') + originalUrl.search,
+      baseWithSlash
+    ).toString()
 
     const upstream = new Request(rewrittenUrl, {
       method: request.rawRequest.method,
