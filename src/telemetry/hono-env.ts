@@ -1,6 +1,7 @@
 // src/telemetry/hono-env.ts
 // Tel is a forward-reference to ./tel (created in Task 5).
 
+import type { Hono } from 'hono'
 import { createFactory } from 'hono/factory'
 
 import type { RouterState } from '../state'
@@ -16,3 +17,5 @@ export type Env = {
 }
 
 export const factory = createFactory<Env>()
+
+export type RouterApp = Hono<Env>

@@ -18,6 +18,11 @@ export type EnvConfig = {
   maxBodyBytes: number
 }
 
+export type EnvPathOverrides = {
+  configPath?: string
+  authDir?: string
+}
+
 const parsePort = (raw: string | undefined): number => {
   if (raw === undefined) return 3000
   const n = Number(raw)
@@ -61,9 +66,16 @@ const resolveOtlpUrl = (): string => {
   return ''
 }
 
-export const readEnvConfig = (): EnvConfig => {
-  const rawAuth = process.env.PI_ROUTE_AUTH ?? '~/.config/pi-route/auth'
-  const authDir = rawAuth.startsWith('~/') ? join(homedir(), rawAuth.slice(2)) : rawAuth
+const expandHomeDir = (path: string): string =>
+  path.startsWith('~/') ? join(homedir(), path.slice(2)) : path
+
+export const readEnvConfig = (overrides: EnvPathOverrides = {}): EnvConfig => {
+  const configPath = expandHomeDir(
+    overrides.configPath ?? process.env.PI_ROUTE_CONFIG ?? '~/.config/pi-route.yaml'
+  )
+  const authDir = expandHomeDir(
+    overrides.authDir ?? process.env.PI_ROUTE_AUTH ?? '~/.local/state/pi-route/auth'
+  )
   return {
     port: parsePort(process.env.PI_ROUTE_PORT),
     host: process.env.PI_ROUTE_HOST ?? '127.0.0.1',
@@ -71,7 +83,7 @@ export const readEnvConfig = (): EnvConfig => {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
-    configPath: process.env.PI_ROUTE_CONFIG ?? './router.yaml',
+    configPath,
     authDir,
     idleTimeout: parseIdleTimeout(process.env.PI_ROUTE_IDLE_TIMEOUT),
     otlpUrl: resolveOtlpUrl(),

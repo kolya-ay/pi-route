@@ -10,7 +10,7 @@ import { timing } from 'hono/timing'
 import { createAuthMiddleware } from './auth/middleware'
 import { scheduleRefresh } from './auth/scheduler'
 import { decompressRequest } from './compression'
-import { readEnvConfig } from './config/env'
+import { type EnvPathOverrides, readEnvConfig } from './config/env'
 import { loadConfig } from './config/loader'
 import { buildCatalog } from './pipeline/catalog'
 import { createProviderRegistry } from './providers/registry'
@@ -22,7 +22,7 @@ import { createMessagesRoute } from './routes/messages'
 import { createModelsRoute } from './routes/models'
 import { createResponsesRoute } from './routes/responses'
 import { createState, type RouterState } from './state'
-import { factory } from './telemetry/hono-env'
+import { factory, type RouterApp } from './telemetry/hono-env'
 import { createTel, initOtel } from './telemetry/tel'
 
 export type CreateAppOpts = {
@@ -30,13 +30,14 @@ export type CreateAppOpts = {
 }
 
 export const createApp = async (
-  opts: CreateAppOpts = {}
-): Promise<RouterState & { app: ReturnType<typeof factory.createApp> }> => {
+  opts: CreateAppOpts = {},
+  envOverrides: EnvPathOverrides = {}
+): Promise<RouterState & { app: RouterApp }> => {
   if (opts.admin !== undefined && !opts.admin.authKey) {
     throw new Error('createApp: admin.authKey must be a non-empty string')
   }
 
-  const env = readEnvConfig()
+  const env = readEnvConfig(envOverrides)
   const { options, state: runtime } = await loadConfig(env.configPath, env.authDir)
   const catalog = buildCatalog(options)
 

@@ -6,6 +6,7 @@ import { getOAuthProvider, type OAuthCredentials } from '@mariozechner/pi-ai/oau
 import { writeCredentials } from './auth/credentials'
 import { deriveName } from './auth/name-derivers'
 import { registerAllOAuthProviders } from './auth/register-all-oauth'
+import { parseCliPathArgs } from './cli/args'
 import { formatTable, runStats } from './cli/stats'
 import { readEnvConfig } from './config/env'
 import { loadConfig } from './config/loader'
@@ -16,14 +17,15 @@ import { createTel } from './telemetry/tel'
 import type { CredentialFile } from './types'
 
 const usage = `Usage:
-  pi-route login <provider-type> [name]
-  pi-route serve
-  pi-route limits
+  pi-route login [--auth-dir DIR] <provider-type> [name]
+  pi-route serve [-c PATH] [--auth-dir DIR]
+  pi-route limits [-c PATH] [--auth-dir DIR]
   pi-route stats [--by provider|model|day|session] [--since 7d]
 
 Known OAuth provider types: anthropic, openai-codex, google-antigravity`
 
-const [, , verb, target, arg2] = Bun.argv
+const { positionals, overrides } = parseCliPathArgs(Bun.argv.slice(2))
+const [verb, target, arg2] = positionals
 
 const tryOpen = (url: string): void => {
   for (const opener of ['xdg-open', 'open']) {
@@ -62,7 +64,7 @@ if (verb === 'login') {
     process.exit(1)
   }
 
-  const env = readEnvConfig()
+  const env = readEnvConfig(overrides)
   const creds: OAuthCredentials = await provider.login({
     onAuth,
     onPrompt,
@@ -82,7 +84,7 @@ if (verb === 'login') {
   await import('./serve')
 } else if (verb === 'limits') {
   registerAllOAuthProviders()
-  const env = readEnvConfig()
+  const env = readEnvConfig(overrides)
   const { options, state: runtime } = await loadConfig(env.configPath, env.authDir)
   const catalog = buildCatalog(options)
   const state = createState(options, catalog, runtime, env.authDir)

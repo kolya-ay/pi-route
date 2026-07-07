@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, test } from 'bun:test'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { interpolateEnvVars, readEnvConfig } from './env'
 
 describe('interpolateEnvVars', () => {
@@ -43,8 +45,8 @@ describe('readEnvConfig', () => {
     expect(e.port).toBe(3000)
     expect(e.host).toBe('127.0.0.1')
     expect(e.tokens).toEqual([])
-    expect(e.configPath).toBe('./router.yaml')
-    expect(e.authDir.endsWith('/pi-route/auth')).toBe(true)
+    expect(e.configPath).toBe(join(homedir(), '.config/pi-route.yaml'))
+    expect(e.authDir).toBe(join(homedir(), '.local/state/pi-route/auth'))
     expect(e.idleTimeout).toBe(120)
   })
   test('overrides via env', () => {
@@ -61,6 +63,20 @@ describe('readEnvConfig', () => {
     expect(e.configPath).toBe('/tmp/r.yaml')
     expect(e.authDir).toBe('/tmp/auth')
     expect(e.idleTimeout).toBe(30)
+  })
+  test('expands tildes in env paths', () => {
+    process.env.PI_ROUTE_CONFIG = '~/router.yaml'
+    process.env.PI_ROUTE_AUTH = '~/.auth/pi-route'
+    const e = readEnvConfig()
+    expect(e.configPath).toBe(join(homedir(), 'router.yaml'))
+    expect(e.authDir).toBe(join(homedir(), '.auth/pi-route'))
+  })
+  test('cli-style overrides win over env vars', () => {
+    process.env.PI_ROUTE_CONFIG = '/tmp/env.yaml'
+    process.env.PI_ROUTE_AUTH = '/tmp/env-auth'
+    const e = readEnvConfig({ configPath: '/tmp/flag.yaml', authDir: '/tmp/flag-auth' })
+    expect(e.configPath).toBe('/tmp/flag.yaml')
+    expect(e.authDir).toBe('/tmp/flag-auth')
   })
   test('throws on invalid port', () => {
     process.env.PI_ROUTE_PORT = 'abc'
