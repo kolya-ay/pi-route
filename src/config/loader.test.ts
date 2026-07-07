@@ -68,4 +68,12 @@ pipeline:
     const { state } = await loadConfig(p, dir)
     expect(state.accounts).toEqual({})
   })
+
+  test('throws a meaningful message when the config file is missing', async () => {
+    const missingPath = join(dir, 'missing.yaml')
+
+    await expect(loadConfig(missingPath, dir)).rejects.toThrow(
+      `Config file not found: ${missingPath}\nCreate it or pass -c <path>.`
+    )
+  })
 })

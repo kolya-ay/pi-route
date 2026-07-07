@@ -68,6 +68,23 @@ describe('cli', () => {
     expect(JSON.parse(stdout)).toEqual({ providers: [] })
   })
 
+  it('prints a meaningful error when the config file is missing', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'pi-route-cli-missing-'))
+    const missingPath = join(dir, 'missing.yaml')
+
+    const proc = Bun.spawn(['bun', 'src/cli.ts', 'limits', '-c', missingPath], {
+      cwd: process.cwd(),
+      stderr: 'pipe',
+      stdout: 'pipe'
+    })
+    const code = await proc.exited
+    const stderr = await new Response(proc.stderr).text()
+
+    expect(code).not.toBe(0)
+    expect(stderr).toContain(`Config file not found: ${missingPath}`)
+    expect(stderr).toContain('Create it or pass -c <path>.')
+  })
+
   it('exits 1 when -c is missing a value', async () => {
     const proc = Bun.spawn(['bun', 'src/cli.ts', 'limits', '-c'], {
       cwd: process.cwd(),

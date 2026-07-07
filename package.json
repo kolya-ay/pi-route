@@ -1,6 +1,6 @@
 {
-  "name": "pi-router",
-  "version": "0.1.0",
+  "name": "pi-route",
+  "version": "0.2.0",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
@@ -14,13 +14,13 @@
     "lint": "biome check src",
     "lint:fix": "biome check --write src",
     "check": "bun run lint && tsgo --noEmit",
-    "test": "bun test",
-    "test:watch": "bun test --watch",
+    "test": "bun test --isolate",
+    "test:watch": "bun test --watch --isolate",
     "prepare": "simple-git-hooks"
   },
   "simple-git-hooks": {
     "pre-commit": "bun run lint-staged",
-    "pre-push": "tsgo --noEmit"
+    "pre-push": "bun run check"
   },
   "lint-staged": {
     "*.{ts,json}": "biome check --write --no-errors-on-unmatched"
@@ -30,16 +30,16 @@
     "@mariozechner/pi-ai": "^0.73.1",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/exporter-trace-otlp-http": "^0.219.0",
-    "@opentelemetry/resources": "^2.8.0",
+    "@opentelemetry/resources": "^2.9.0",
     "@opentelemetry/sdk-node": "^0.219.0",
-    "@opentelemetry/sdk-trace-base": "^2.8.0",
-    "@opentelemetry/semantic-conventions": "^1.41.1",
-    "hono": "^4.12.27",
+    "@opentelemetry/sdk-trace-base": "^2.9.0",
+    "@opentelemetry/semantic-conventions": "^1.42.0",
+    "hono": "^4.12.28",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.1",
-    "@modelcontextprotocol/server-everything": "^2026.1.26",
+    "@modelcontextprotocol/server-everything": "^2026.7.4",
     "@types/bun": "latest",
     "@typescript/native-preview": "7.0.0-dev.20260624.1",
     "lint-staged": "^17.0.8",

@@ -8,6 +8,7 @@ export const parseCliPathArgs = (
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
+    if (arg === undefined) continue
     if (arg === '-c' || arg === '--auth-dir') {
       const value = argv[i + 1]
       if (value === undefined || value === '-c' || value === '--auth-dir') {
