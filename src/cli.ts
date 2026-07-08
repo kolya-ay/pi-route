@@ -94,9 +94,11 @@ cli
     }
   )
 
-cli.command('serve', 'Start the HTTP server').action(async () => {
-  await import('./serve')
-})
+cli
+  .command('serve', 'Start the HTTP server')
+  .action(async (options: { config?: string; authDir?: string }) => {
+    await import('./serve').then((m) => m.startServer(toOverrides(options)))
+  })
 
 cli
   .command('limits', 'Print a rate-limit snapshot as JSON')
