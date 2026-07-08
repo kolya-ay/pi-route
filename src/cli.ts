@@ -1,14 +1,17 @@
 #!/usr/bin/env bun
+
 // src/cli.ts
 
 import { getOAuthProvider, type OAuthCredentials } from '@mariozechner/pi-ai/oauth'
+import cac from 'cac'
+import { z } from 'zod'
 
 import { writeCredentials } from './auth/credentials'
 import { deriveName } from './auth/name-derivers'
 import { registerAllOAuthProviders } from './auth/register-all-oauth'
-import { parseCliPathArgs } from './cli/args'
-import { formatTable, runStats } from './cli/stats'
-import { readEnvConfig } from './config/env'
+import { formatTable, runStats, type StatsBy } from './cli/stats'
+import { type EnvPathOverrides, readEnvConfig } from './config/env'
+import { ConfigError } from './config/errors'
 import { loadConfig } from './config/loader'
 import { collectLimitsSnapshot } from './limits'
 import { buildCatalog } from './pipeline/catalog'
@@ -16,16 +19,21 @@ import { createState } from './state'
 import { createTel } from './telemetry/tel'
 import type { CredentialFile } from './types'
 
-const usage = `Usage:
-  pi-route login [--auth-dir DIR] <provider-type> [name]
-  pi-route serve [-c PATH] [--auth-dir DIR]
-  pi-route limits [-c PATH] [--auth-dir DIR]
-  pi-route stats [--by provider|model|day|session] [--since 7d]
+// cac throws CACError (err.name === 'CACError') for its own arg/option failures but
+// does not export the class. Reuse the same shape for our usage errors so both map
+// to exit 2 through one path — no bespoke error type.
+const usageError = (message: string): never => {
+  const err = new Error(message)
+  err.name = 'CACError'
+  throw err
+}
 
-Known OAuth provider types: anthropic, openai-codex, google-antigravity`
-
-const { positionals, overrides } = parseCliPathArgs(Bun.argv.slice(2))
-const [verb, target, arg2] = positionals
+const toOverrides = (options: { config?: string; authDir?: string }): EnvPathOverrides => {
+  const overrides: EnvPathOverrides = {}
+  if (options.config) overrides.configPath = options.config
+  if (options.authDir) overrides.authDir = options.authDir
+  return overrides
+}
 
 const tryOpen = (url: string): void => {
   for (const opener of ['xdg-open', 'open']) {
@@ -38,83 +46,87 @@ const tryOpen = (url: string): void => {
   }
 }
 
-const log = (msg: string): void => {
-  console.error(`… ${msg}`)
-}
+const StatsArgsSchema = z.object({
+  by: z.enum(['provider', 'model', 'day', 'session']),
+  since: z.string().regex(/^\d+[dh]$/, 'expected e.g. 7d or 12h')
+})
 
-const onAuth = ({ url }: { url: string }): void => {
-  console.error(`Open in browser: ${url}`)
-  tryOpen(url)
-}
+const pkg = await Bun.file(new URL('../package.json', import.meta.url)).json()
 
-const onPrompt = async (): Promise<string> => ''
+const cli = cac('pi-route')
 
-if (verb === 'login') {
-  if (!target) {
-    console.error(usage)
-    process.exit(1)
-  }
+cli.option('-c, --config <path>', 'Config file path (default: ~/.config/pi-route.yaml)')
+cli.option('--auth-dir <dir>', 'Auth/credentials directory')
 
-  registerAllOAuthProviders()
+cli
+  .command(
+    'login <type> [name]',
+    'Authenticate an OAuth provider (types: anthropic, openai-codex, google-antigravity)'
+  )
+  .action(
+    async (
+      type: string,
+      name: string | undefined,
+      options: { config?: string; authDir?: string }
+    ) => {
+      registerAllOAuthProviders()
+      const provider = getOAuthProvider(type)
+      if (!provider) throw usageError(`unknown OAuth provider: "${type}"`)
 
-  const provider = getOAuthProvider(target)
-  if (!provider) {
-    console.error(`Unknown OAuth provider: "${target}"`)
-    console.error(usage)
-    process.exit(1)
-  }
+      const env = readEnvConfig(toOverrides(options))
+      const creds: OAuthCredentials = await provider.login({
+        onAuth: ({ url }: { url: string }) => {
+          console.error(`Open in browser: ${url}`)
+          tryOpen(url)
+        },
+        onPrompt: async () => '',
+        onProgress: (msg: string) => console.error(`… ${msg}`)
+      })
 
-  const env = readEnvConfig(overrides)
-  const creds: OAuthCredentials = await provider.login({
-    onAuth,
-    onPrompt,
-    onProgress: log
+      const resolved = name ?? deriveName(type, creds)
+      if (!resolved) {
+        throw usageError(`name required for provider "${type}": pi-route login ${type} <name>`)
+      }
+
+      const credentialFile: CredentialFile = { ...creds, provider: type }
+      await writeCredentials(env.authDir, resolved, credentialFile)
+      console.log(`Logged in: ${type}/${resolved}`)
+    }
+  )
+
+cli.command('serve', 'Start the HTTP server').action(async () => {
+  await import('./serve')
+})
+
+cli
+  .command('limits', 'Print a rate-limit snapshot as JSON')
+  .action(async (options: { config?: string; authDir?: string }) => {
+    registerAllOAuthProviders()
+    const env = readEnvConfig(toOverrides(options))
+    const { options: routerOptions, state: runtime } = await loadConfig(env.configPath, env.authDir)
+    const catalog = buildCatalog(routerOptions)
+    const state = createState(routerOptions, catalog, runtime, env.authDir)
+    const snapshot = await collectLimitsSnapshot(state, createTel())
+    console.log(JSON.stringify(snapshot, null, 2))
   })
 
-  const name = arg2 ?? deriveName(target, creds)
-  if (!name) {
-    console.error(`Name required for provider "${target}": pi-route login ${target} <name>`)
-    process.exit(1)
-  }
+cli
+  .command('stats', 'Query telemetry from the OTel viewer')
+  .option('--by <dim>', 'Group by: provider|model|day|session', { default: 'provider' })
+  .option('--since <range>', 'Time range, e.g. 7d or 12h', { default: '7d' })
+  .action(async (options: { by: string; since: string }) => {
+    const parsed = StatsArgsSchema.safeParse({ by: options.by, since: options.since })
+    if (!parsed.success) throw usageError(z.prettifyError(parsed.error))
+    const by = parsed.data.by as StatsBy
+    const rows = await runStats({ by, since: parsed.data.since })
+    console.log(formatTable(by, rows))
+  })
 
-  const credentialFile: CredentialFile = { ...creds, provider: target }
-  await writeCredentials(env.authDir, name, credentialFile)
-  console.log(`Logged in: ${target}/${name}`)
-} else if (verb === 'serve') {
-  await import('./serve')
-} else if (verb === 'limits') {
-  registerAllOAuthProviders()
-  const env = readEnvConfig(overrides)
-  const { options, state: runtime } = await loadConfig(env.configPath, env.authDir)
-  const catalog = buildCatalog(options)
-  const state = createState(options, catalog, runtime, env.authDir)
-  const snapshot = await collectLimitsSnapshot(state, createTel())
-  console.log(JSON.stringify(snapshot, null, 2))
-} else if (verb === 'stats') {
-  const argVal = (flag: string, def: string): string => {
-    const idx = Bun.argv.indexOf(flag)
-    if (idx === -1) return def
-    const val = Bun.argv[idx + 1]
-    if (val === undefined || val.startsWith('--')) {
-      console.error(`Missing value for ${flag}`)
-      process.exit(1)
-    }
-    return val
-  }
-  const byArg = argVal('--by', 'provider')
-  const since = argVal('--since', '7d')
-  if (!['provider', 'model', 'day', 'session'].includes(byArg)) {
-    console.error(`Invalid --by "${byArg}". Must be one of: provider|model|day|session`)
-    process.exit(1)
-  }
-  const by = byArg as 'provider' | 'model' | 'day' | 'session'
-  const rows = await runStats({ by, since })
-  console.log(formatTable(by, rows))
-} else if (verb === 'query') {
+cli.command('query', 'Deprecated: use the OTel viewer UI').action(() => {
   const viewer =
     process.env.PI_ROUTE_VIEWER_URL ??
     `http://localhost:${process.env.PI_ROUTE_VIEWER_PORT ?? '8000'}`
-  console.error(
+  usageError(
     [
       'pi-route query is deprecated.',
       '',
@@ -123,8 +135,33 @@ if (verb === 'login') {
       '  duckdb ~/.cache/pi-route/otel.duckdb'
     ].join('\n')
   )
-  process.exit(2)
-} else {
-  console.error(usage)
-  process.exit(1)
+})
+
+cli.help()
+cli.version(pkg.version as string)
+
+const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err))
+
+const exitCodeFor = (err: unknown): number => {
+  if (err instanceof ConfigError) return 3
+  if (err instanceof Error && err.name === 'CACError') return 2 // cac's own + our usageError()
+  return 1
+}
+
+try {
+  const parsed = cli.parse(Bun.argv, { run: false })
+  if (parsed.options.help || parsed.options.version) {
+    process.exit(0)
+  }
+  if (!cli.matchedCommand) {
+    if (parsed.args.length === 0) {
+      cli.outputHelp()
+      process.exit(0)
+    }
+    usageError(`unknown command: ${parsed.args[0]}`)
+  }
+  await cli.runMatchedCommand()
+} catch (err) {
+  process.stderr.write(`pi-route: ${errorMessage(err)}\n`)
+  process.exit(exitCodeFor(err))
 }

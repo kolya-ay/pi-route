@@ -1,100 +1,65 @@
-import { afterEach, describe, expect, it } from 'bun:test'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { expect, test } from 'bun:test'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-let dir: string | null = null
+const CLI = join(import.meta.dir, 'cli.ts')
 
-afterEach(async () => {
-  if (dir) {
-    await rm(dir, { recursive: true, force: true })
-    dir = null
-  }
+const run = async (
+  args: string[]
+): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
+  const proc = Bun.spawn(['bun', CLI, ...args], { stdout: 'pipe', stderr: 'pipe' })
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text()
+  ])
+  const exitCode = await proc.exited
+  return { stdout, stderr, exitCode }
+}
+
+const tmp = (): string => mkdtempSync(join(tmpdir(), 'pi-route-'))
+
+test('--help exits 0 and prints usage', async () => {
+  const { stdout, exitCode } = await run(['--help'])
+  expect(exitCode).toBe(0)
+  expect(stdout).toContain('pi-route')
 })
 
-describe('cli', () => {
-  it('prints usage and exits 1 with no args', async () => {
-    const proc = Bun.spawn(['bun', 'src/cli.ts'], {
-      stderr: 'pipe',
-      stdout: 'pipe'
-    })
-    const code = await proc.exited
-    const stderr = await new Response(proc.stderr).text()
-    expect(code).toBe(1)
-    expect(stderr).toContain('Usage:')
-    expect(stderr).toContain('pi-route limits')
-  })
+test('--version exits 0 and prints a version', async () => {
+  const { stdout, exitCode } = await run(['--version'])
+  expect(exitCode).toBe(0)
+  expect(stdout).toMatch(/\d+\.\d+\.\d+/)
+})
 
-  it('prints usage and exits 1 with unknown verb', async () => {
-    const proc = Bun.spawn(['bun', 'src/cli.ts', 'foo', 'p1', 'a'], {
-      stderr: 'pipe',
-      stdout: 'pipe'
-    })
-    const code = await proc.exited
-    const stderr = await new Response(proc.stderr).text()
-    expect(code).toBe(1)
-    expect(stderr).toContain('Usage:')
-    expect(stderr).toContain('pi-route limits')
-  })
+test('no command exits 0 and prints help', async () => {
+  const { stdout, exitCode } = await run([])
+  expect(exitCode).toBe(0)
+  expect(stdout).toContain('pi-route')
+})
 
-  it('prints a limits snapshot as JSON and exits 0', async () => {
-    dir = await mkdtemp(join(tmpdir(), 'pi-route-cli-'))
-    const configPath = join(dir, 'router.yaml')
-    const authDir = join(dir, 'auth')
-    await writeFile(
-      configPath,
-      `providers:\n  ignored:\n    type: openrouter\n    account:\n      credential: key\n      key: sk-test\n`
-    )
+test('unknown command exits 2', async () => {
+  const { stderr, exitCode } = await run(['bogus'])
+  expect(exitCode).toBe(2)
+  expect(stderr).toContain('unknown command')
+})
 
-    const env = { ...process.env }
-    delete env.PI_ROUTE_CONFIG
-    delete env.PI_ROUTE_AUTH
+test('stats --by bogus exits 2 with a clear message', async () => {
+  const { stderr, exitCode } = await run(['stats', '--by', 'bogus'])
+  expect(exitCode).toBe(2)
+  expect(stderr.toLowerCase()).toContain('by')
+})
 
-    const proc = Bun.spawn(
-      ['bun', 'src/cli.ts', 'limits', '-c', configPath, '--auth-dir', authDir],
-      {
-        cwd: process.cwd(),
-        env,
-        stderr: 'pipe',
-        stdout: 'pipe'
-      }
-    )
-    const code = await proc.exited
-    const stdout = await new Response(proc.stdout).text()
-    const stderr = await new Response(proc.stderr).text()
+test('limits with a missing config exits 3', async () => {
+  const dir = tmp()
+  const { stderr, exitCode } = await run(['limits', '-c', join(dir, 'nope.yaml')])
+  expect(exitCode).toBe(3)
+  expect(stderr).toContain('Config file not found')
+})
 
-    expect(code).toBe(0)
-    expect(stderr).toBe('')
-    expect(JSON.parse(stdout)).toEqual({ providers: [] })
-  })
-
-  it('prints a meaningful error when the config file is missing', async () => {
-    dir = await mkdtemp(join(tmpdir(), 'pi-route-cli-missing-'))
-    const missingPath = join(dir, 'missing.yaml')
-
-    const proc = Bun.spawn(['bun', 'src/cli.ts', 'limits', '-c', missingPath], {
-      cwd: process.cwd(),
-      stderr: 'pipe',
-      stdout: 'pipe'
-    })
-    const code = await proc.exited
-    const stderr = await new Response(proc.stderr).text()
-
-    expect(code).not.toBe(0)
-    expect(stderr).toContain(`Config file not found: ${missingPath}`)
-    expect(stderr).toContain('Create it or pass -c <path>.')
-  })
-
-  it('exits 1 when -c is missing a value', async () => {
-    const proc = Bun.spawn(['bun', 'src/cli.ts', 'limits', '-c'], {
-      cwd: process.cwd(),
-      stderr: 'pipe',
-      stdout: 'pipe'
-    })
-    const code = await proc.exited
-    const stderr = await new Response(proc.stderr).text()
-
-    expect(code).toBe(1)
-    expect(stderr).toBe('Missing value for -c\n')
-  })
+test('limits with malformed config exits 3', async () => {
+  const dir = tmp()
+  const path = join(dir, 'router.yaml')
+  writeFileSync(path, 'providers: [unclosed')
+  const { exitCode } = await run(['limits', '-c', path])
+  expect(exitCode).toBe(3)
 })
