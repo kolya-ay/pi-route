@@ -1,8 +1,36 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { ConfigError } from './errors'
 import { loadConfig } from './loader'
+
+const tmp = (): string => mkdtempSync(join(tmpdir(), 'pi-route-'))
+
+test('missing config file throws ConfigError', async () => {
+  const dir = tmp()
+  const err = await loadConfig(join(dir, 'nope.yaml'), dir).catch((e) => e)
+  expect(err).toBeInstanceOf(ConfigError)
+  expect(err.message).toContain('Config file not found')
+})
+
+test('malformed YAML throws ConfigError', async () => {
+  const dir = tmp()
+  const path = join(dir, 'router.yaml')
+  writeFileSync(path, 'providers: [unclosed')
+  const err = await loadConfig(path, dir).catch((e) => e)
+  expect(err).toBeInstanceOf(ConfigError)
+})
+
+test('schema violation throws ConfigError mentioning the config path', async () => {
+  const dir = tmp()
+  const path = join(dir, 'router.yaml')
+  writeFileSync(path, 'providers:\n  bad:\n    type: 123\n')
+  const err = await loadConfig(path, dir).catch((e) => e)
+  expect(err).toBeInstanceOf(ConfigError)
+  expect(err.message).toContain('Invalid config')
+})
 
 let dir: string
 beforeEach(async () => {
