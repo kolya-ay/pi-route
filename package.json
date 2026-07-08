@@ -34,6 +34,7 @@
     "@opentelemetry/sdk-node": "^0.219.0",
     "@opentelemetry/sdk-trace-base": "^2.9.0",
     "@opentelemetry/semantic-conventions": "^1.42.0",
+    "cac": "^7.0.0",
     "hono": "^4.12.28",
     "zod": "^4.4.3"
   },
