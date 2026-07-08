@@ -15,10 +15,12 @@ import { loadConfig } from './config/loader'
 import { buildCatalog } from './pipeline/catalog'
 import { createProviderRegistry } from './providers/registry'
 import { mountAdmin } from './routes/admin'
+import { buildOpencodeModels, renderApiJson, resolveApiUrl } from './routes/api-json'
 import { createChatCompletionsRoute } from './routes/chat-completions'
 import { createHealthRoute } from './routes/health'
 import { createLimitsRoute } from './routes/limits'
 import { createMessagesRoute } from './routes/messages'
+import { buildModelInfoBody } from './routes/model-info'
 import { createModelsRoute } from './routes/models'
 import { createResponsesRoute } from './routes/responses'
 import { createState, type RouterState } from './state'
@@ -68,7 +70,11 @@ export const createApp = async (
       await next()
     })
   )
-  app.use('/v1/*', createAuthMiddleware(env.tokens))
+  const modelInfoPaths = ['/model/info', '/v1/model/info', '/v2/model/info', '/model_group/info']
+  const authMw = createAuthMiddleware(env.tokens)
+  app.use('/v1/*', authMw)
+  // Endpoint B aliases outside /v1/* need the same token; /v1/model/info is already covered by /v1/*.
+  for (const p of modelInfoPaths) if (!p.startsWith('/v1/')) app.use(p, authMw)
 
   app.get('/', (c) => c.json({ name: 'pi-route', status: 'ok' }))
   app.route('/health', createHealthRoute(registry, startTime))
@@ -77,6 +83,18 @@ export const createApp = async (
   app.route('/v1/chat/completions', createChatCompletionsRoute(registry))
   app.route('/v1/limits', createLimitsRoute(state, tel))
   app.route('/v1/responses', createResponsesRoute(registry))
+
+  const modelInfoBody = buildModelInfoBody(state.options, state.catalog)
+  for (const p of modelInfoPaths) app.get(p, (c) => c.json(modelInfoBody))
+
+  if (state.options.opencode) {
+    const opencodeModels = buildOpencodeModels(state.options, state.catalog)
+    const apiOverride = state.options.opencode.api
+    // Public (no authMw): OpenCode fetches /api.json without a bearer token.
+    app.get('/api.json', (c) =>
+      c.json(renderApiJson(opencodeModels, resolveApiUrl(c.req, apiOverride)))
+    )
+  }
 
   if (opts.admin !== undefined) {
     mountAdmin(app, state, { authKey: opts.admin.authKey })
