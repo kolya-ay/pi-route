@@ -41,7 +41,8 @@ const PipelineValueSchema = z.union([
 const RootSchema = z.object({
   providers: z.record(z.string(), ProviderSchema).default({}),
   pipeline: z.record(z.string(), PipelineValueSchema).default({}),
-  expose: z.array(z.string()).default([])
+  expose: z.array(z.string()).default([]),
+  opencode: z.union([z.boolean(), z.object({ api: z.string().optional() })]).optional()
 })
 
 const desugar = (name: string, value: z.infer<typeof PipelineValueSchema>): PipelineEntry => {
@@ -79,9 +80,18 @@ export const parseConfig = (raw: unknown): RouterOptions => {
     pipeline.push(desugar(name, value))
   }
 
+  // exactOptionalPropertyTypes: Zod infers api as `string | undefined`; narrow to `api?: string`.
+  const opencode: { api?: string } | undefined =
+    parsed.opencode === undefined || parsed.opencode === false
+      ? undefined
+      : parsed.opencode === true
+        ? {}
+        : (parsed.opencode as { api?: string })
+
   return {
     providers: parsed.providers,
     pipeline,
-    expose: parsed.expose
+    expose: parsed.expose,
+    ...(opencode !== undefined ? { opencode } : {})
   }
 }

@@ -94,4 +94,5 @@ export type RouterOptions = {
   providers: Record<string, ProviderConfig>
   pipeline: PipelineEntry[] // ordered
   expose: string[] // gitignore-style globs; empty = all
+  opencode?: { api?: string } // presence = /api.json enabled; api overrides host-derived callback URL
 }

@@ -122,3 +122,28 @@ describe('parseConfig — collision', () => {
     ).toThrow(/collision/i)
   })
 })
+
+describe('parseConfig — opencode option', () => {
+  test('absent → undefined', () => {
+    const opts = parseConfig({ providers: {} })
+    expect(opts.opencode).toBeUndefined()
+    expect('opencode' in opts).toBe(false)
+  })
+  test('false → undefined', () => {
+    const opts = parseConfig({ providers: {}, opencode: false })
+    expect(opts.opencode).toBeUndefined()
+    expect('opencode' in opts).toBe(false)
+  })
+  test('true → empty object (enabled, host-derived url)', () => {
+    const opts = parseConfig({ providers: {}, opencode: true })
+    expect(opts.opencode).toEqual({})
+  })
+  test('empty object → empty object', () => {
+    const opts = parseConfig({ providers: {}, opencode: {} })
+    expect(opts.opencode).toEqual({})
+  })
+  test('object with api override', () => {
+    const opts = parseConfig({ providers: {}, opencode: { api: 'https://x/v1' } })
+    expect(opts.opencode).toEqual({ api: 'https://x/v1' })
+  })
+})
