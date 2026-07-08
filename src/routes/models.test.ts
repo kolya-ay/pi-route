@@ -64,4 +64,26 @@ describe('/v1/models', () => {
       expect(parseFloat(withPricing.pricing.prompt)).toBeLessThan(1)
     }
   })
+
+  test('route body is stable across requests', async () => {
+    const o = opts()
+    const app = createModelsRoute(o, buildCatalog(o))
+    const a = await (await app.request('/')).json()
+    const b = await (await app.request('/')).json()
+    expect(a).toEqual(b)
+  })
+})
+
+describe('/v1/models — enriched fields', () => {
+  test('route emits enriched Vercel keys for known leaves', async () => {
+    const o = opts()
+    const app = createModelsRoute(o, buildCatalog(o))
+    const r = await app.request('/')
+    const body = (await r.json()) as {
+      data: Array<{ context_length?: number; context_window?: number }>
+    }
+    const known = body.data.find((e) => e.context_length !== undefined)
+    if (!known) return // cerebras catalog may be empty in some installs
+    expect(known.context_window).toBe(known.context_length)
+  })
 })
