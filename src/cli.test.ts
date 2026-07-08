@@ -63,3 +63,12 @@ test('limits with malformed config exits 3', async () => {
   const { exitCode } = await run(['limits', '-c', path])
   expect(exitCode).toBe(3)
 })
+
+test('limits with a valid empty config exits 0 and prints JSON', async () => {
+  const dir = tmp()
+  const cfg = join(dir, 'router.yaml')
+  writeFileSync(cfg, 'providers: {}\npipeline: {}\nexpose: []\n')
+  const { stdout, exitCode } = await run(['limits', '-c', cfg, '--auth-dir', join(dir, 'auth')])
+  expect(exitCode).toBe(0)
+  expect(() => JSON.parse(stdout)).not.toThrow()
+})

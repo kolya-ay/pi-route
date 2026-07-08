@@ -9,7 +9,7 @@ import { z } from 'zod'
 import { writeCredentials } from './auth/credentials'
 import { deriveName } from './auth/name-derivers'
 import { registerAllOAuthProviders } from './auth/register-all-oauth'
-import { formatTable, runStats, type StatsBy } from './cli/stats'
+import { formatTable, runStats } from './cli/stats'
 import { type EnvPathOverrides, readEnvConfig } from './config/env'
 import { ConfigError } from './config/errors'
 import { loadConfig } from './config/loader'
@@ -19,14 +19,10 @@ import { createState } from './state'
 import { createTel } from './telemetry/tel'
 import type { CredentialFile } from './types'
 
-// cac throws CACError (err.name === 'CACError') for its own arg/option failures but
-// does not export the class. Reuse the same shape for our usage errors so both map
-// to exit 2 through one path — no bespoke error type.
-const usageError = (message: string): never => {
-  const err = new Error(message)
-  err.name = 'CACError'
-  throw err
-}
+// cac tags its own arg/option errors with name 'CACError' (not exported). Reuse that
+// name so self-raised usage errors share the exit-2 path — no bespoke error type.
+const usageError = (message: string): Error =>
+  Object.assign(new Error(message), { name: 'CACError' })
 
 const toOverrides = (options: { config?: string; authDir?: string }): EnvPathOverrides => {
   const overrides: EnvPathOverrides = {}
@@ -51,7 +47,9 @@ const StatsArgsSchema = z.object({
   since: z.string().regex(/^\d+[dh]$/, 'expected e.g. 7d or 12h')
 })
 
-const pkg = await Bun.file(new URL('../package.json', import.meta.url)).json()
+const pkg = (await Bun.file(new URL('../package.json', import.meta.url)).json()) as {
+  version: string
+}
 
 const cli = cac('pi-route')
 
@@ -119,7 +117,7 @@ cli
   .action(async (options: { by: string; since: string }) => {
     const parsed = StatsArgsSchema.safeParse({ by: options.by, since: options.since })
     if (!parsed.success) throw usageError(z.prettifyError(parsed.error))
-    const by = parsed.data.by as StatsBy
+    const by = parsed.data.by
     const rows = await runStats({ by, since: parsed.data.since })
     console.log(formatTable(by, rows))
   })
@@ -128,7 +126,7 @@ cli.command('query', 'Deprecated: use the OTel viewer UI').action(() => {
   const viewer =
     process.env.PI_ROUTE_VIEWER_URL ??
     `http://localhost:${process.env.PI_ROUTE_VIEWER_PORT ?? '8000'}`
-  usageError(
+  throw usageError(
     [
       'pi-route query is deprecated.',
       '',
@@ -140,7 +138,7 @@ cli.command('query', 'Deprecated: use the OTel viewer UI').action(() => {
 })
 
 cli.help()
-cli.version(pkg.version as string)
+cli.version(pkg.version)
 
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err))
 
@@ -152,6 +150,7 @@ const exitCodeFor = (err: unknown): number => {
 
 try {
   const parsed = cli.parse(Bun.argv, { run: false })
+  // help/version already printed by cac
   if (parsed.options.help || parsed.options.version) {
     process.exit(0)
   }
@@ -160,7 +159,7 @@ try {
       cli.outputHelp()
       process.exit(0)
     }
-    usageError(`unknown command: ${parsed.args[0]}`)
+    throw usageError(`unknown command: ${parsed.args[0]}`)
   }
   await cli.runMatchedCommand()
 } catch (err) {
