@@ -65,6 +65,49 @@ describe('buildCatalog', () => {
       expect(c.leafFor.get(poolAddr)).toBe(a)
     }
   })
+  test('exact-match pools do not derive prefix addresses', () => {
+    const c = buildCatalog(
+      baseOpts({
+        providers: { p: { type: 'cerebras', account: { credential: 'key', key: 'k' } } },
+        pipeline: [
+          {
+            kind: 'pool',
+            name: 'pool',
+            match: 'exact',
+            to: ['p/$1'],
+            strategy: 'round-robin'
+          }
+        ]
+      })
+    )
+    const piModels = [...c.addresses].filter((a) => a.startsWith('p/'))
+    expect(piModels.length).toBeGreaterThan(0)
+    for (const a of piModels) {
+      const tail = a.slice(2)
+      const poolAddr = `pool/${tail}`
+      expect(c.addresses.has(poolAddr)).toBe(false)
+      expect(c.leafFor.has(poolAddr)).toBe(false)
+    }
+  })
+
+  test('exact-match default pool targeting a provider leaf is only addressable by bare default', () => {
+    const c = buildCatalog(
+      baseOpts({
+        providers: { p: { type: 'cerebras', account: { credential: 'key', key: 'k' } } },
+        pipeline: [
+          {
+            kind: 'pool',
+            name: 'default',
+            match: 'exact',
+            to: ['p/some-specific-model'],
+            strategy: 'round-robin'
+          }
+        ]
+      })
+    )
+    expect(c.addresses.has('default')).toBe(true)
+    expect(c.addresses.has('default/some-specific-model')).toBe(false)
+  })
 
   test('alias leafFor resolves one hop', () => {
     const c = buildCatalog(

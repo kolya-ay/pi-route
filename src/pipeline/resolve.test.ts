@@ -48,6 +48,61 @@ describe('resolveCandidates', () => {
     expect(['claude-personal', 'claude-work']).toContain(a.provider)
     expect(a.modelId).toBe('claude-opus-4-7')
   })
+  test('exact-match pools fire for the bare pool name', () => {
+    const o = opts({
+      pipeline: [
+        {
+          kind: 'pool',
+          name: 'default',
+          match: 'exact',
+          to: ['claude-personal/claude-opus-4-7'],
+          strategy: 'round-robin'
+        }
+      ]
+    })
+    expect(first(o, 'default')).toEqual({
+      provider: 'claude-personal',
+      modelId: 'claude-opus-4-7'
+    })
+  })
+
+  test('exact-match pools do not fire for suffixed models', () => {
+    const o = opts({
+      pipeline: [
+        {
+          kind: 'pool',
+          name: 'default',
+          match: 'exact',
+          to: ['claude-personal/claude-opus-4-7'],
+          strategy: 'round-robin'
+        }
+      ]
+    })
+    expect(() => resolve(o, 'default/suffix')).toThrow(/unknown provider "default"/i)
+  })
+
+  test('exact-match pools with when gating remain exact', () => {
+    const o = opts({
+      providers: {
+        provider: { type: 'anthropic', account: { credential: 'key', key: 'x' } }
+      },
+      pipeline: [
+        {
+          kind: 'pool',
+          name: 'thinking-role',
+          match: 'exact',
+          to: ['provider/model'],
+          strategy: 'round-robin',
+          when: { thinking: true }
+        }
+      ]
+    })
+    expect(first(o, 'thinking-role', { thinking: true })).toEqual({
+      provider: 'provider',
+      modelId: 'model'
+    })
+    expect(() => resolve(o, 'other', { thinking: true })).toThrow(/unresolved bare model "other"/i)
+  })
 
   test('alias chained through pool', () => {
     const o = opts({

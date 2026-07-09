@@ -85,6 +85,7 @@ export type PipelineEntry =
   | {
       kind: 'pool'
       name: string
+      match?: 'prefix' | 'exact' | undefined
       to: string[]
       strategy: BalancingStrategyName
       when?: { thinking?: boolean | undefined } | undefined

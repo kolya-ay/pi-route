@@ -24,10 +24,12 @@ const ProviderSchema = z.object({
 })
 
 const StrategySchema = z.enum(['round-robin', 'sticky', 'fill-first', 'failover'])
+const MatchSchema = z.enum(['prefix', 'exact'])
 const WhenSchema = z.object({ thinking: z.boolean().optional() })
 
 const PipelineEntryObjectSchema = z.object({
   to: z.union([z.string(), z.array(z.string()).nonempty()]),
+  match: MatchSchema.optional(),
   strategy: StrategySchema.optional(),
   when: WhenSchema.optional()
 })
@@ -62,6 +64,7 @@ const desugar = (name: string, value: z.infer<typeof PipelineValueSchema>): Pipe
     name,
     to: Array.isArray(value.to) ? value.to : [value.to],
     strategy: value.strategy ?? 'round-robin',
+    ...(value.match !== undefined ? { match: value.match } : {}),
     ...(value.when !== undefined ? { when: value.when } : {})
   }
 }

@@ -74,6 +74,41 @@ describe('parseConfig — pipeline value shapes', () => {
       }
     ])
   })
+  test('object value parses exact-match pools and normalizes to arrays', () => {
+    const opts = parseConfig({
+      providers: {},
+      pipeline: {
+        default: { match: 'exact', to: ['p/a', 'p/b'], strategy: 'fill-first' },
+        small: { match: 'exact', to: 'p/small' }
+      }
+    })
+    expect(opts.pipeline).toEqual([
+      {
+        kind: 'pool',
+        name: 'default',
+        match: 'exact',
+        to: ['p/a', 'p/b'],
+        strategy: 'fill-first'
+      },
+      {
+        kind: 'pool',
+        name: 'small',
+        match: 'exact',
+        to: ['p/small'],
+        strategy: 'round-robin'
+      }
+    ])
+  })
+  test('rejects an invalid match value on a pipeline object entry', () => {
+    expect(() =>
+      parseConfig({
+        providers: {},
+        pipeline: {
+          small: { match: 'bogus', to: 'p/small' }
+        }
+      })
+    ).toThrow()
+  })
   test('preserves YAML insertion order', () => {
     const opts = parseConfig({
       providers: {},

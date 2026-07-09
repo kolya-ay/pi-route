@@ -18,12 +18,15 @@ const fires = (entry: PipelineEntry, model: string, req: ResolveRequest): FireRe
     if (entry.when.thinking !== undefined && req.thinking !== entry.when.thinking) {
       return { fired: false }
     }
-    return { fired: true, captures: [] }
+    if (!entry.match) return { fired: true, captures: [] }
   }
   if (entry.kind === 'alias') {
     return model === entry.name ? { fired: true, captures: [] } : { fired: false }
   }
-  // pool, no `when`: match key/**
+  if (entry.match === 'exact') {
+    return model === entry.name ? { fired: true, captures: [] } : { fired: false }
+  }
+  // pool, default prefix semantics: match key/**
   const caps = matches(`${entry.name}/**`, model)
   if (caps !== null) return { fired: true, captures: caps }
   return { fired: false }

@@ -44,11 +44,17 @@ export const buildCatalog = (opts: RouterOptions): Catalog => {
     }
   }
 
-  // 3. Alias names + pool-prefix addresses
+  // 3. Alias names, exact-pool names, and pool-prefix addresses
   for (const entry of opts.pipeline) {
     if (entry.kind === 'alias') {
       addresses.add(entry.name)
       leafFor.set(entry.name, leafFor.get(entry.target) ?? entry.target)
+      continue
+    }
+    if (entry.match === 'exact') {
+      addresses.add(entry.name)
+      const firstTarget = entry.to[0]
+      if (firstTarget) leafFor.set(entry.name, leafFor.get(firstTarget) ?? firstTarget)
       continue
     }
     // For pool entries: expose <entry.name>/<tail> for each `<provider>/$1`-style item
