@@ -9,6 +9,7 @@ import { z } from 'zod'
 import { writeCredentials } from './auth/credentials'
 import { deriveName } from './auth/name-derivers'
 import { registerAllOAuthProviders } from './auth/register-all-oauth'
+import { listModelIds, type SetupEngine, setupModels, showModel } from './cli/models'
 import { formatTable, runStats } from './cli/stats'
 import { type EnvPathOverrides, readEnvConfig } from './config/env'
 import { ConfigError } from './config/errors'
@@ -109,6 +110,56 @@ cli
     const snapshot = await collectLimitsSnapshot(state, createTel())
     console.log(JSON.stringify(snapshot, null, 2))
   })
+
+const loadRouterOptions = async (options: { config?: string; authDir?: string }) => {
+  const env = readEnvConfig(toOverrides(options))
+  const { options: routerOptions } = await loadConfig(env.configPath, env.authDir)
+  return routerOptions
+}
+
+cli
+  .command('models [sub] [model]', 'List / show / setup models')
+  .option('--home-dir <dir>', 'Home directory for setup (default: $HOME)')
+  .option('--dry', 'Print planned writes without changing files')
+  .action(
+    async (
+      sub: string | undefined,
+      model: string | undefined,
+      options: { config?: string; authDir?: string; homeDir?: string; dry?: boolean }
+    ) => {
+      const routerOptions = await loadRouterOptions(options)
+      if (sub === 'show') {
+        if (!model)
+          throw usageError('models show requires a model id: pi-route models show <model>')
+        console.log(JSON.stringify(showModel(routerOptions, model), null, 2))
+        return
+      }
+      if (sub === 'setup') {
+        if (!model)
+          throw usageError('models setup requires an engine: pi-route models setup <engine>')
+        const KNOWN_ENGINES: Record<string, true> = {
+          claude: true,
+          codex: true,
+          qwen: true,
+          opencode: true,
+          omp: true,
+          pi: true,
+          openclaw: true
+        }
+        if (!KNOWN_ENGINES[model]) throw usageError(`unknown models setup engine: ${model}`)
+        const setupOpts: { dry: boolean; homeDir?: string } = { dry: Boolean(options.dry) }
+        if (options.homeDir) setupOpts.homeDir = options.homeDir
+        const writes = await setupModels(routerOptions, model as SetupEngine, setupOpts)
+        if (options.dry) console.log(JSON.stringify(writes, null, 2))
+        return
+      }
+      if (sub !== undefined && sub !== 'list') {
+        throw usageError(`unknown models subcommand: "${sub}" (expected: list | show | setup)`)
+      }
+      const ids = listModelIds(routerOptions)
+      if (ids.length > 0) console.log(ids.join('\n'))
+    }
+  )
 
 cli
   .command('stats', 'Query telemetry from the OTel viewer')
