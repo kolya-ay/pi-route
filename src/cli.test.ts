@@ -168,10 +168,12 @@ const setupConfig = (dir: string): string => {
       'pipeline:',
       '  default:',
       '    match: exact',
-      '    to: cerebras/llama3.1-8b',
-      '  small:',
+      '    to:',
+      '      - cerebras/llama3.1-8b',
+      '      - cerebras/llama-3.3-70b',
+      '  smol:',
       '    match: exact',
-      '    to: cerebras/llama3.1-8b',
+      '    to: cerebras/qwen-3-32b',
       'expose:',
       '  - default'
     ].join('\n') + '\n'
@@ -197,13 +199,11 @@ test('models setup claude --dry prints planned writes and creates no files', asy
   ])
   expect(exitCode).toBe(0)
   const writes = JSON.parse(stdout) as Array<{ path: string; action: string; content: string }>
-  expect(writes.length).toBeGreaterThan(0)
   expect(writes[0]?.path).toBe(join(home, '.claude', 'settings.json'))
   const settings = JSON.parse(writes[0]!.content)
-  expect(settings.model).toBe('sonnet')
-  expect(settings.availableModels).toEqual(['sonnet', 'haiku'])
-  expect(settings.env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('default')
-  expect(settings.env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('small')
+  expect(settings.model).toBe('cerebras/llama3.1-8b')
+  expect(settings.env.ANTHROPIC_MODEL).toBe('cerebras/llama3.1-8b')
+  expect(settings.env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('cerebras/qwen-3-32b')
 })
 
 test('models setup claude --dry writes no files', async () => {
@@ -255,11 +255,11 @@ test('models setup claude without pipeline.default fails', async () => {
   expect(stderr).toContain('default')
 })
 
-test('models setup codex --dry writes config.toml with provider block', async () => {
+test('models setup codex --dry writes config.toml + model_catalog_json', async () => {
   const dir = tmp()
   const cfg = setupConfig(dir)
   const home = join(dir, 'home')
-  const { stdout, exitCode } = await run([
+  const { exitCode } = await run([
     'models',
     'setup',
     'codex',
@@ -272,19 +272,39 @@ test('models setup codex --dry writes config.toml with provider block', async ()
     '--dry'
   ])
   expect(exitCode).toBe(0)
-  const writes = JSON.parse(stdout) as Array<{ path: string; content: string }>
-  expect(writes[0]?.path).toBe(join(home, '.codex', 'config.toml'))
-  expect(writes[0]!.content).toContain('model = "default"')
-  expect(writes[0]!.content).toContain('[model_providers.piroute]')
-  expect(writes[0]!.content).toContain('wire_api = "responses"')
-  expect(writes[0]!.content).toContain('review_model = "small"')
+  // Read the files by re-running non-dry to assert structure precisely
+  // (--dry output is human-readable after Task 9).
+  await run([
+    'models',
+    'setup',
+    'codex',
+    '-c',
+    cfg,
+    '--auth-dir',
+    join(dir, 'auth'),
+    '--home-dir',
+    home
+  ])
+  const toml = await Bun.file(join(home, '.codex', 'config.toml')).text()
+  const catalogPath = join(home, '.codex', 'pi-route-catalog.json')
+  expect(toml).toContain('model = "cerebras/llama3.1-8b"')
+  expect(toml).toContain('[model_providers.piroute]')
+  expect(toml).toContain('wire_api = "responses"')
+  expect(toml).toContain(`model_catalog_json = "${catalogPath}"`)
+  expect(toml).not.toContain('review_model')
+  const catalog = JSON.parse(await Bun.file(catalogPath).text()) as Array<{ slug: string }>
+  expect(catalog.map((e) => e.slug)).toEqual([
+    'cerebras/llama3.1-8b',
+    'cerebras/llama-3.3-70b',
+    'cerebras/qwen-3-32b'
+  ])
 })
 
-test('models setup omp --dry writes discovery litellm and modelOverrides', async () => {
+test('models setup omp writes litellm discovery, all members, modelRoles.smol', async () => {
   const dir = tmp()
   const cfg = setupConfig(dir)
   const home = join(dir, 'home')
-  const { stdout, exitCode } = await run([
+  await run([
     'models',
     'setup',
     'omp',
@@ -293,27 +313,25 @@ test('models setup omp --dry writes discovery litellm and modelOverrides', async
     '--auth-dir',
     join(dir, 'auth'),
     '--home-dir',
-    home,
-    '--dry'
+    home
   ])
-  expect(exitCode).toBe(0)
-  const writes = JSON.parse(stdout) as Array<{ path: string; content: string }>
-  const modelsYml = writes.find((w) => w.path.endsWith('models.yml'))
-  expect(modelsYml).toBeDefined()
-  expect(modelsYml!.content).toContain('discovery:')
-  expect(modelsYml!.content).toContain('type: litellm')
-  expect(modelsYml!.content).toContain('modelOverrides:')
-  const configYml = writes.find((w) => w.path.endsWith('config.yml'))
-  expect(configYml).toBeDefined()
-  expect(configYml!.content).toContain('modelRoles:')
-  expect(configYml!.content).toContain('default:')
+  const modelsYml = await Bun.file(join(home, '.omp', 'agent', 'models.yml')).text()
+  expect(modelsYml).toContain('discovery:')
+  expect(modelsYml).toContain('type: litellm')
+  expect(modelsYml).toContain('"cerebras/llama3.1-8b":')
+  expect(modelsYml).toContain('"cerebras/llama-3.3-70b":')
+  expect(modelsYml).toContain('"cerebras/qwen-3-32b":')
+  const configYml = await Bun.file(join(home, '.omp', 'agent', 'config.yml')).text()
+  expect(configYml).toContain('default: "piroute/cerebras/llama3.1-8b"')
+  expect(configYml).toContain('smol: "piroute/cerebras/qwen-3-32b"')
+  expect(configYml).not.toContain('small:')
 })
 
-test('models setup pi --dry writes models.json not models.yml', async () => {
+test('models setup pi writes modelOverrides for all members + defaultModel', async () => {
   const dir = tmp()
   const cfg = setupConfig(dir)
   const home = join(dir, 'home')
-  const { stdout, exitCode } = await run([
+  await run([
     'models',
     'setup',
     'pi',
@@ -322,20 +340,24 @@ test('models setup pi --dry writes models.json not models.yml', async () => {
     '--auth-dir',
     join(dir, 'auth'),
     '--home-dir',
-    home,
-    '--dry'
+    home
   ])
-  expect(exitCode).toBe(0)
-  const writes = JSON.parse(stdout) as Array<{ path: string; content: string }>
-  expect(writes.some((w) => w.path.endsWith('.pi/agent/models.json'))).toBe(true)
-  expect(writes.some((w) => w.path.endsWith('.pi/agent/models.yml'))).toBe(false)
+  expect(existsSync(join(home, '.pi', 'agent', 'models.yml'))).toBe(false)
+  const models = JSON.parse(await Bun.file(join(home, '.pi', 'agent', 'models.json')).text())
+  expect(Object.keys(models.providers.piroute.modelOverrides)).toEqual([
+    'cerebras/llama3.1-8b',
+    'cerebras/llama-3.3-70b',
+    'cerebras/qwen-3-32b'
+  ])
+  const settings = JSON.parse(await Bun.file(join(home, '.pi', 'agent', 'settings.json')).text())
+  expect(settings.defaultModel).toBe('cerebras/llama3.1-8b')
 })
 
-test('models setup qwen --dry writes openai modelProviders as array', async () => {
+test('models setup qwen writes all members as openai modelProviders array', async () => {
   const dir = tmp()
   const cfg = setupConfig(dir)
   const home = join(dir, 'home')
-  const { stdout, exitCode } = await run([
+  await run([
     'models',
     'setup',
     'qwen',
@@ -344,21 +366,24 @@ test('models setup qwen --dry writes openai modelProviders as array', async () =
     '--auth-dir',
     join(dir, 'auth'),
     '--home-dir',
-    home,
-    '--dry'
+    home
   ])
-  expect(exitCode).toBe(0)
-  const writes = JSON.parse(stdout) as Array<{ path: string; content: string }>
-  const settings = JSON.parse(writes[0]!.content)
-  expect(Array.isArray(settings.modelProviders.openai)).toBe(true)
+  const settings = JSON.parse(await Bun.file(join(home, '.qwen', 'settings.json')).text())
   expect(settings.providerProtocol.openai).toBe('openai')
+  expect(settings.security.auth.selectedType).toBe('openai')
+  expect(settings.modelProviders.openai.map((m: { id: string }) => m.id)).toEqual([
+    'cerebras/llama3.1-8b',
+    'cerebras/llama-3.3-70b',
+    'cerebras/qwen-3-32b'
+  ])
+  expect(settings.model.name).toBe('cerebras/llama3.1-8b')
 })
 
-test('models setup opencode --dry writes static config without models fetch disable flag', async () => {
+test('models setup opencode writes provider models map + small_model', async () => {
   const dir = tmp()
   const cfg = setupConfig(dir)
   const home = join(dir, 'home')
-  const { stdout, exitCode } = await run([
+  await run([
     'models',
     'setup',
     'opencode',
@@ -367,21 +392,24 @@ test('models setup opencode --dry writes static config without models fetch disa
     '--auth-dir',
     join(dir, 'auth'),
     '--home-dir',
-    home,
-    '--dry'
+    home
   ])
-  expect(exitCode).toBe(0)
-  const writes = JSON.parse(stdout) as Array<{ path: string; content: string }>
-  const content = writes[0]!.content
-  expect(content).toContain('pi-route/')
-  expect(content).not.toContain('OPENCODE_DISABLE_MODELS_FETCH')
+  const oc = JSON.parse(await Bun.file(join(home, '.config', 'opencode', 'opencode.json')).text())
+  expect(oc.model).toBe('pi-route/cerebras/llama3.1-8b')
+  expect(oc.small_model).toBe('pi-route/cerebras/qwen-3-32b')
+  expect(oc.provider['pi-route'].npm).toBe('@ai-sdk/openai-compatible')
+  expect(Object.keys(oc.provider['pi-route'].models)).toEqual([
+    'cerebras/llama3.1-8b',
+    'cerebras/llama-3.3-70b',
+    'cerebras/qwen-3-32b'
+  ])
 })
 
-test('models setup openclaw --dry writes agents.defaults.models piroute wildcard', async () => {
+test('models setup openclaw writes all members statically + wildcard', async () => {
   const dir = tmp()
   const cfg = setupConfig(dir)
   const home = join(dir, 'home')
-  const { stdout, exitCode } = await run([
+  await run([
     'models',
     'setup',
     'openclaw',
@@ -390,13 +418,16 @@ test('models setup openclaw --dry writes agents.defaults.models piroute wildcard
     '--auth-dir',
     join(dir, 'auth'),
     '--home-dir',
-    home,
-    '--dry'
+    home
   ])
-  expect(exitCode).toBe(0)
-  const writes = JSON.parse(stdout) as Array<{ path: string; content: string }>
-  const settings = JSON.parse(writes[0]!.content)
-  expect(settings.agents.defaults.models['piroute/*']).toBeDefined()
+  const oc = JSON.parse(await Bun.file(join(home, '.openclaw', 'openclaw.json')).text())
+  expect(oc.agents.defaults.models['piroute/*']).toBeDefined()
+  expect(oc.agents.defaults.model.primary).toBe('piroute/cerebras/llama3.1-8b')
+  expect(oc.models.providers.piroute.models.map((m: { id: string }) => m.id)).toEqual([
+    'cerebras/llama3.1-8b',
+    'cerebras/llama-3.3-70b',
+    'cerebras/qwen-3-32b'
+  ])
 })
 
 test('models setup unknown engine exits 2', async () => {
@@ -416,7 +447,7 @@ test('models setup unknown engine exits 2', async () => {
   expect(stderr.toLowerCase()).toContain('engine')
 })
 
-test('models setup claude (non-dry) writes the settings file', async () => {
+test('models setup claude (non-dry) writes availableModels + real main + haiku fast', async () => {
   const dir = tmp()
   const cfg = setupConfig(dir)
   const home = join(dir, 'home')
@@ -431,8 +462,15 @@ test('models setup claude (non-dry) writes the settings file', async () => {
     '--home-dir',
     home
   ])
-  const settingsPath = join(home, '.claude', 'settings.json')
-  expect(existsSync(settingsPath)).toBe(true)
-  const settings = JSON.parse(await Bun.file(settingsPath).text())
-  expect(settings.model).toBe('sonnet')
+  const settings = JSON.parse(await Bun.file(join(home, '.claude', 'settings.json')).text())
+  expect(settings.model).toBe('cerebras/llama3.1-8b')
+  expect(settings.availableModels).toEqual([
+    'cerebras/llama3.1-8b',
+    'cerebras/llama-3.3-70b',
+    'cerebras/qwen-3-32b'
+  ])
+  expect(settings.env.ANTHROPIC_MODEL).toBe('cerebras/llama3.1-8b')
+  expect(settings.env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('cerebras/qwen-3-32b')
+  expect(settings.env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBeUndefined()
+  expect(settings.env.ANTHROPIC_DEFAULT_SONNET_MODEL_NAME).toBeUndefined()
 })

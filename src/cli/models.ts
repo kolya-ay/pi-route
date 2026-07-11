@@ -62,32 +62,30 @@ export type RoleModel = {
 const isPlain = (item: string): boolean =>
   !item.includes('*') && !item.includes('?') && !item.includes('[') && !item.includes('$')
 
-const firstPlainTarget = (items: string[]): string | null => items.find(isPlain) ?? null
-
-const roleModel = (
+const roleModels = (
   options: RouterOptions,
   catalog: Catalog,
-  role: 'default' | 'small'
-): RoleModel | null => {
+  role: 'default' | 'smol'
+): RoleModel[] => {
   const entry = options.pipeline.find(
     (p) => p.name === role && p.kind === 'pool' && p.match === 'exact'
   )
-  if (!entry || entry.kind !== 'pool') return null
-  const first = firstPlainTarget(entry.to)
-  if (!first) return null
-  // The role name is the pi-route address clients send; the leaf provides metadata.
-  const leaf = catalog.leafFor.get(first) ?? first
-  const resolved = resolveModel(options, catalog, leaf)
-  const model = resolved.model
-  return {
-    id: role,
-    name: model?.name ?? leaf,
-    ...(model?.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
-    ...(model?.maxTokens !== undefined ? { maxTokens: model.maxTokens } : {}),
-    ...(model?.reasoning !== undefined ? { reasoning: model.reasoning } : {}),
-    ...(Array.isArray(model?.input) ? { input: model!.input } : {}),
-    ...(model?.cost !== undefined ? { cost: model.cost } : {})
-  }
+  if (!entry || entry.kind !== 'pool') return []
+  return entry.to.filter(isPlain).map((target) => {
+    // The target (as written) is the real backend address the client sends;
+    // the leaf provides metadata.
+    const leaf = catalog.leafFor.get(target) ?? target
+    const model = resolveModel(options, catalog, leaf).model
+    return {
+      id: target,
+      name: model?.name ?? leaf,
+      ...(model?.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
+      ...(model?.maxTokens !== undefined ? { maxTokens: model.maxTokens } : {}),
+      ...(model?.reasoning !== undefined ? { reasoning: model.reasoning } : {}),
+      ...(Array.isArray(model?.input) ? { input: model!.input } : {}),
+      ...(model?.cost !== undefined ? { cost: model.cost } : {})
+    }
+  })
 }
 
 // --- Planned writes ---
@@ -126,42 +124,68 @@ const yamlString = (value: string): string => JSON.stringify(value)
 
 const claudeWrites = async (
   home: string,
-  def: RoleModel,
-  small: RoleModel | null
-): Promise<PlannedWrite[]> => [
-  await plannedWrite(
-    join(home, '.claude/settings.json'),
-    json({
-      model: 'sonnet',
-      availableModels: small ? ['sonnet', 'haiku'] : ['sonnet'],
-      env: {
-        ANTHROPIC_BASE_URL: `${PI_ROUTE_URL}`,
-        ANTHROPIC_AUTH_TOKEN: PI_ROUTE_TOKEN,
-        ANTHROPIC_MODEL: 'sonnet',
-        ANTHROPIC_DEFAULT_SONNET_MODEL: def.id,
-        ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: def.name,
-        ...(small
-          ? {
-              ANTHROPIC_DEFAULT_HAIKU_MODEL: small.id,
-              ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME: small.name
-            }
-          : {})
-      }
-    })
-  )
-]
+  defaults: RoleModel[],
+  smols: RoleModel[]
+): Promise<PlannedWrite[]> => {
+  const all = [...defaults, ...smols]
+  const main = defaults[0]!
+  const fast = smols[0] ?? null
+  return [
+    await plannedWrite(
+      join(home, '.claude/settings.json'),
+      json({
+        model: main.id,
+        availableModels: all.map((m) => m.id),
+        env: {
+          ANTHROPIC_BASE_URL: `${PI_ROUTE_URL}`,
+          ANTHROPIC_AUTH_TOKEN: PI_ROUTE_TOKEN,
+          ANTHROPIC_MODEL: main.id,
+          // Fast/background slot (titles, summaries). ANTHROPIC_SMALL_FAST_MODEL is
+          // deprecated in favor of ANTHROPIC_DEFAULT_HAIKU_MODEL.
+          ...(fast ? { ANTHROPIC_DEFAULT_HAIKU_MODEL: fast.id } : {})
+        }
+      })
+    )
+  ]
+}
+
+// Codex resolves request model ids by longest-prefix against a bundled catalog.
+// A custom-provider id (real backend address) matches nothing -> "metadata not
+// found" warning. A static model_catalog_json whose slug == the id silences it.
+// Required fields track codex-rs/protocol/src/openai_models.rs on `main`; if
+// codex errors at startup parsing this file, upstream added a field — add it here.
+const codexCatalogEntry = (m: RoleModel) => ({
+  slug: m.id,
+  display_name: m.name,
+  supported_reasoning_levels: [] as string[],
+  shell_type: 'shell_command',
+  visibility: 'list',
+  supported_in_api: true,
+  priority: 1,
+  base_instructions: '',
+  default_reasoning_summary: 'none',
+  support_verbosity: false,
+  truncation_policy: { mode: 'tokens', limit: 10000 },
+  supports_parallel_tool_calls: true,
+  experimental_supported_tools: [] as string[],
+  context_window: m.contextWindow ?? 200000,
+  max_context_window: m.contextWindow ?? 200000
+})
 
 const codexWrites = async (
   home: string,
-  def: RoleModel,
-  small: RoleModel | null
+  defaults: RoleModel[],
+  smols: RoleModel[]
 ): Promise<PlannedWrite[]> => {
+  const all = [...defaults, ...smols]
+  const main = defaults[0]!
+  const catalogPath = join(home, '.codex/pi-route-catalog.json')
   const lines = [
-    `model = ${JSON.stringify(def.id)}`,
-    ...(small ? [`review_model = ${JSON.stringify(small.id)}`] : []),
+    `model = ${JSON.stringify(main.id)}`,
     'model_provider = "piroute"',
-    ...(def.contextWindow ? [`model_context_window = ${def.contextWindow}`] : []),
-    ...(def.maxTokens ? [`model_max_output_tokens = ${def.maxTokens}`] : []),
+    `model_catalog_json = ${JSON.stringify(catalogPath)}`,
+    ...(main.contextWindow ? [`model_context_window = ${main.contextWindow}`] : []),
+    ...(main.maxTokens ? [`model_max_output_tokens = ${main.maxTokens}`] : []),
     '',
     '[model_providers.piroute]',
     'name = "pi-route"',
@@ -171,7 +195,10 @@ const codexWrites = async (
     'requires_openai_auth = false',
     ''
   ]
-  return [await plannedWrite(join(home, '.codex/config.toml'), lines.join('\n'))]
+  return [
+    await plannedWrite(join(home, '.codex/config.toml'), lines.join('\n')),
+    await plannedWrite(catalogPath, json(all.map(codexCatalogEntry)))
+  ]
 }
 
 const qwenModel = (m: RoleModel) => ({
@@ -185,19 +212,23 @@ const qwenModel = (m: RoleModel) => ({
 
 const qwenWrites = async (
   home: string,
-  def: RoleModel,
-  small: RoleModel | null
-): Promise<PlannedWrite[]> => [
-  await plannedWrite(
-    join(home, '.qwen/settings.json'),
-    json({
-      security: { auth: { selectedType: 'openai', baseUrl: `${PI_ROUTE_URL}/v1` } },
-      providerProtocol: { openai: 'openai' },
-      modelProviders: { openai: [qwenModel(def), ...(small ? [qwenModel(small)] : [])] },
-      model: { name: def.id }
-    })
-  )
-]
+  defaults: RoleModel[],
+  smols: RoleModel[]
+): Promise<PlannedWrite[]> => {
+  const all = [...defaults, ...smols]
+  const main = defaults[0]!
+  return [
+    await plannedWrite(
+      join(home, '.qwen/settings.json'),
+      json({
+        security: { auth: { selectedType: 'openai', baseUrl: `${PI_ROUTE_URL}/v1` } },
+        providerProtocol: { openai: 'openai' },
+        modelProviders: { openai: all.map(qwenModel) },
+        model: { name: main.id }
+      })
+    )
+  ]
+}
 
 const modelDev = (m: RoleModel): ModelsDevModel => ({
   id: m.id,
@@ -222,18 +253,19 @@ const modelDev = (m: RoleModel): ModelsDevModel => ({
 const opencodeWrites = async (
   _options: RouterOptions,
   home: string,
-  def: RoleModel,
-  small: RoleModel | null
+  defaults: RoleModel[],
+  smols: RoleModel[]
 ): Promise<PlannedWrite[]> => {
-  const models = Object.fromEntries(
-    [def, ...(small ? [small] : [])].map((m) => [m.id, modelDev(m)])
-  )
+  const all = [...defaults, ...smols]
+  const main = defaults[0]!
+  const fast = smols[0] ?? null
+  const models = Object.fromEntries(all.map((m) => [m.id, modelDev(m)]))
   return [
     await plannedWrite(
       join(home, '.config/opencode/opencode.json'),
       json({
-        model: `pi-route/${def.id}`,
-        ...(small ? { small_model: `pi-route/${small.id}` } : {}),
+        model: `pi-route/${main.id}`,
+        ...(fast ? { small_model: `pi-route/${fast.id}` } : {}),
         provider: {
           'pi-route': {
             npm: '@ai-sdk/openai-compatible',
@@ -270,10 +302,13 @@ const overrideYaml = (m: RoleModel, indent: string): string[] => [
 
 const ompWrites = async (
   home: string,
-  def: RoleModel,
-  small: RoleModel | null
+  defaults: RoleModel[],
+  smols: RoleModel[]
 ): Promise<PlannedWrite[]> => {
-  const overrides = [def, ...(small ? [small] : [])].flatMap((m) => overrideYaml(m, '      '))
+  const all = [...defaults, ...smols]
+  const main = defaults[0]!
+  const fast = smols[0] ?? null
+  const overrides = all.flatMap((m) => overrideYaml(m, '      '))
   const modelsYml = [
     'providers:',
     '  piroute:',
@@ -289,8 +324,8 @@ const ompWrites = async (
   ].join('\n')
   const configYml = [
     'modelRoles:',
-    `  default: ${yamlString(`piroute/${def.id}`)}`,
-    ...(small ? [`  small: ${yamlString(`piroute/${small.id}`)}`] : []),
+    `  default: ${yamlString(`piroute/${main.id}`)}`,
+    ...(fast ? [`  smol: ${yamlString(`piroute/${fast.id}`)}`] : []),
     ''
   ].join('\n')
   return [
@@ -315,31 +350,33 @@ const piOverride = (m: RoleModel) => ({
 
 const piWrites = async (
   home: string,
-  def: RoleModel,
-  small: RoleModel | null
-): Promise<PlannedWrite[]> => [
-  await plannedWrite(
-    join(home, '.pi/agent/models.json'),
-    json({
-      providers: {
-        piroute: {
-          name: 'pi-route',
-          baseUrl: `${PI_ROUTE_URL}/v1`,
-          apiKey: PI_ROUTE_TOKEN,
-          api: 'openai-completions',
-          models: [],
-          modelOverrides: Object.fromEntries(
-            [def, ...(small ? [small] : [])].map((m) => [m.id, piOverride(m)])
-          )
+  defaults: RoleModel[],
+  smols: RoleModel[]
+): Promise<PlannedWrite[]> => {
+  const all = [...defaults, ...smols]
+  const main = defaults[0]!
+  return [
+    await plannedWrite(
+      join(home, '.pi/agent/models.json'),
+      json({
+        providers: {
+          piroute: {
+            name: 'pi-route',
+            baseUrl: `${PI_ROUTE_URL}/v1`,
+            apiKey: PI_ROUTE_TOKEN,
+            api: 'openai-completions',
+            models: [],
+            modelOverrides: Object.fromEntries(all.map((m) => [m.id, piOverride(m)]))
+          }
         }
-      }
-    })
-  ),
-  await plannedWrite(
-    join(home, '.pi/agent/settings.json'),
-    json({ defaultProvider: 'piroute', defaultModel: def.id })
-  )
-]
+      })
+    ),
+    await plannedWrite(
+      join(home, '.pi/agent/settings.json'),
+      json({ defaultProvider: 'piroute', defaultModel: main.id })
+    )
+  ]
+}
 
 const openclawModel = (m: RoleModel) => ({
   id: m.id,
@@ -362,47 +399,51 @@ const openclawModel = (m: RoleModel) => ({
 
 const openclawWrites = async (
   home: string,
-  def: RoleModel,
-  small: RoleModel | null
-): Promise<PlannedWrite[]> => [
-  await plannedWrite(
-    join(home, '.openclaw/openclaw.json'),
-    json({
-      models: {
-        mode: 'merge',
-        providers: {
-          piroute: {
-            baseUrl: `${PI_ROUTE_URL}/v1`,
-            apiKey: PI_ROUTE_TOKEN,
-            api: 'openai-completions',
-            models: [openclawModel(def), ...(small ? [openclawModel(small)] : [])]
+  defaults: RoleModel[],
+  smols: RoleModel[]
+): Promise<PlannedWrite[]> => {
+  const all = [...defaults, ...smols]
+  const main = defaults[0]!
+  return [
+    await plannedWrite(
+      join(home, '.openclaw/openclaw.json'),
+      json({
+        models: {
+          mode: 'merge',
+          providers: {
+            piroute: {
+              baseUrl: `${PI_ROUTE_URL}/v1`,
+              apiKey: PI_ROUTE_TOKEN,
+              api: 'openai-completions',
+              models: all.map(openclawModel)
+            }
+          }
+        },
+        agents: {
+          defaults: {
+            model: { primary: `piroute/${main.id}` },
+            models: { 'piroute/*': {} }
           }
         }
-      },
-      agents: {
-        defaults: {
-          model: { primary: `piroute/${def.id}` },
-          models: { 'piroute/*': {} }
-        }
-      }
-    })
-  )
-]
+      })
+    )
+  ]
+}
 
 const buildSetupWrites = async (
   options: RouterOptions,
   engine: SetupEngine,
   home: string,
-  def: RoleModel,
-  small: RoleModel | null
+  defaults: RoleModel[],
+  smols: RoleModel[]
 ): Promise<PlannedWrite[]> => {
-  if (engine === 'claude') return claudeWrites(home, def, small)
-  if (engine === 'codex') return codexWrites(home, def, small)
-  if (engine === 'qwen') return qwenWrites(home, def, small)
-  if (engine === 'opencode') return opencodeWrites(options, home, def, small)
-  if (engine === 'omp') return ompWrites(home, def, small)
-  if (engine === 'pi') return piWrites(home, def, small)
-  return openclawWrites(home, def, small)
+  if (engine === 'claude') return claudeWrites(home, defaults, smols)
+  if (engine === 'codex') return codexWrites(home, defaults, smols)
+  if (engine === 'qwen') return qwenWrites(home, defaults, smols)
+  if (engine === 'opencode') return opencodeWrites(options, home, defaults, smols)
+  if (engine === 'omp') return ompWrites(home, defaults, smols)
+  if (engine === 'pi') return piWrites(home, defaults, smols)
+  return openclawWrites(home, defaults, smols)
 }
 
 export const setupModels = async (
@@ -412,10 +453,10 @@ export const setupModels = async (
 ): Promise<PlannedWrite[]> => {
   const home = opts.homeDir ?? homedir()
   const catalog = buildCatalog(options)
-  const def = roleModel(options, catalog, 'default')
-  if (!def) throw new Error('Missing pipeline.default exact-match role')
-  const small = roleModel(options, catalog, 'small')
-  const writes = await buildSetupWrites(options, engine, home, def, small)
+  const defaults = roleModels(options, catalog, 'default')
+  if (defaults.length === 0) throw new Error('Missing pipeline.default exact-match role')
+  const smols = roleModels(options, catalog, 'smol')
+  const writes = await buildSetupWrites(options, engine, home, defaults, smols)
   if (!opts.dry) await applyWrites(writes)
   return writes
 }
