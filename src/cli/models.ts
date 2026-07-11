@@ -88,6 +88,10 @@ const roleModels = (
   })
 }
 
+const dedupById = (models: RoleModel[]): RoleModel[] => [
+  ...new Map(models.map((m) => [m.id, m])).values()
+]
+
 // --- Planned writes ---
 
 export type PlannedWrite = {
@@ -111,6 +115,18 @@ const applyWrites = async (writes: PlannedWrite[]): Promise<void> => {
   )
 }
 
+export const renderPlannedWrites = (writes: PlannedWrite[]): string =>
+  writes
+    .map((w) => {
+      const header = `${w.action}  ${w.path}`
+      const body = w.content
+        .split('\n')
+        .map((line) => `    ${line}`)
+        .join('\n')
+      return `${header}\n${body}`
+    })
+    .join('\n\n')
+
 // --- Setup engine writers ---
 
 export type SetupEngine = 'claude' | 'codex' | 'qwen' | 'opencode' | 'omp' | 'pi' | 'openclaw'
@@ -127,7 +143,7 @@ const claudeWrites = async (
   defaults: RoleModel[],
   smols: RoleModel[]
 ): Promise<PlannedWrite[]> => {
-  const all = [...defaults, ...smols]
+  const all = dedupById([...defaults, ...smols])
   const main = defaults[0]!
   const fast = smols[0] ?? null
   return [
@@ -165,10 +181,10 @@ const codexCatalogEntry = (m: RoleModel) => ({
   base_instructions: '',
   default_reasoning_summary: 'none',
   support_verbosity: false,
-  truncation_policy: { mode: 'tokens', limit: 10000 },
+  truncation_policy: { mode: 'tokens', limit: 10000 }, // codex default truncation window
   supports_parallel_tool_calls: true,
   experimental_supported_tools: [] as string[],
-  context_window: m.contextWindow ?? 200000,
+  context_window: m.contextWindow ?? 200000, // codex fallback when pi-route has no metadata
   max_context_window: m.contextWindow ?? 200000
 })
 
@@ -177,7 +193,7 @@ const codexWrites = async (
   defaults: RoleModel[],
   smols: RoleModel[]
 ): Promise<PlannedWrite[]> => {
-  const all = [...defaults, ...smols]
+  const all = dedupById([...defaults, ...smols])
   const main = defaults[0]!
   const catalogPath = join(home, '.codex/pi-route-catalog.json')
   const lines = [
@@ -215,7 +231,7 @@ const qwenWrites = async (
   defaults: RoleModel[],
   smols: RoleModel[]
 ): Promise<PlannedWrite[]> => {
-  const all = [...defaults, ...smols]
+  const all = dedupById([...defaults, ...smols])
   const main = defaults[0]!
   return [
     await plannedWrite(
@@ -256,7 +272,7 @@ const opencodeWrites = async (
   defaults: RoleModel[],
   smols: RoleModel[]
 ): Promise<PlannedWrite[]> => {
-  const all = [...defaults, ...smols]
+  const all = dedupById([...defaults, ...smols])
   const main = defaults[0]!
   const fast = smols[0] ?? null
   const models = Object.fromEntries(all.map((m) => [m.id, modelDev(m)]))
@@ -305,7 +321,7 @@ const ompWrites = async (
   defaults: RoleModel[],
   smols: RoleModel[]
 ): Promise<PlannedWrite[]> => {
-  const all = [...defaults, ...smols]
+  const all = dedupById([...defaults, ...smols])
   const main = defaults[0]!
   const fast = smols[0] ?? null
   const overrides = all.flatMap((m) => overrideYaml(m, '      '))
@@ -353,7 +369,7 @@ const piWrites = async (
   defaults: RoleModel[],
   smols: RoleModel[]
 ): Promise<PlannedWrite[]> => {
-  const all = [...defaults, ...smols]
+  const all = dedupById([...defaults, ...smols])
   const main = defaults[0]!
   return [
     await plannedWrite(
@@ -402,7 +418,7 @@ const openclawWrites = async (
   defaults: RoleModel[],
   smols: RoleModel[]
 ): Promise<PlannedWrite[]> => {
-  const all = [...defaults, ...smols]
+  const all = dedupById([...defaults, ...smols])
   const main = defaults[0]!
   return [
     await plannedWrite(

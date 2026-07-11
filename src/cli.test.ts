@@ -181,7 +181,7 @@ const setupConfig = (dir: string): string => {
   return cfg
 }
 
-test('models setup claude --dry prints planned writes and creates no files', async () => {
+test('models setup claude --dry prints a human table and writes nothing', async () => {
   const dir = tmp()
   const cfg = setupConfig(dir)
   const home = join(dir, 'home')
@@ -198,30 +198,10 @@ test('models setup claude --dry prints planned writes and creates no files', asy
     '--dry'
   ])
   expect(exitCode).toBe(0)
-  const writes = JSON.parse(stdout) as Array<{ path: string; action: string; content: string }>
-  expect(writes[0]?.path).toBe(join(home, '.claude', 'settings.json'))
-  const settings = JSON.parse(writes[0]!.content)
-  expect(settings.model).toBe('cerebras/llama3.1-8b')
-  expect(settings.env.ANTHROPIC_MODEL).toBe('cerebras/llama3.1-8b')
-  expect(settings.env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('cerebras/qwen-3-32b')
-})
-
-test('models setup claude --dry writes no files', async () => {
-  const dir = tmp()
-  const cfg = setupConfig(dir)
-  const home = join(dir, 'home')
-  await run([
-    'models',
-    'setup',
-    'claude',
-    '-c',
-    cfg,
-    '--auth-dir',
-    join(dir, 'auth'),
-    '--home-dir',
-    home,
-    '--dry'
-  ])
+  expect(() => JSON.parse(stdout)).toThrow() // not raw JSON anymore
+  expect(stdout).toContain(join(home, '.claude', 'settings.json'))
+  expect(stdout).toContain('create')
+  expect(stdout).toContain('cerebras/llama3.1-8b')
   expect(existsSync(join(home, '.claude', 'settings.json'))).toBe(false)
 })
 
@@ -445,6 +425,49 @@ test('models setup unknown engine exits 2', async () => {
   ])
   expect(exitCode).toBe(2)
   expect(stderr.toLowerCase()).toContain('engine')
+})
+
+test('models setup dedups a model that is in both default and smol groups', async () => {
+  const dir = tmp()
+  const cfg = join(dir, 'router.yaml')
+  writeFileSync(
+    cfg,
+    [
+      'providers:',
+      '  cerebras:',
+      '    type: cerebras',
+      '    account:',
+      '      credential: key',
+      '      key: x',
+      'pipeline:',
+      '  default:',
+      '    match: exact',
+      '    to:',
+      '      - cerebras/llama3.1-8b',
+      '      - cerebras/shared-model',
+      '  smol:',
+      '    match: exact',
+      '    to: cerebras/shared-model',
+      'expose:',
+      '  - default'
+    ].join('\n') + '\n'
+  )
+  const home = join(dir, 'home')
+  await run([
+    'models',
+    'setup',
+    'claude',
+    '-c',
+    cfg,
+    '--auth-dir',
+    join(dir, 'auth'),
+    '--home-dir',
+    home
+  ])
+  const settings = JSON.parse(await Bun.file(join(home, '.claude', 'settings.json')).text())
+  // shared-model appears once, in first-occurrence order; fast slot still points at it
+  expect(settings.availableModels).toEqual(['cerebras/llama3.1-8b', 'cerebras/shared-model'])
+  expect(settings.env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('cerebras/shared-model')
 })
 
 test('models setup claude (non-dry) writes availableModels + real main + haiku fast', async () => {

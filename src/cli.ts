@@ -9,7 +9,13 @@ import { z } from 'zod'
 import { writeCredentials } from './auth/credentials'
 import { deriveName } from './auth/name-derivers'
 import { registerAllOAuthProviders } from './auth/register-all-oauth'
-import { listModelIds, type SetupEngine, setupModels, showModel } from './cli/models'
+import {
+  listModelIds,
+  renderPlannedWrites,
+  type SetupEngine,
+  setupModels,
+  showModel
+} from './cli/models'
 import { formatTable, runStats } from './cli/stats'
 import { type EnvPathOverrides, readEnvConfig } from './config/env'
 import { ConfigError } from './config/errors'
@@ -150,7 +156,7 @@ cli
         const setupOpts: { dry: boolean; homeDir?: string } = { dry: Boolean(options.dry) }
         if (options.homeDir) setupOpts.homeDir = options.homeDir
         const writes = await setupModels(routerOptions, model as SetupEngine, setupOpts)
-        if (options.dry) console.log(JSON.stringify(writes, null, 2))
+        if (options.dry) console.log(renderPlannedWrites(writes))
         return
       }
       if (sub !== undefined && sub !== 'list') {
