@@ -10,9 +10,9 @@ import { writeCredentials } from './auth/credentials'
 import { deriveName } from './auth/name-derivers'
 import { registerAllOAuthProviders } from './auth/register-all-oauth'
 import {
+  type Harness,
   listModelIds,
   renderPlannedWrites,
-  type SetupEngine,
   setupModels,
   showModel
 } from './cli/models'
@@ -124,8 +124,8 @@ const loadRouterOptions = async (options: { config?: string; authDir?: string })
 }
 
 cli
-  .command('models [sub] [model]', 'List / show / setup models')
-  .option('--home-dir <dir>', 'Home directory for setup (default: $HOME)')
+  .command('models [sub] [model]', 'List / show / install models')
+  .option('--home-dir <dir>', 'Home directory for install (default: $HOME)')
   .option('--dry', 'Print planned writes without changing files')
   .action(
     async (
@@ -140,10 +140,10 @@ cli
         console.log(JSON.stringify(showModel(routerOptions, model), null, 2))
         return
       }
-      if (sub === 'setup') {
+      if (sub === 'install') {
         if (!model)
-          throw usageError('models setup requires an engine: pi-route models setup <engine>')
-        const KNOWN_ENGINES: Record<string, true> = {
+          throw usageError('models install requires a harness: pi-route models install <harness>')
+        const KNOWN_HARNESSES: Record<string, true> = {
           claude: true,
           codex: true,
           qwen: true,
@@ -152,15 +152,15 @@ cli
           pi: true,
           openclaw: true
         }
-        if (!KNOWN_ENGINES[model]) throw usageError(`unknown models setup engine: ${model}`)
+        if (!KNOWN_HARNESSES[model]) throw usageError(`unknown models install harness: ${model}`)
         const setupOpts: { dry: boolean; homeDir?: string } = { dry: Boolean(options.dry) }
         if (options.homeDir) setupOpts.homeDir = options.homeDir
-        const writes = await setupModels(routerOptions, model as SetupEngine, setupOpts)
+        const writes = await setupModels(routerOptions, model as Harness, setupOpts)
         if (options.dry) console.log(renderPlannedWrites(writes))
         return
       }
       if (sub !== undefined && sub !== 'list') {
-        throw usageError(`unknown models subcommand: "${sub}" (expected: list | show | setup)`)
+        throw usageError(`unknown models subcommand: "${sub}" (expected: list | show | install)`)
       }
       const ids = listModelIds(routerOptions)
       if (ids.length > 0) console.log(ids.join('\n'))

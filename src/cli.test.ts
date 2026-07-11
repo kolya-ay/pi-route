@@ -181,13 +181,13 @@ const setupConfig = (dir: string): string => {
   return cfg
 }
 
-test('models setup claude --dry prints a human table and writes nothing', async () => {
+test('models install claude --dry prints a human table and writes nothing', async () => {
   const dir = tmp()
   const cfg = setupConfig(dir)
   const home = join(dir, 'home')
   const { stdout, exitCode } = await run([
     'models',
-    'setup',
+    'install',
     'claude',
     '-c',
     cfg,
@@ -205,7 +205,7 @@ test('models setup claude --dry prints a human table and writes nothing', async 
   expect(existsSync(join(home, '.claude', 'settings.json'))).toBe(false)
 })
 
-test('models setup claude without pipeline.default fails', async () => {
+test('models install claude without pipeline.default fails', async () => {
   const dir = tmp()
   const cfg = join(dir, 'router.yaml')
   writeFileSync(
@@ -223,7 +223,7 @@ test('models setup claude without pipeline.default fails', async () => {
   )
   const { stderr, exitCode } = await run([
     'models',
-    'setup',
+    'install',
     'claude',
     '-c',
     cfg,
@@ -235,13 +235,13 @@ test('models setup claude without pipeline.default fails', async () => {
   expect(stderr).toContain('default')
 })
 
-test('models setup codex --dry writes config.toml + model_catalog_json', async () => {
+test('models install codex --dry writes config.toml + model_catalog_json', async () => {
   const dir = tmp()
   const cfg = setupConfig(dir)
   const home = join(dir, 'home')
   const { exitCode } = await run([
     'models',
-    'setup',
+    'install',
     'codex',
     '-c',
     cfg,
@@ -256,7 +256,7 @@ test('models setup codex --dry writes config.toml + model_catalog_json', async (
   // (--dry output is human-readable after Task 9).
   await run([
     'models',
-    'setup',
+    'install',
     'codex',
     '-c',
     cfg,
@@ -280,13 +280,13 @@ test('models setup codex --dry writes config.toml + model_catalog_json', async (
   ])
 })
 
-test('models setup omp writes litellm discovery, all members, modelRoles.smol', async () => {
+test('models install omp writes litellm discovery, all members, modelRoles.smol', async () => {
   const dir = tmp()
   const cfg = setupConfig(dir)
   const home = join(dir, 'home')
   await run([
     'models',
-    'setup',
+    'install',
     'omp',
     '-c',
     cfg,
@@ -307,13 +307,13 @@ test('models setup omp writes litellm discovery, all members, modelRoles.smol', 
   expect(configYml).not.toContain('small:')
 })
 
-test('models setup pi writes modelOverrides for all members + defaultModel', async () => {
+test('models install pi writes modelOverrides for all members + defaultModel', async () => {
   const dir = tmp()
   const cfg = setupConfig(dir)
   const home = join(dir, 'home')
   await run([
     'models',
-    'setup',
+    'install',
     'pi',
     '-c',
     cfg,
@@ -333,13 +333,13 @@ test('models setup pi writes modelOverrides for all members + defaultModel', asy
   expect(settings.defaultModel).toBe('cerebras/llama3.1-8b')
 })
 
-test('models setup qwen writes all members as openai modelProviders array', async () => {
+test('models install qwen writes all members as openai modelProviders array', async () => {
   const dir = tmp()
   const cfg = setupConfig(dir)
   const home = join(dir, 'home')
   await run([
     'models',
-    'setup',
+    'install',
     'qwen',
     '-c',
     cfg,
@@ -359,13 +359,13 @@ test('models setup qwen writes all members as openai modelProviders array', asyn
   expect(settings.model.name).toBe('cerebras/llama3.1-8b')
 })
 
-test('models setup opencode writes provider models map + small_model', async () => {
+test('models install opencode writes provider models map + small_model', async () => {
   const dir = tmp()
   const cfg = setupConfig(dir)
   const home = join(dir, 'home')
   await run([
     'models',
-    'setup',
+    'install',
     'opencode',
     '-c',
     cfg,
@@ -385,13 +385,13 @@ test('models setup opencode writes provider models map + small_model', async () 
   ])
 })
 
-test('models setup openclaw writes all members statically + wildcard', async () => {
+test('models install openclaw writes all members statically + wildcard', async () => {
   const dir = tmp()
   const cfg = setupConfig(dir)
   const home = join(dir, 'home')
   await run([
     'models',
-    'setup',
+    'install',
     'openclaw',
     '-c',
     cfg,
@@ -410,12 +410,12 @@ test('models setup openclaw writes all members statically + wildcard', async () 
   ])
 })
 
-test('models setup unknown engine exits 2', async () => {
+test('models install unknown harness exits 2', async () => {
   const dir = tmp()
   const cfg = setupConfig(dir)
   const { stderr, exitCode } = await run([
     'models',
-    'setup',
+    'install',
     'bogus',
     '-c',
     cfg,
@@ -424,10 +424,10 @@ test('models setup unknown engine exits 2', async () => {
     '--dry'
   ])
   expect(exitCode).toBe(2)
-  expect(stderr.toLowerCase()).toContain('engine')
+  expect(stderr.toLowerCase()).toContain('harness')
 })
 
-test('models setup dedups a model that is in both default and smol groups', async () => {
+test('models install dedups a model that is in both default and smol groups', async () => {
   const dir = tmp()
   const cfg = join(dir, 'router.yaml')
   writeFileSync(
@@ -455,7 +455,7 @@ test('models setup dedups a model that is in both default and smol groups', asyn
   const home = join(dir, 'home')
   await run([
     'models',
-    'setup',
+    'install',
     'claude',
     '-c',
     cfg,
@@ -470,13 +470,13 @@ test('models setup dedups a model that is in both default and smol groups', asyn
   expect(settings.env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('cerebras/shared-model')
 })
 
-test('models setup claude (non-dry) writes availableModels + real main + haiku fast', async () => {
+test('models install claude (non-dry) writes availableModels + real main + haiku fast', async () => {
   const dir = tmp()
   const cfg = setupConfig(dir)
   const home = join(dir, 'home')
   await run([
     'models',
-    'setup',
+    'install',
     'claude',
     '-c',
     cfg,

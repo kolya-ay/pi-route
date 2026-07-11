@@ -127,9 +127,9 @@ export const renderPlannedWrites = (writes: PlannedWrite[]): string =>
     })
     .join('\n\n')
 
-// --- Setup engine writers ---
+// --- Setup harness writers ---
 
-export type SetupEngine = 'claude' | 'codex' | 'qwen' | 'opencode' | 'omp' | 'pi' | 'openclaw'
+export type Harness = 'claude' | 'codex' | 'qwen' | 'opencode' | 'omp' | 'pi' | 'openclaw'
 
 const PI_ROUTE_URL = '${PI_ROUTE_URL:-http://127.0.0.1:3000}'
 const PI_ROUTE_TOKEN = '${PI_ROUTE_TOKEN}'
@@ -448,23 +448,23 @@ const openclawWrites = async (
 
 const buildSetupWrites = async (
   options: RouterOptions,
-  engine: SetupEngine,
+  harness: Harness,
   home: string,
   defaults: RoleModel[],
   smols: RoleModel[]
 ): Promise<PlannedWrite[]> => {
-  if (engine === 'claude') return claudeWrites(home, defaults, smols)
-  if (engine === 'codex') return codexWrites(home, defaults, smols)
-  if (engine === 'qwen') return qwenWrites(home, defaults, smols)
-  if (engine === 'opencode') return opencodeWrites(options, home, defaults, smols)
-  if (engine === 'omp') return ompWrites(home, defaults, smols)
-  if (engine === 'pi') return piWrites(home, defaults, smols)
+  if (harness === 'claude') return claudeWrites(home, defaults, smols)
+  if (harness === 'codex') return codexWrites(home, defaults, smols)
+  if (harness === 'qwen') return qwenWrites(home, defaults, smols)
+  if (harness === 'opencode') return opencodeWrites(options, home, defaults, smols)
+  if (harness === 'omp') return ompWrites(home, defaults, smols)
+  if (harness === 'pi') return piWrites(home, defaults, smols)
   return openclawWrites(home, defaults, smols)
 }
 
 export const setupModels = async (
   options: RouterOptions,
-  engine: SetupEngine,
+  harness: Harness,
   opts: { homeDir?: string; dry?: boolean }
 ): Promise<PlannedWrite[]> => {
   const home = opts.homeDir ?? homedir()
@@ -472,7 +472,7 @@ export const setupModels = async (
   const defaults = roleModels(options, catalog, 'default')
   if (defaults.length === 0) throw new Error('Missing pipeline.default exact-match role')
   const smols = roleModels(options, catalog, 'smol')
-  const writes = await buildSetupWrites(options, engine, home, defaults, smols)
+  const writes = await buildSetupWrites(options, harness, home, defaults, smols)
   if (!opts.dry) await applyWrites(writes)
   return writes
 }
