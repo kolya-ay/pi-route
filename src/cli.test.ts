@@ -672,6 +672,62 @@ test('models install zed writes the pi-route provider, default_model, and edit p
   expect(settings.features.edit_prediction_provider).toBe('open_ai_compatible_api')
 })
 
+test('models install openclaw overwrites a legacy string agents.defaults.model', async () => {
+  const dir = tmp()
+  const cfg = setupConfig(dir)
+  const home = join(dir, 'home')
+  // Legacy shorthand: `model` is a string. The writer must replace it, not descend
+  // into it (jsonc-parser throws "Can not add index to parent of type string").
+  mkdirSync(join(home, '.openclaw'), { recursive: true })
+  writeFileSync(
+    join(home, '.openclaw', 'openclaw.json'),
+    JSON.stringify({ agents: { defaults: { model: 'legacy/x' } } })
+  )
+  const { exitCode } = await run([
+    'models',
+    'install',
+    'openclaw',
+    '-c',
+    cfg,
+    '--auth-dir',
+    join(dir, 'auth'),
+    '--home-dir',
+    home
+  ])
+  expect(exitCode).toBe(0)
+  const conf = parseJsonc(await Bun.file(join(home, '.openclaw', 'openclaw.json')).text())
+  expect(conf.agents.defaults.model).toEqual({ primary: 'piroute/cerebras/llama3.1-8b' })
+})
+
+test('models install openclaw preserves sibling keys when model is an object', async () => {
+  const dir = tmp()
+  const cfg = setupConfig(dir)
+  const home = join(dir, 'home')
+  // Object form with a sibling the user set — must survive; only `primary` is ours.
+  mkdirSync(join(home, '.openclaw'), { recursive: true })
+  writeFileSync(
+    join(home, '.openclaw', 'openclaw.json'),
+    JSON.stringify({ agents: { defaults: { model: { primary: 'old/x', fallback: 'keep/me' } } } })
+  )
+  const { exitCode } = await run([
+    'models',
+    'install',
+    'openclaw',
+    '-c',
+    cfg,
+    '--auth-dir',
+    join(dir, 'auth'),
+    '--home-dir',
+    home
+  ])
+  expect(exitCode).toBe(0)
+  const conf = parseJsonc(await Bun.file(join(home, '.openclaw', 'openclaw.json')).text())
+  expect(conf.agents.defaults.model).toEqual({
+    primary: 'piroute/cerebras/llama3.1-8b',
+    fallback: 'keep/me'
+  })
+})
+
 test('models install zed with no smol role omits edit_predictions and features', async () => {
   const dir = tmp()
   const cfg = modelsConfig(dir)

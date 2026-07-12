@@ -1,6 +1,9 @@
 // src/cli/agents/openclaw.ts
 
+import { existsSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { parse as parseJsonc } from 'jsonc-parser'
 import {
   type Agent,
   edit,
@@ -34,6 +37,18 @@ export const openclaw: Agent = {
   name: 'openclaw',
   description: 'openclaw — ~/.openclaw/openclaw.json',
   write: async ({ url, home, all, main }): Promise<PlannedWrite[]> => {
+    const path = join(home, '.openclaw/openclaw.json')
+    // If `agents.defaults.model` is already an object, descend so sibling keys
+    // survive; if it's a legacy scalar (or absent) jsonc-parser can't index into
+    // it, so replace the whole node instead.
+    const existing = existsSync(path)
+      ? (parseJsonc(await readFile(path, 'utf8')) as
+          | { agents?: { defaults?: { model?: unknown } } }
+          | undefined)
+      : undefined
+    const modelNode = existing?.agents?.defaults?.model
+    const modelIsObject = typeof modelNode === 'object' && modelNode !== null
+    const primary = `piroute/${main.id}`
     const edits = [
       edit(['models', 'mode'], 'merge'),
       edit(['models', 'providers', 'piroute'], {
@@ -42,9 +57,11 @@ export const openclaw: Agent = {
         api: 'openai-completions',
         models: all.map(openclawModel)
       }),
-      edit(['agents', 'defaults', 'model', 'primary'], `piroute/${main.id}`),
+      modelIsObject
+        ? edit(['agents', 'defaults', 'model', 'primary'], primary)
+        : edit(['agents', 'defaults', 'model'], { primary }),
       edit(['agents', 'defaults', 'models', 'piroute/*'], {})
     ]
-    return [await mergedWrite(join(home, '.openclaw/openclaw.json'), patchJson, edits)]
+    return [await mergedWrite(path, patchJson, edits)]
   }
 }
