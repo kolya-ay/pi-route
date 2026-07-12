@@ -270,10 +270,14 @@ test('models install codex --dry writes config.toml + model_catalog_json', async
   expect(toml).toContain('model = "cerebras/llama3.1-8b"')
   expect(toml).toContain('[model_providers.piroute]')
   expect(toml).toContain('wire_api = "responses"')
-  expect(toml).toContain(`model_catalog_json = "${catalogPath}"`)
+  // Relative basename — codex resolves it against ~/.codex/, where we write the file.
+  expect(toml).toContain('model_catalog_json = "pi-route-catalog.json"')
+  expect(toml).toContain('env_key = "PI_ROUTE_API_KEY"')
   expect(toml).not.toContain('review_model')
-  const catalog = JSON.parse(await Bun.file(catalogPath).text()) as Array<{ slug: string }>
-  expect(catalog.map((e) => e.slug)).toEqual([
+  const catalog = JSON.parse(await Bun.file(catalogPath).text()) as {
+    models: Array<{ slug: string }>
+  }
+  expect(catalog.models.map((e) => e.slug)).toEqual([
     'cerebras/llama3.1-8b',
     'cerebras/llama-3.3-70b',
     'cerebras/qwen-3-32b'
@@ -298,6 +302,8 @@ test('models install omp writes litellm discovery, all members, modelRoles.smol'
   const modelsYml = await Bun.file(join(home, '.omp', 'agent', 'models.yml')).text()
   expect(modelsYml).toContain('discovery:')
   expect(modelsYml).toContain('type: litellm')
+  // Token stays in env: apiKey is the env-var name, not a literal secret.
+  expect(modelsYml).toContain('apiKey: PI_ROUTE_API_KEY')
   expect(modelsYml).toContain('"cerebras/llama3.1-8b":')
   expect(modelsYml).toContain('"cerebras/llama-3.3-70b":')
   expect(modelsYml).toContain('"cerebras/qwen-3-32b":')
@@ -331,6 +337,8 @@ test('models install pi writes modelOverrides for all members + defaultModel', a
   ])
   const settings = JSON.parse(await Bun.file(join(home, '.pi', 'agent', 'settings.json')).text())
   expect(settings.defaultModel).toBe('cerebras/llama3.1-8b')
+  // Token stays in env: apiKey references ${PI_ROUTE_API_KEY}, no literal secret.
+  expect(models.providers.piroute.apiKey).toBe('${PI_ROUTE_API_KEY}')
 })
 
 test('models install qwen writes all members as openai modelProviders array', async () => {
@@ -403,6 +411,8 @@ test('models install openclaw writes all members statically + wildcard', async (
   const oc = JSON.parse(await Bun.file(join(home, '.openclaw', 'openclaw.json')).text())
   expect(oc.agents.defaults.models['piroute/*']).toBeDefined()
   expect(oc.agents.defaults.model.primary).toBe('piroute/cerebras/llama3.1-8b')
+  // Token stays in env: apiKey references ${PI_ROUTE_API_KEY}, no literal secret.
+  expect(oc.models.providers.piroute.apiKey).toBe('${PI_ROUTE_API_KEY}')
   expect(oc.models.providers.piroute.models.map((m: { id: string }) => m.id)).toEqual([
     'cerebras/llama3.1-8b',
     'cerebras/llama-3.3-70b',
@@ -496,4 +506,7 @@ test('models install claude (non-dry) writes availableModels + real main + haiku
   expect(settings.env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('cerebras/qwen-3-32b')
   expect(settings.env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBeUndefined()
   expect(settings.env.ANTHROPIC_DEFAULT_SONNET_MODEL_NAME).toBeUndefined()
+  // Base URL is baked, but the token stays in the ambient ANTHROPIC_AUTH_TOKEN env var.
+  expect(settings.env.ANTHROPIC_BASE_URL).toContain('http')
+  expect(settings.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined()
 })

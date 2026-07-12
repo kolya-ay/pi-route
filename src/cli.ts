@@ -153,7 +153,15 @@ cli
           openclaw: true
         }
         if (!KNOWN_HARNESSES[model]) throw usageError(`unknown models install harness: ${model}`)
-        const setupOpts: { dry: boolean; homeDir?: string } = { dry: Boolean(options.dry) }
+        // Bake pi-route's own URL into client configs (clients don't uniformly
+        // expand shell vars). The token is a secret — it stays in the client's
+        // PI_ROUTE_API_KEY / ANTHROPIC_AUTH_TOKEN env var, never written to a file.
+        const env = readEnvConfig(toOverrides(options))
+        const host = env.host === '0.0.0.0' || env.host === '::' ? '127.0.0.1' : env.host
+        const setupOpts: { dry: boolean; url: string; homeDir?: string } = {
+          dry: Boolean(options.dry),
+          url: `http://${host}:${env.port}`
+        }
         if (options.homeDir) setupOpts.homeDir = options.homeDir
         const writes = await setupModels(routerOptions, model as Harness, setupOpts)
         if (options.dry) console.log(renderPlannedWrites(writes))

@@ -131,14 +131,18 @@ export const renderPlannedWrites = (writes: PlannedWrite[]): string =>
 
 export type Harness = 'claude' | 'codex' | 'qwen' | 'opencode' | 'omp' | 'pi' | 'openclaw'
 
-const PI_ROUTE_URL = '${PI_ROUTE_URL:-http://127.0.0.1:3000}'
-const PI_ROUTE_TOKEN = '${PI_ROUTE_TOKEN}'
+// The pi-route base URL, resolved from env at install time. Clients don't
+// uniformly expand shell vars, so we bake the concrete URL. The token is a
+// secret and stays in the PI_ROUTE_API_KEY / ANTHROPIC_AUTH_TOKEN env var — never
+// written to a config file.
+const PI_ROUTE_API_KEY = 'PI_ROUTE_API_KEY'
 
 const json = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`
 
 const yamlString = (value: string): string => JSON.stringify(value)
 
 const claudeWrites = async (
+  url: string,
   home: string,
   defaults: RoleModel[],
   smols: RoleModel[]
@@ -153,8 +157,8 @@ const claudeWrites = async (
         model: main.id,
         availableModels: all.map((m) => m.id),
         env: {
-          ANTHROPIC_BASE_URL: `${PI_ROUTE_URL}`,
-          ANTHROPIC_AUTH_TOKEN: PI_ROUTE_TOKEN,
+          // Token stays in the ambient ANTHROPIC_AUTH_TOKEN env var, not baked here.
+          ANTHROPIC_BASE_URL: url,
           ANTHROPIC_MODEL: main.id,
           // Fast/background slot (titles, summaries). ANTHROPIC_SMALL_FAST_MODEL is
           // deprecated in favor of ANTHROPIC_DEFAULT_HAIKU_MODEL.
@@ -179,6 +183,7 @@ const codexCatalogEntry = (m: RoleModel) => ({
   supported_in_api: true,
   priority: 1,
   base_instructions: '',
+  supports_reasoning_summaries: false,
   default_reasoning_summary: 'none',
   support_verbosity: false,
   truncation_policy: { mode: 'tokens', limit: 10000 }, // codex default truncation window
@@ -189,44 +194,51 @@ const codexCatalogEntry = (m: RoleModel) => ({
 })
 
 const codexWrites = async (
+  url: string,
   home: string,
   defaults: RoleModel[],
   smols: RoleModel[]
 ): Promise<PlannedWrite[]> => {
   const all = dedupById([...defaults, ...smols])
   const main = defaults[0]!
-  const catalogPath = join(home, '.codex/pi-route-catalog.json')
+  // codex resolves a relative model_catalog_json against ~/.codex/ (its config
+  // dir), not cwd — so the bare basename points at the file we write beside it.
+  const catalogFile = 'pi-route-catalog.json'
+  const catalogPath = join(home, '.codex', catalogFile)
   const lines = [
     `model = ${JSON.stringify(main.id)}`,
     'model_provider = "piroute"',
-    `model_catalog_json = ${JSON.stringify(catalogPath)}`,
+    `model_catalog_json = ${JSON.stringify(catalogFile)}`,
     ...(main.contextWindow ? [`model_context_window = ${main.contextWindow}`] : []),
     ...(main.maxTokens ? [`model_max_output_tokens = ${main.maxTokens}`] : []),
     '',
     '[model_providers.piroute]',
     'name = "pi-route"',
-    `base_url = "${PI_ROUTE_URL}/v1"`,
+    `base_url = ${JSON.stringify(`${url}/v1`)}`,
     'wire_api = "responses"',
-    'env_key = "OPENAI_API_KEY"',
+    `env_key = ${JSON.stringify(PI_ROUTE_API_KEY)}`,
     'requires_openai_auth = false',
     ''
   ]
   return [
     await plannedWrite(join(home, '.codex/config.toml'), lines.join('\n')),
-    await plannedWrite(catalogPath, json(all.map(codexCatalogEntry)))
+    // codex parses this file as ModelsResponse = { models: ModelInfo[] } — a bare
+    // array fails with "invalid type: map, expected a sequence".
+    await plannedWrite(catalogPath, json({ models: all.map(codexCatalogEntry) }))
   ]
 }
 
-const qwenModel = (m: RoleModel) => ({
+const qwenModel = (m: RoleModel, url: string) => ({
   id: m.id,
   name: m.name,
-  baseUrl: `${PI_ROUTE_URL}/v1`,
-  envKey: 'OPENAI_API_KEY',
+  baseUrl: `${url}/v1`,
+  envKey: PI_ROUTE_API_KEY,
   ...(m.input?.includes('image') ? { capabilities: { vision: true } } : {}),
   ...(m.contextWindow ? { generationConfig: { contextWindowSize: m.contextWindow } } : {})
 })
 
 const qwenWrites = async (
+  url: string,
   home: string,
   defaults: RoleModel[],
   smols: RoleModel[]
@@ -237,9 +249,9 @@ const qwenWrites = async (
     await plannedWrite(
       join(home, '.qwen/settings.json'),
       json({
-        security: { auth: { selectedType: 'openai', baseUrl: `${PI_ROUTE_URL}/v1` } },
+        security: { auth: { selectedType: 'openai', baseUrl: `${url}/v1` } },
         providerProtocol: { openai: 'openai' },
-        modelProviders: { openai: all.map(qwenModel) },
+        modelProviders: { openai: all.map((m) => qwenModel(m, url)) },
         model: { name: main.id }
       })
     )
@@ -267,6 +279,7 @@ const modelDev = (m: RoleModel): ModelsDevModel => ({
 })
 
 const opencodeWrites = async (
+  url: string,
   _options: RouterOptions,
   home: string,
   defaults: RoleModel[],
@@ -287,9 +300,9 @@ const opencodeWrites = async (
             npm: '@ai-sdk/openai-compatible',
             name: 'pi-route',
             id: 'pi-route',
-            api: `${PI_ROUTE_URL}/v1`,
-            env: ['OPENAI_API_KEY'],
-            options: { baseURL: `${PI_ROUTE_URL}/v1` },
+            api: `${url}/v1`,
+            env: [PI_ROUTE_API_KEY],
+            options: { baseURL: `${url}/v1` },
             models
           }
         }
@@ -317,6 +330,7 @@ const overrideYaml = (m: RoleModel, indent: string): string[] => [
 ]
 
 const ompWrites = async (
+  url: string,
   home: string,
   defaults: RoleModel[],
   smols: RoleModel[]
@@ -328,8 +342,9 @@ const ompWrites = async (
   const modelsYml = [
     'providers:',
     '  piroute:',
-    `    baseUrl: ${PI_ROUTE_URL}/v1`,
-    `    apiKey: ${PI_ROUTE_TOKEN}`,
+    `    baseUrl: ${yamlString(`${url}/v1`)}`,
+    // omp reads apiKey as an env-var name (or literal fallback); keep the token in env.
+    `    apiKey: ${PI_ROUTE_API_KEY}`,
     '    api: openai-completions',
     '    auth: apiKey',
     '    discovery:',
@@ -365,6 +380,7 @@ const piOverride = (m: RoleModel) => ({
 })
 
 const piWrites = async (
+  url: string,
   home: string,
   defaults: RoleModel[],
   smols: RoleModel[]
@@ -378,8 +394,9 @@ const piWrites = async (
         providers: {
           piroute: {
             name: 'pi-route',
-            baseUrl: `${PI_ROUTE_URL}/v1`,
-            apiKey: PI_ROUTE_TOKEN,
+            baseUrl: `${url}/v1`,
+            // pi expands ${VAR} in apiKey; keep the token in env.
+            apiKey: `\${${PI_ROUTE_API_KEY}}`,
             api: 'openai-completions',
             models: [],
             modelOverrides: Object.fromEntries(all.map((m) => [m.id, piOverride(m)]))
@@ -414,6 +431,7 @@ const openclawModel = (m: RoleModel) => ({
 })
 
 const openclawWrites = async (
+  url: string,
   home: string,
   defaults: RoleModel[],
   smols: RoleModel[]
@@ -428,8 +446,9 @@ const openclawWrites = async (
           mode: 'merge',
           providers: {
             piroute: {
-              baseUrl: `${PI_ROUTE_URL}/v1`,
-              apiKey: PI_ROUTE_TOKEN,
+              baseUrl: `${url}/v1`,
+              // openclaw expands ${VAR} in apiKey; keep the token in env.
+              apiKey: `\${${PI_ROUTE_API_KEY}}`,
               api: 'openai-completions',
               models: all.map(openclawModel)
             }
@@ -449,30 +468,31 @@ const openclawWrites = async (
 const buildSetupWrites = async (
   options: RouterOptions,
   harness: Harness,
+  url: string,
   home: string,
   defaults: RoleModel[],
   smols: RoleModel[]
 ): Promise<PlannedWrite[]> => {
-  if (harness === 'claude') return claudeWrites(home, defaults, smols)
-  if (harness === 'codex') return codexWrites(home, defaults, smols)
-  if (harness === 'qwen') return qwenWrites(home, defaults, smols)
-  if (harness === 'opencode') return opencodeWrites(options, home, defaults, smols)
-  if (harness === 'omp') return ompWrites(home, defaults, smols)
-  if (harness === 'pi') return piWrites(home, defaults, smols)
-  return openclawWrites(home, defaults, smols)
+  if (harness === 'claude') return claudeWrites(url, home, defaults, smols)
+  if (harness === 'codex') return codexWrites(url, home, defaults, smols)
+  if (harness === 'qwen') return qwenWrites(url, home, defaults, smols)
+  if (harness === 'opencode') return opencodeWrites(url, options, home, defaults, smols)
+  if (harness === 'omp') return ompWrites(url, home, defaults, smols)
+  if (harness === 'pi') return piWrites(url, home, defaults, smols)
+  return openclawWrites(url, home, defaults, smols)
 }
 
 export const setupModels = async (
   options: RouterOptions,
   harness: Harness,
-  opts: { homeDir?: string; dry?: boolean }
+  opts: { homeDir?: string; dry?: boolean; url: string }
 ): Promise<PlannedWrite[]> => {
   const home = opts.homeDir ?? homedir()
   const catalog = buildCatalog(options)
   const defaults = roleModels(options, catalog, 'default')
   if (defaults.length === 0) throw new Error('Missing pipeline.default exact-match role')
   const smols = roleModels(options, catalog, 'smol')
-  const writes = await buildSetupWrites(options, harness, home, defaults, smols)
+  const writes = await buildSetupWrites(options, harness, opts.url, home, defaults, smols)
   if (!opts.dry) await applyWrites(writes)
   return writes
 }

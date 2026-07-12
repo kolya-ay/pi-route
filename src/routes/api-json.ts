@@ -40,7 +40,7 @@ export const renderApiJson = (models: Record<string, ModelsDevModel>, api: strin
     npm: '@ai-sdk/openai-compatible',
     name: 'pi-route',
     api,
-    env: ['OPENAI_API_KEY'],
+    env: ['PI_ROUTE_API_KEY'],
     models
   }
 })
