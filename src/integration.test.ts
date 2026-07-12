@@ -27,10 +27,10 @@ describe('integration — config shapes load and dispatch wiring works', () => {
 providers:
   c1:
     type: cerebras
-    account: { credential: key, key: k1 }
+    apiKey: k1
   c2:
     type: cerebras
-    account: { credential: key, key: k2 }
+    apiKey: k2
 
 pipeline:
   pool: [c1/$1, c2/$1]
@@ -55,7 +55,7 @@ pipeline:
 providers:
   c1:
     type: cerebras
-    account: { credential: key, key: k1 }
+    apiKey: k1
 
 pipeline:
   opus: c1/llama3.1-8b

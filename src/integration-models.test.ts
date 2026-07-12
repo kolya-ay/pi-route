@@ -12,7 +12,7 @@ beforeEach(async () => {
   process.env.PI_ROUTE_AUTH = dir
   await writeFile(
     process.env.PI_ROUTE_CONFIG,
-    `providers:\n  cerebras:\n    type: cerebras\n    account: { credential: key, key: sk }\n`
+    `providers:\n  cerebras:\n    type: cerebras\n    apiKey: sk\n`
   )
 })
 afterEach(async () => {
@@ -106,7 +106,7 @@ describe('/api.json — models.dev masquerade (endpoint C)', () => {
   test('public (no token) + host-derived api url when opencode: true', async () => {
     await writeFile(
       process.env.PI_ROUTE_CONFIG as string,
-      `providers:\n  cerebras:\n    type: cerebras\n    account: { credential: key, key: sk }\nopencode: true\n`
+      `providers:\n  cerebras:\n    type: cerebras\n    apiKey: sk\nopencode: true\n`
     )
     process.env.PI_ROUTE_TOKEN = 'sk-test'
     try {
@@ -127,7 +127,7 @@ describe('/api.json — models.dev masquerade (endpoint C)', () => {
   test('api override wins over host', async () => {
     await writeFile(
       process.env.PI_ROUTE_CONFIG as string,
-      `providers:\n  cerebras:\n    type: cerebras\n    account: { credential: key, key: sk }\nopencode:\n  api: https://pi.example.com/v1\n`
+      `providers:\n  cerebras:\n    type: cerebras\n    apiKey: sk\nopencode:\n  api: https://pi.example.com/v1\n`
     )
     const router = await createApp()
     const r = await router.app.request('http://127.0.0.1:2130/api.json')

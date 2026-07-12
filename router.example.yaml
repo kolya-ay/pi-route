@@ -4,22 +4,26 @@
 #   PI_ROUTE_PORT    listen port            (default 3000)
 #   PI_ROUTE_HOST    listen host            (default 127.0.0.1)
 #   PI_ROUTE_TOKEN   comma-separated client bearer tokens; unset = no gate
-#   PI_ROUTE_CONFIG  path to this file      (default ./router.yaml)
-#   PI_ROUTE_AUTH    OAuth + state.json dir (default ~/.config/pi-route/auth)
+#   PI_ROUTE_CONFIG  path to this file      (default ~/.config/pi-route/config.yaml)
+#   PI_ROUTE_AUTH    OAuth + state.json dir (default ~/.local/share/pi-route/auth)
 
 # Atomic upstream connections. One provider = one account.
 providers:
   claude-max:
     type: anthropic
-    account:
-      credential: oauth
-      name: your-email@example.com   # run: pi-route login anthropic your-email@example.com
+    account: your-email@example.com   # run: pi-route provider claude-max auth anthropic
 
   antigravity:
     type: antigravity
-    account:
-      credential: oauth
-      name: user@gmail.com
+    account: user@gmail.com
+
+  # A key-credential provider. `apiKey` is first-class — a literal, or a $VAR
+  # read from the environment. Register it without hand-editing via:
+  #   pi-route provider chutes set --url https://llm.chutes.ai/v1 --key-env CHUTES_API_KEY
+  # chutes:
+  #   type: openai-compatible
+  #   baseUrl: https://llm.chutes.ai/v1
+  #   apiKey: $CHUTES_API_KEY
 
 # Routing pipeline. Each entry's YAML value shape declares its semantics:
 #   key: target           → alias (rewrite bare name to target)

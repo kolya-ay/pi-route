@@ -53,7 +53,7 @@ describe('loadConfig', () => {
 providers:
   cerebras:
     type: cerebras
-    account: { credential: key, key: sk-test }
+    apiKey: sk-test
 `)
     const { options } = await loadConfig(p, dir)
     expect(options.providers.cerebras?.type).toBe('cerebras')
@@ -65,7 +65,7 @@ providers:
 providers:
   c:
     type: cerebras
-    account: { credential: key, key: $MY_TEST_KEY }
+    apiKey: $MY_TEST_KEY
 `)
     const { options } = await loadConfig(p, dir)
     const a = options.providers.c?.account

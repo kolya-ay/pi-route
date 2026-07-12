@@ -12,7 +12,7 @@ beforeEach(async () => {
   process.env.PI_ROUTE_AUTH = dir
   await writeFile(
     process.env.PI_ROUTE_CONFIG,
-    `providers:\n  cerebras:\n    type: cerebras\n    account:\n      credential: key\n      key: sk-test\n`
+    `providers:\n  cerebras:\n    type: cerebras\n    apiKey: sk-test\n`
   )
 })
 

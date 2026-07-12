@@ -1,22 +1,13 @@
 import { z } from 'zod'
 
-import type { PipelineEntry, RouterOptions } from '../types'
+import type { Account, PipelineEntry, ProviderConfig, RouterOptions } from '../types'
 
-export const AccountSchema = z.discriminatedUnion('credential', [
-  z.object({
-    credential: z.literal('key'),
-    key: z.string(),
-    disabled: z.boolean().optional()
-  }),
-  z.object({
-    credential: z.literal('oauth'),
-    name: z.string(),
-    projectId: z.string().optional(),
-    disabled: z.boolean().optional()
-  })
+// Config *surface*: apiKey (literal or $VAR) XOR account (oauth). `account` is a
+// bare credential-name string, or an object naming it plus an optional projectId.
+const AccountValueSchema = z.union([
+  z.string(),
+  z.object({ name: z.string(), projectId: z.string().optional() })
 ])
-
-const ProviderTypeSchema = z.string()
 
 const DiscoverStrategySchema = z.enum([
   'auto',
@@ -43,12 +34,49 @@ const ModelMetaOverrideSchema = z.object({
   input: z.array(z.string()).optional()
 })
 
-const ProviderSchema = z.object({
-  type: ProviderTypeSchema,
-  baseUrl: z.string().optional(),
-  account: AccountSchema,
-  discover: z.array(DiscoverStrategySchema).optional(),
-  modelOverrides: z.record(z.string(), ModelMetaOverrideSchema).optional()
+const ProviderSchema = z
+  .object({
+    type: z.string(),
+    baseUrl: z.string().optional(),
+    apiKey: z.string().optional(),
+    account: AccountValueSchema.optional(),
+    disabled: z.boolean().optional(),
+    discover: z.array(DiscoverStrategySchema).optional(),
+    modelOverrides: z.record(z.string(), ModelMetaOverrideSchema).optional()
+  })
+  .refine((p) => (p.apiKey === undefined) !== (p.account === undefined), {
+    message: 'provider requires exactly one of `apiKey` or `account`'
+  })
+
+type RawProvider = z.infer<typeof ProviderSchema>
+
+// Desugar the surface into the internal Account union so all runtime consumers
+// (registry, scheduler, resolve, dispatch) keep reading the shape they always have.
+const normalizeAccount = (raw: RawProvider): Account => {
+  const disabled = raw.disabled !== undefined ? { disabled: raw.disabled } : {}
+  if (raw.apiKey !== undefined) {
+    return { credential: 'key', key: raw.apiKey, ...disabled }
+  }
+  const acc = raw.account
+  if (typeof acc === 'string') {
+    return { credential: 'oauth', name: acc, ...disabled }
+  }
+  // acc is defined and an object here (refine guarantees exactly one of apiKey/account).
+  const obj = acc as { name: string; projectId?: string }
+  return {
+    credential: 'oauth',
+    name: obj.name,
+    ...(obj.projectId !== undefined ? { projectId: obj.projectId } : {}),
+    ...disabled
+  }
+}
+
+const normalizeProvider = (raw: RawProvider): ProviderConfig => ({
+  type: raw.type,
+  ...(raw.baseUrl !== undefined ? { baseUrl: raw.baseUrl } : {}),
+  account: normalizeAccount(raw),
+  ...(raw.discover !== undefined ? { discover: raw.discover } : {}),
+  ...(raw.modelOverrides !== undefined ? { modelOverrides: raw.modelOverrides } : {})
 })
 
 const StrategySchema = z.enum(['round-robin', 'sticky', 'fill-first', 'failover'])
@@ -120,7 +148,9 @@ export const parseConfig = (raw: unknown): RouterOptions => {
         : (parsed.opencode as { api?: string })
 
   return {
-    providers: parsed.providers,
+    providers: Object.fromEntries(
+      Object.entries(parsed.providers).map(([name, raw]) => [name, normalizeProvider(raw)])
+    ),
     pipeline,
     expose: parsed.expose,
     ...(opencode !== undefined ? { opencode } : {})

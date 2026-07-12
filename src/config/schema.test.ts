@@ -2,27 +2,52 @@ import { describe, expect, test } from 'bun:test'
 import { parseConfig } from './schema'
 
 describe('parseConfig — providers', () => {
-  test('parses a key-credential provider', () => {
+  test('apiKey desugars to internal key-credential account', () => {
     const opts = parseConfig({
-      providers: {
-        cerebras: { type: 'cerebras', account: { credential: 'key', key: 'sk-foo' } }
-      }
+      providers: { cerebras: { type: 'cerebras', apiKey: 'sk-foo' } }
     })
     expect(opts.providers.cerebras?.account).toEqual({ credential: 'key', key: 'sk-foo' })
   })
-  test('parses an oauth-credential provider', () => {
+
+  test('account string desugars to oauth account', () => {
+    const opts = parseConfig({
+      providers: { anthropic: { type: 'anthropic', account: 'main' } }
+    })
+    expect(opts.providers.anthropic?.account).toEqual({ credential: 'oauth', name: 'main' })
+  })
+
+  test('account object carries projectId', () => {
     const opts = parseConfig({
       providers: {
-        antigravity: {
-          type: 'antigravity',
-          account: { credential: 'oauth', name: 'user@gmail.com', projectId: 'p123' }
-        }
+        ag: { type: 'antigravity', account: { name: 'user@gmail.com', projectId: 'p123' } }
       }
     })
-    const a = opts.providers.antigravity?.account
-    if (!a) throw new Error('antigravity provider missing')
-    expect(a.credential).toBe('oauth')
-    if (a.credential === 'oauth') expect(a.name).toBe('user@gmail.com')
+    expect(opts.providers.ag?.account).toEqual({
+      credential: 'oauth',
+      name: 'user@gmail.com',
+      projectId: 'p123'
+    })
+  })
+
+  test('provider-level disabled desugars onto the account', () => {
+    const opts = parseConfig({
+      providers: { cerebras: { type: 'cerebras', apiKey: 'sk-foo', disabled: true } }
+    })
+    expect(opts.providers.cerebras?.account).toEqual({
+      credential: 'key',
+      key: 'sk-foo',
+      disabled: true
+    })
+  })
+
+  test('rejects a provider with both apiKey and account', () => {
+    expect(() =>
+      parseConfig({ providers: { x: { type: 'openai-compatible', apiKey: 'k', account: 'y' } } })
+    ).toThrow()
+  })
+
+  test('rejects a provider with neither apiKey nor account', () => {
+    expect(() => parseConfig({ providers: { x: { type: 'openai-compatible' } } })).toThrow()
   })
 })
 
@@ -119,8 +144,8 @@ describe('parseConfig — pipeline value shapes', () => {
   test('accepts strategy: failover on a pool entry', () => {
     const parsed = parseConfig({
       providers: {
-        a: { type: 'openai-compatible', account: { credential: 'key', key: 'k' } },
-        b: { type: 'openai-compatible', account: { credential: 'key', key: 'k' } }
+        a: { type: 'openai-compatible', apiKey: 'k' },
+        b: { type: 'openai-compatible', apiKey: 'k' }
       },
       pipeline: {
         gpt: { to: ['a/x', 'b/x'], strategy: 'failover' }
@@ -151,7 +176,7 @@ describe('parseConfig — collision', () => {
   test('errors when pipeline entry name collides with provider name', () => {
     expect(() =>
       parseConfig({
-        providers: { foo: { type: 'cerebras', account: { credential: 'key', key: 'k' } } },
+        providers: { foo: { type: 'cerebras', apiKey: 'k' } },
         pipeline: { foo: 'bar' }
       })
     ).toThrow(/collision/i)
@@ -165,7 +190,7 @@ describe('provider discover + modelOverrides', () => {
         chutes: {
           type: 'openai-compatible',
           baseUrl: 'https://llm.chutes.ai/v1',
-          account: { credential: 'key', key: 'x' },
+          apiKey: 'x',
           discover: ['auto'],
           modelOverrides: { 'MiniMaxAI/MiniMax-M2.5-TEE': { contextWindow: 204800 } }
         }
@@ -183,7 +208,7 @@ describe('provider discover + modelOverrides', () => {
         providers: {
           p: {
             type: 'openai-compatible',
-            account: { credential: 'key', key: 'x' },
+            apiKey: 'x',
             discover: ['nope']
           }
         }
