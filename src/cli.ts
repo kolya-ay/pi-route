@@ -150,7 +150,8 @@ cli
           opencode: true,
           omp: true,
           pi: true,
-          openclaw: true
+          openclaw: true,
+          zed: true
         }
         if (!KNOWN_HARNESSES[model]) throw usageError(`unknown models install harness: ${model}`)
         // Bake pi-route's own URL into client configs (clients don't uniformly

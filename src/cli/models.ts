@@ -136,7 +136,7 @@ export const renderPlannedWrites = (writes: PlannedWrite[]): string =>
 
 // --- Setup harness writers ---
 
-export type Harness = 'claude' | 'codex' | 'qwen' | 'opencode' | 'omp' | 'pi' | 'openclaw'
+export type Harness = 'claude' | 'codex' | 'qwen' | 'opencode' | 'omp' | 'pi' | 'openclaw' | 'zed'
 
 // The pi-route base URL, resolved from env at install time. Clients don't
 // uniformly expand shell vars, so we bake the concrete URL. The token is a
@@ -431,6 +431,58 @@ const openclawWrites = async (
   return [await mergedWrite(join(home, '.openclaw/openclaw.json'), patchJson, edits)]
 }
 
+// Zed reads the model catalog + all metadata ONLY from settings.json ->
+// available_models (it never calls /v1/models for an openai_compatible provider).
+// Verified against zed main: reasoning_effort is open_ai::ReasoningEffort (lowercase
+// minimal|low|medium|high|xhigh|max|none), "medium" valid; ModelCapabilities uses serde
+// defaults so a { tools, images } subset is accepted; the openai_compatible settings
+// sub-key is the provider id used in agent.default_model.provider ("pi-route"); the edit-
+// prediction provider literal is "open_ai_compatible_api" (edit_predictions sub-key), fields
+// api_url/model/max_output_tokens(64)/prompt_format:"infer".
+const openaiCompatibleModel = (m: RoleModel) => ({
+  name: m.id,
+  display_name: m.name,
+  // Zed "max_tokens" == context window
+  ...(m.contextWindow ? { max_tokens: m.contextWindow } : {}),
+  ...(m.maxTokens ? { max_output_tokens: m.maxTokens } : {}),
+  capabilities: { tools: true, images: m.input?.includes('image') ?? false },
+  ...(m.reasoning ? { reasoning_effort: 'medium' } : {})
+})
+
+const zedWrites = async (
+  url: string,
+  home: string,
+  defaults: RoleModel[],
+  smols: RoleModel[]
+): Promise<PlannedWrite[]> => {
+  const all = dedupById([...defaults, ...smols])
+  const main = defaults[0]!
+  const fast = smols[0] ?? null
+  const edits: Edit[] = [
+    edit(['language_models', 'openai_compatible', 'pi-route'], {
+      api_url: `${url}/v1`,
+      available_models: all.map(openaiCompatibleModel)
+    }),
+    edit(['agent', 'default_model'], {
+      provider: 'pi-route',
+      model: main.id,
+      enable_thinking: Boolean(main.reasoning)
+    }),
+    ...(fast
+      ? [
+          edit(['edit_predictions', 'open_ai_compatible_api'], {
+            api_url: `${url}/v1`,
+            model: fast.id,
+            max_output_tokens: fast.maxTokens ?? 64,
+            prompt_format: 'infer'
+          }),
+          edit(['features', 'edit_prediction_provider'], 'open_ai_compatible_api')
+        ]
+      : [])
+  ]
+  return [await mergedWrite(join(home, '.config/zed/settings.json'), patchJson, edits)]
+}
+
 const buildSetupWrites = async (
   harness: Harness,
   url: string,
@@ -444,6 +496,7 @@ const buildSetupWrites = async (
   if (harness === 'opencode') return opencodeWrites(url, home, defaults, smols)
   if (harness === 'omp') return ompWrites(url, home, defaults, smols)
   if (harness === 'pi') return piWrites(url, home, defaults, smols)
+  if (harness === 'zed') return zedWrites(url, home, defaults, smols)
   return openclawWrites(url, home, defaults, smols)
 }
 

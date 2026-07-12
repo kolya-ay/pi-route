@@ -592,3 +592,57 @@ test('models install claude merges into an existing settings.json, preserving co
   expect(text).toContain('"model": "cerebras/llama3.1-8b"')
   expect(text).toContain('"ANTHROPIC_BASE_URL"')
 })
+
+test('models install zed writes the pi-route provider, default_model, and edit predictions', async () => {
+  const dir = tmp()
+  const cfg = setupConfig(dir)
+  const home = join(dir, 'home')
+  await run([
+    'models',
+    'install',
+    'zed',
+    '-c',
+    cfg,
+    '--auth-dir',
+    join(dir, 'auth'),
+    '--home-dir',
+    home
+  ])
+  const settings = JSON.parse(await Bun.file(join(home, '.config', 'zed', 'settings.json')).text())
+  const provider = settings.language_models.openai_compatible['pi-route']
+  expect(provider.api_url).toContain('/v1')
+  expect(provider.available_models.map((m: { name: string }) => m.name)).toEqual([
+    'cerebras/llama3.1-8b',
+    'cerebras/llama-3.3-70b',
+    'cerebras/qwen-3-32b'
+  ])
+  expect(provider.available_models[0].capabilities.tools).toBe(true)
+  expect(settings.agent.default_model).toEqual({
+    provider: 'pi-route',
+    model: 'cerebras/llama3.1-8b',
+    enable_thinking: false
+  })
+  expect(settings.edit_predictions.open_ai_compatible_api.model).toBe('cerebras/qwen-3-32b')
+  expect(settings.features.edit_prediction_provider).toBe('open_ai_compatible_api')
+})
+
+test('models install zed with no smol role omits edit_predictions and features', async () => {
+  const dir = tmp()
+  const cfg = modelsConfig(dir)
+  const home = join(dir, 'home')
+  await run([
+    'models',
+    'install',
+    'zed',
+    '-c',
+    cfg,
+    '--auth-dir',
+    join(dir, 'auth'),
+    '--home-dir',
+    home
+  ])
+  const settings = JSON.parse(await Bun.file(join(home, '.config', 'zed', 'settings.json')).text())
+  expect(settings.language_models.openai_compatible['pi-route']).toBeDefined()
+  expect(settings.edit_predictions).toBeUndefined()
+  expect(settings.features).toBeUndefined()
+})
