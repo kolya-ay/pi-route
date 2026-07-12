@@ -13,6 +13,7 @@ import { decompressRequest } from './compression'
 import { type EnvPathOverrides, readEnvConfig } from './config/env'
 import { loadConfig } from './config/loader'
 import { buildCatalog } from './pipeline/catalog'
+import { enrichLiveMeta } from './pipeline/metadata'
 import { createProviderRegistry } from './providers/registry'
 import { mountAdmin } from './routes/admin'
 import { buildOpencodeModels, renderApiJson, resolveApiUrl } from './routes/api-json'
@@ -42,6 +43,7 @@ export const createApp = async (
   const env = readEnvConfig(envOverrides)
   const { options, state: runtime } = await loadConfig(env.configPath, env.authDir)
   const catalog = buildCatalog(options)
+  await enrichLiveMeta(options, catalog)
 
   initOtel({ otlpUrl: env.otlpUrl, serviceName: env.serviceName })
   const tel = createTel()

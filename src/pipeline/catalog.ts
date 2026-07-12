@@ -20,6 +20,7 @@ export type ModelMeta = {
 export type Catalog = {
   addresses: Set<string>
   leafFor: Map<string, string>
+  liveMeta: Map<string, ModelMeta> // address -> live-fetched metadata (empty until enriched)
 }
 
 const safeGetModels = (type: string): { id: string }[] => {
@@ -33,6 +34,7 @@ const safeGetModels = (type: string): { id: string }[] => {
 export const buildCatalog = (opts: RouterOptions): Catalog => {
   const addresses = new Set<string>()
   const leafFor = new Map<string, string>()
+  const liveMeta = new Map<string, ModelMeta>()
 
   // 1. Provider leaf addresses from pi-ai
   for (const [name, p] of Object.entries(opts.providers)) {
@@ -89,5 +91,5 @@ export const buildCatalog = (opts: RouterOptions): Catalog => {
     }
   }
 
-  return { addresses, leafFor }
+  return { addresses, leafFor, liveMeta }
 }

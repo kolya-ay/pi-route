@@ -30,6 +30,26 @@ describe('buildOpencodeModels', () => {
     const models = buildOpencodeModels(o, buildCatalog(o))
     expect(Object.keys(models)).toEqual(['solo'])
   })
+  test('includes an openai-compatible model once discover/override supplies metadata', () => {
+    const o = {
+      providers: {
+        nv: {
+          type: 'openai-compatible',
+          baseUrl: 'http://x/v1',
+          account: { credential: 'key', key: 'k' },
+          discover: ['fallback']
+        }
+      },
+      pipeline: [],
+      expose: ['nv/**']
+    } as unknown as RouterOptions
+    const catalog = buildCatalog(o)
+    catalog.addresses.add('nv/foo/bar-model')
+    catalog.leafFor.set('nv/foo/bar-model', 'nv/foo/bar-model')
+    const models = buildOpencodeModels(o, catalog)
+    expect(models['nv/foo/bar-model']).toBeDefined()
+    expect(models['nv/foo/bar-model']!.limit.context).toBe(200000)
+  })
 })
 
 describe('renderApiJson', () => {

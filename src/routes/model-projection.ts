@@ -1,7 +1,6 @@
-import { getModel } from '@mariozechner/pi-ai'
 import type { Catalog, ModelMeta } from '../pipeline/catalog'
 import { exposeIncludes } from '../pipeline/match'
-import { toModelMeta } from '../pipeline/metadata'
+import { resolveMetadata } from '../pipeline/metadata'
 import type { RouterOptions } from '../types'
 
 // Display + filter order for reasoning effort levels (high→minimal), matching
@@ -15,21 +14,7 @@ export type Resolved = { id: string; owned_by: string; model: ModelMeta | null }
 export const resolveModel = (opts: RouterOptions, catalog: Catalog, address: string): Resolved => {
   const [ownedBy] = address.split('/')
   const owned_by = address.includes('/') ? (ownedBy ?? address) : address
-  const leaf = catalog.leafFor.get(address) ?? address
-  const slash = leaf.indexOf('/')
-  const providerName = slash === -1 ? leaf : leaf.slice(0, slash)
-  const modelId = slash === -1 ? '' : leaf.slice(slash + 1)
-  const provider = opts.providers[providerName]
-  if (!provider || !modelId) return { id: address, owned_by, model: null }
-  try {
-    const m = getModel(
-      provider.type as Parameters<typeof getModel>[0],
-      modelId as Parameters<typeof getModel>[1]
-    )
-    return { id: address, owned_by, model: m ? toModelMeta(m) : null }
-  } catch {
-    return { id: address, owned_by, model: null }
-  }
+  return { id: address, owned_by, model: resolveMetadata(opts, catalog, address) }
 }
 
 // Sorted list of addresses passing the expose allowlist. Shared by all three

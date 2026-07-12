@@ -39,4 +39,27 @@ describe('/model/info (LiteLLM)', () => {
     const body = buildModelInfoBody(o, buildCatalog(o))
     expect(body.data.map((e) => e.model_name)).toEqual(['solo'])
   })
+  test('includes an openai-compatible model once discover/override supplies metadata', () => {
+    const o = {
+      providers: {
+        nv: {
+          type: 'openai-compatible',
+          baseUrl: 'http://x/v1',
+          account: { credential: 'key', key: 'k' },
+          discover: ['fallback'],
+          modelOverrides: { 'deepseek-ai/deepseek-v4-pro': { contextWindow: 163840 } }
+        }
+      },
+      pipeline: [],
+      expose: ['nv/**']
+    } as unknown as RouterOptions
+    const catalog = buildCatalog(o)
+    catalog.addresses.add('nv/deepseek-ai/deepseek-v4-pro')
+    catalog.leafFor.set('nv/deepseek-ai/deepseek-v4-pro', 'nv/deepseek-ai/deepseek-v4-pro')
+    const body = buildModelInfoBody(o, catalog)
+    const keys = body.data.map((e) => e.model_info.key)
+    expect(keys).toContain('nv/deepseek-ai/deepseek-v4-pro')
+    const entry = body.data.find((e) => e.model_info.key === 'nv/deepseek-ai/deepseek-v4-pro')!
+    expect(entry.model_info.max_input_tokens).toBe(163840)
+  })
 })
