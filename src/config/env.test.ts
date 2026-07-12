@@ -41,12 +41,14 @@ describe('readEnvConfig', () => {
     delete process.env.PI_ROUTE_CONFIG
     delete process.env.PI_ROUTE_AUTH
     delete process.env.PI_ROUTE_IDLE_TIMEOUT
+    delete process.env.XDG_CONFIG_HOME
+    delete process.env.XDG_DATA_HOME
     const e = readEnvConfig()
     expect(e.port).toBe(3000)
     expect(e.host).toBe('127.0.0.1')
     expect(e.tokens).toEqual([])
-    expect(e.configPath).toBe(join(homedir(), '.config/pi-route.yaml'))
-    expect(e.authDir).toBe(join(homedir(), '.local/state/pi-route/auth'))
+    expect(e.configPath).toBe(join(homedir(), '.config/pi-route/config.yaml'))
+    expect(e.authDir).toBe(join(homedir(), '.local/share/pi-route/auth'))
     expect(e.idleTimeout).toBe(120)
   })
   test('overrides via env', () => {

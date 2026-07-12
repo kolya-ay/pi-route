@@ -1,5 +1,6 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { xdgConfigHome, xdgDataHome } from './xdg'
 
 export type EnvConfig = {
   port: number
@@ -71,10 +72,12 @@ const expandHomeDir = (path: string): string =>
 
 export const readEnvConfig = (overrides: EnvPathOverrides = {}): EnvConfig => {
   const configPath = expandHomeDir(
-    overrides.configPath ?? process.env.PI_ROUTE_CONFIG ?? '~/.config/pi-route.yaml'
+    overrides.configPath ??
+      process.env.PI_ROUTE_CONFIG ??
+      join(xdgConfigHome(), 'pi-route', 'config.yaml')
   )
   const authDir = expandHomeDir(
-    overrides.authDir ?? process.env.PI_ROUTE_AUTH ?? '~/.local/state/pi-route/auth'
+    overrides.authDir ?? process.env.PI_ROUTE_AUTH ?? join(xdgDataHome(), 'pi-route', 'auth')
   )
   return {
     port: parsePort(process.env.PI_ROUTE_PORT),
