@@ -168,7 +168,7 @@ const setupConfig = (dir: string): string => {
       '    to:',
       '      - cerebras/llama3.1-8b',
       '      - cerebras/llama-3.3-70b',
-      '  smol:',
+      '  fast:',
       '    match: exact',
       '    to: cerebras/qwen-3-32b',
       'expose:',
@@ -534,7 +534,7 @@ test('models install with no agent lists the available agents', async () => {
   }
 })
 
-test('models install dedups a model that is in both default and smol groups', async () => {
+test('models install dedups a model that is in both default and fast groups', async () => {
   const dir = tmp()
   const cfg = join(dir, 'router.yaml')
   writeFileSync(
@@ -550,7 +550,7 @@ test('models install dedups a model that is in both default and smol groups', as
       '    to:',
       '      - cerebras/llama3.1-8b',
       '      - cerebras/shared-model',
-      '  smol:',
+      '  fast:',
       '    match: exact',
       '    to: cerebras/shared-model',
       'expose:',
@@ -728,7 +728,7 @@ test('models install openclaw preserves sibling keys when model is an object', a
   })
 })
 
-test('models install zed with no smol role omits edit_predictions and features', async () => {
+test('models install zed with no fast role omits edit_predictions and features', async () => {
   const dir = tmp()
   const cfg = modelsConfig(dir)
   const home = join(dir, 'home')

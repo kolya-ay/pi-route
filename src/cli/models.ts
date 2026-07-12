@@ -56,7 +56,7 @@ const isPlain = (item: string): boolean =>
 const roleModels = (
   options: RouterOptions,
   catalog: Catalog,
-  role: 'default' | 'smol'
+  role: 'default' | 'fast'
 ): RoleModel[] => {
   const entry = options.pipeline.find((p) => p.name === role && p.kind === 'pool')
   if (entry?.kind !== 'pool') return []
@@ -96,14 +96,14 @@ export const setupModels = async (
   const catalog = buildCatalog(options)
   const defaults = roleModels(options, catalog, 'default')
   if (defaults.length === 0) throw new Error('Missing pipeline.default exact-match role')
-  const smols = roleModels(options, catalog, 'smol')
-  const all = dedupById([...defaults, ...smols])
+  const fasts = roleModels(options, catalog, 'fast')
+  const all = dedupById([...defaults, ...fasts])
   const writes = await agent.write({
     url: opts.url,
     home,
     all,
     main: defaults[0]!,
-    fast: smols[0] ?? null
+    fast: fasts[0] ?? null
   })
   if (!opts.dry) await applyWrites(writes)
   return writes

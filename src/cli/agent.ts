@@ -60,8 +60,8 @@ export const applyWrites = async (writes: PlannedWrite[]): Promise<void> => {
 }
 
 // Derived once in setupModels so the eight writers don't each recompute (and
-// re-assert) them: `all` = deduped default+smol members, `main` = the primary
-// default (guaranteed present by setupModels' guard), `fast` = the smol lead.
+// re-assert) them: `all` = deduped default+fast members, `main` = the primary
+// default (guaranteed present by setupModels' guard), `fast` = the fast-role lead.
 export type AgentContext = {
   url: string
   home: string
