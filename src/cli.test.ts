@@ -1,7 +1,8 @@
 import { expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { parse as parseJsonc } from 'jsonc-parser'
 
 const CLI = join(import.meta.dir, 'cli.ts')
 
@@ -300,17 +301,30 @@ test('models install omp writes litellm discovery, all members, modelRoles.smol'
     home
   ])
   const modelsYml = await Bun.file(join(home, '.omp', 'agent', 'models.yml')).text()
-  expect(modelsYml).toContain('discovery:')
-  expect(modelsYml).toContain('type: litellm')
+  const models = Bun.YAML.parse(modelsYml) as {
+    providers: {
+      piroute: {
+        discovery: { type: string }
+        apiKey: string
+        modelOverrides: Record<string, unknown>
+      }
+    }
+  }
+  expect(models.providers.piroute.discovery.type).toBe('litellm')
   // Token stays in env: apiKey is the env-var name, not a literal secret.
-  expect(modelsYml).toContain('apiKey: PI_ROUTE_API_KEY')
-  expect(modelsYml).toContain('"cerebras/llama3.1-8b":')
-  expect(modelsYml).toContain('"cerebras/llama-3.3-70b":')
-  expect(modelsYml).toContain('"cerebras/qwen-3-32b":')
+  expect(models.providers.piroute.apiKey).toBe('PI_ROUTE_API_KEY')
+  expect(Object.keys(models.providers.piroute.modelOverrides)).toEqual([
+    'cerebras/llama3.1-8b',
+    'cerebras/llama-3.3-70b',
+    'cerebras/qwen-3-32b'
+  ])
   const configYml = await Bun.file(join(home, '.omp', 'agent', 'config.yml')).text()
-  expect(configYml).toContain('default: "piroute/cerebras/llama3.1-8b"')
-  expect(configYml).toContain('smol: "piroute/cerebras/qwen-3-32b"')
-  expect(configYml).not.toContain('small:')
+  const config = Bun.YAML.parse(configYml) as {
+    modelRoles: { default: string; smol: string; small?: string }
+  }
+  expect(config.modelRoles.default).toBe('piroute/cerebras/llama3.1-8b')
+  expect(config.modelRoles.smol).toBe('piroute/cerebras/qwen-3-32b')
+  expect(config.modelRoles.small).toBeUndefined()
 })
 
 test('models install pi writes modelOverrides for all members + defaultModel', async () => {
@@ -420,6 +434,41 @@ test('models install openclaw writes all members statically + wildcard', async (
   ])
 })
 
+test('models install openclaw merges, preserving other providers and comments', async () => {
+  const dir = tmp()
+  const cfg = setupConfig(dir)
+  const home = join(dir, 'home')
+  const p = join(home, '.openclaw', 'openclaw.json')
+  mkdirSync(join(home, '.openclaw'), { recursive: true })
+  writeFileSync(
+    p,
+    `{
+  // my openclaw config
+  "models": { "mode": "merge", "providers": { "anthropic": { "api": "anthropic" } } },
+  "agents": { "defaults": { "temperature": 0.7 } }
+}
+`
+  )
+  await run([
+    'models',
+    'install',
+    'openclaw',
+    '-c',
+    cfg,
+    '--auth-dir',
+    join(dir, 'auth'),
+    '--home-dir',
+    home
+  ])
+  const text = await Bun.file(p).text()
+  expect(text).toContain('// my openclaw config') // JSONC comment survives the merge
+  const parsed = parseJsonc(text)
+  expect(parsed.models.providers.anthropic).toBeDefined() // foreign provider survives
+  expect(parsed.models.providers.piroute).toBeDefined() // pi-route added
+  expect(parsed.agents.defaults.temperature).toBe(0.7) // sibling key survives
+  expect(parsed.agents.defaults.model.primary).toContain('piroute/')
+})
+
 test('models install unknown harness exits 2', async () => {
   const dir = tmp()
   const cfg = setupConfig(dir)
@@ -509,4 +558,37 @@ test('models install claude (non-dry) writes availableModels + real main + haiku
   // Base URL is baked, but the token stays in the ambient ANTHROPIC_AUTH_TOKEN env var.
   expect(settings.env.ANTHROPIC_BASE_URL).toContain('http')
   expect(settings.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined()
+})
+
+test('models install claude merges into an existing settings.json, preserving comments and keys', async () => {
+  const dir = tmp()
+  const cfg = setupConfig(dir)
+  const home = join(dir, 'home')
+  const settingsPath = join(home, '.claude', 'settings.json')
+  mkdirSync(join(home, '.claude'), { recursive: true })
+  writeFileSync(
+    settingsPath,
+    `{
+  // my hooks and perms
+  "permissions": { "allow": ["Bash"] },
+  "model": "old-model"
+}
+`
+  )
+  await run([
+    'models',
+    'install',
+    'claude',
+    '-c',
+    cfg,
+    '--auth-dir',
+    join(dir, 'auth'),
+    '--home-dir',
+    home
+  ])
+  const text = await Bun.file(settingsPath).text()
+  expect(text).toContain('// my hooks and perms')
+  expect(text).toContain('"permissions"')
+  expect(text).toContain('"model": "cerebras/llama3.1-8b"')
+  expect(text).toContain('"ANTHROPIC_BASE_URL"')
 })

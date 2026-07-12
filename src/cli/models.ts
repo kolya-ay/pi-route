@@ -1,7 +1,7 @@
 // src/cli/models.ts
 
 import { existsSync } from 'node:fs'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -18,6 +18,7 @@ import {
   toOpenAIModel
 } from '../routes/model-projection'
 import type { RouterOptions } from '../types'
+import { type Edit, patchJson, patchToml, patchYaml } from './config-patch'
 
 export type ModelView = {
   id: string
@@ -100,11 +101,17 @@ export type PlannedWrite = {
   content: string
 }
 
-const plannedWrite = async (path: string, content: string): Promise<PlannedWrite> => ({
-  path,
-  action: existsSync(path) ? 'update' : 'create',
-  content
-})
+// Read the user's existing file (or start empty), merge pi-route's key-paths,
+// return the full merged text. Absent file -> action 'create'.
+const mergedWrite = async (
+  path: string,
+  patch: (existing: string, edits: Edit[]) => string,
+  edits: Edit[]
+): Promise<PlannedWrite> => {
+  const present = existsSync(path)
+  const existing = present ? await readFile(path, 'utf8') : ''
+  return { path, action: present ? 'update' : 'create', content: patch(existing, edits) }
+}
 
 const applyWrites = async (writes: PlannedWrite[]): Promise<void> => {
   await Promise.all(
@@ -137,9 +144,7 @@ export type Harness = 'claude' | 'codex' | 'qwen' | 'opencode' | 'omp' | 'pi' | 
 // written to a config file.
 const PI_ROUTE_API_KEY = 'PI_ROUTE_API_KEY'
 
-const json = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`
-
-const yamlString = (value: string): string => JSON.stringify(value)
+const edit = (path: (string | number)[], value: unknown): Edit => [path, value]
 
 const claudeWrites = async (
   url: string,
@@ -150,23 +155,20 @@ const claudeWrites = async (
   const all = dedupById([...defaults, ...smols])
   const main = defaults[0]!
   const fast = smols[0] ?? null
-  return [
-    await plannedWrite(
-      join(home, '.claude/settings.json'),
-      json({
-        model: main.id,
-        availableModels: all.map((m) => m.id),
-        env: {
-          // Token stays in the ambient ANTHROPIC_AUTH_TOKEN env var, not baked here.
-          ANTHROPIC_BASE_URL: url,
-          ANTHROPIC_MODEL: main.id,
-          // Fast/background slot (titles, summaries). ANTHROPIC_SMALL_FAST_MODEL is
-          // deprecated in favor of ANTHROPIC_DEFAULT_HAIKU_MODEL.
-          ...(fast ? { ANTHROPIC_DEFAULT_HAIKU_MODEL: fast.id } : {})
-        }
-      })
-    )
+  // Token stays in the ambient ANTHROPIC_AUTH_TOKEN env var, not baked here.
+  // Fast/background slot (titles, summaries) uses ANTHROPIC_DEFAULT_HAIKU_MODEL;
+  // ANTHROPIC_SMALL_FAST_MODEL is deprecated.
+  const edits: Edit[] = [
+    edit(['model'], main.id),
+    edit(
+      ['availableModels'],
+      all.map((m) => m.id)
+    ),
+    edit(['env', 'ANTHROPIC_BASE_URL'], url),
+    edit(['env', 'ANTHROPIC_MODEL'], main.id),
+    ...(fast ? [edit(['env', 'ANTHROPIC_DEFAULT_HAIKU_MODEL'], fast.id)] : [])
   ]
+  return [await mergedWrite(join(home, '.claude/settings.json'), patchJson, edits)]
 }
 
 // Codex resolves request model ids by longest-prefix against a bundled catalog.
@@ -205,26 +207,29 @@ const codexWrites = async (
   // dir), not cwd — so the bare basename points at the file we write beside it.
   const catalogFile = 'pi-route-catalog.json'
   const catalogPath = join(home, '.codex', catalogFile)
-  const lines = [
-    `model = ${JSON.stringify(main.id)}`,
-    'model_provider = "piroute"',
-    `model_catalog_json = ${JSON.stringify(catalogFile)}`,
-    ...(main.contextWindow ? [`model_context_window = ${main.contextWindow}`] : []),
-    ...(main.maxTokens ? [`model_max_output_tokens = ${main.maxTokens}`] : []),
-    '',
-    '[model_providers.piroute]',
-    'name = "pi-route"',
-    `base_url = ${JSON.stringify(`${url}/v1`)}`,
-    'wire_api = "responses"',
-    `env_key = ${JSON.stringify(PI_ROUTE_API_KEY)}`,
-    'requires_openai_auth = false',
-    ''
+  const edits: Edit[] = [
+    edit(['model'], main.id),
+    edit(['model_provider'], 'piroute'),
+    edit(['model_catalog_json'], catalogFile),
+    ...(main.contextWindow ? [edit(['model_context_window'], main.contextWindow)] : []),
+    ...(main.maxTokens ? [edit(['model_max_output_tokens'], main.maxTokens)] : []),
+    edit(['model_providers', 'piroute'], {
+      name: 'pi-route',
+      base_url: `${url}/v1`,
+      wire_api: 'responses',
+      env_key: PI_ROUTE_API_KEY,
+      requires_openai_auth: false
+    })
   ]
+  // pi-route-owned catalog file: overwrite (not a merge). codex parses it as { models: ModelInfo[] }.
+  const catalogContent = `${JSON.stringify({ models: all.map(codexCatalogEntry) }, null, 2)}\n`
   return [
-    await plannedWrite(join(home, '.codex/config.toml'), lines.join('\n')),
-    // codex parses this file as ModelsResponse = { models: ModelInfo[] } — a bare
-    // array fails with "invalid type: map, expected a sequence".
-    await plannedWrite(catalogPath, json({ models: all.map(codexCatalogEntry) }))
+    await mergedWrite(join(home, '.codex/config.toml'), patchToml, edits),
+    {
+      path: catalogPath,
+      action: existsSync(catalogPath) ? 'update' : 'create',
+      content: catalogContent
+    }
   ]
 }
 
@@ -245,17 +250,16 @@ const qwenWrites = async (
 ): Promise<PlannedWrite[]> => {
   const all = dedupById([...defaults, ...smols])
   const main = defaults[0]!
-  return [
-    await plannedWrite(
-      join(home, '.qwen/settings.json'),
-      json({
-        security: { auth: { selectedType: 'openai', baseUrl: `${url}/v1` } },
-        providerProtocol: { openai: 'openai' },
-        modelProviders: { openai: all.map((m) => qwenModel(m, url)) },
-        model: { name: main.id }
-      })
-    )
+  const edits: Edit[] = [
+    edit(['security', 'auth'], { selectedType: 'openai', baseUrl: `${url}/v1` }),
+    edit(['providerProtocol', 'openai'], 'openai'),
+    edit(
+      ['modelProviders', 'openai'],
+      all.map((m) => qwenModel(m, url))
+    ),
+    edit(['model', 'name'], main.id)
   ]
+  return [await mergedWrite(join(home, '.qwen/settings.json'), patchJson, edits)]
 }
 
 const modelDev = (m: RoleModel): ModelsDevModel => ({
@@ -280,7 +284,6 @@ const modelDev = (m: RoleModel): ModelsDevModel => ({
 
 const opencodeWrites = async (
   url: string,
-  _options: RouterOptions,
   home: string,
   defaults: RoleModel[],
   smols: RoleModel[]
@@ -289,45 +292,35 @@ const opencodeWrites = async (
   const main = defaults[0]!
   const fast = smols[0] ?? null
   const models = Object.fromEntries(all.map((m) => [m.id, modelDev(m)]))
-  return [
-    await plannedWrite(
-      join(home, '.config/opencode/opencode.json'),
-      json({
-        model: `pi-route/${main.id}`,
-        ...(fast ? { small_model: `pi-route/${fast.id}` } : {}),
-        provider: {
-          'pi-route': {
-            npm: '@ai-sdk/openai-compatible',
-            name: 'pi-route',
-            id: 'pi-route',
-            api: `${url}/v1`,
-            env: [PI_ROUTE_API_KEY],
-            options: { baseURL: `${url}/v1` },
-            models
-          }
-        }
-      })
-    )
+  const edits: Edit[] = [
+    edit(['model'], `pi-route/${main.id}`),
+    ...(fast ? [edit(['small_model'], `pi-route/${fast.id}`)] : []),
+    edit(['provider', 'pi-route'], {
+      npm: '@ai-sdk/openai-compatible',
+      name: 'pi-route',
+      id: 'pi-route',
+      api: `${url}/v1`,
+      env: [PI_ROUTE_API_KEY],
+      options: { baseURL: `${url}/v1` },
+      models
+    })
   ]
+  return [await mergedWrite(join(home, '.config/opencode/opencode.json'), patchJson, edits)]
 }
 
-const costYaml = (m: RoleModel, indent: string): string[] => {
-  const lines: string[] = []
-  if (m.cost?.input !== undefined || m.cost?.output !== undefined) {
-    lines.push(`${indent}cost:`)
-    if (m.cost.input !== undefined) lines.push(`${indent}  input: ${m.cost.input}`)
-    if (m.cost.output !== undefined) lines.push(`${indent}  output: ${m.cost.output}`)
-  }
-  return lines
-}
-
-const overrideYaml = (m: RoleModel, indent: string): string[] => [
-  `${indent}${yamlString(m.id)}:`,
-  `${indent}  name: ${yamlString(m.name)}`,
-  ...(m.contextWindow ? [`${indent}  contextWindow: ${m.contextWindow}`] : []),
-  ...(m.maxTokens ? [`${indent}  maxTokens: ${m.maxTokens}`] : []),
-  ...costYaml(m, `${indent}  `)
-]
+const ompModelOverride = (m: RoleModel) => ({
+  name: m.name,
+  ...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
+  ...(m.maxTokens ? { maxTokens: m.maxTokens } : {}),
+  ...(m.cost?.input !== undefined || m.cost?.output !== undefined
+    ? {
+        cost: {
+          ...(m.cost.input !== undefined ? { input: m.cost.input } : {}),
+          ...(m.cost.output !== undefined ? { output: m.cost.output } : {})
+        }
+      }
+    : {})
+})
 
 const ompWrites = async (
   url: string,
@@ -338,30 +331,22 @@ const ompWrites = async (
   const all = dedupById([...defaults, ...smols])
   const main = defaults[0]!
   const fast = smols[0] ?? null
-  const overrides = all.flatMap((m) => overrideYaml(m, '      '))
-  const modelsYml = [
-    'providers:',
-    '  piroute:',
-    `    baseUrl: ${yamlString(`${url}/v1`)}`,
-    // omp reads apiKey as an env-var name (or literal fallback); keep the token in env.
-    `    apiKey: ${PI_ROUTE_API_KEY}`,
-    '    api: openai-completions',
-    '    auth: apiKey',
-    '    discovery:',
-    '      type: litellm',
-    '    modelOverrides:',
-    ...overrides,
-    ''
-  ].join('\n')
-  const configYml = [
-    'modelRoles:',
-    `  default: ${yamlString(`piroute/${main.id}`)}`,
-    ...(fast ? [`  smol: ${yamlString(`piroute/${fast.id}`)}`] : []),
-    ''
-  ].join('\n')
   return [
-    await plannedWrite(join(home, '.omp/agent/models.yml'), modelsYml),
-    await plannedWrite(join(home, '.omp/agent/config.yml'), configYml)
+    await mergedWrite(join(home, '.omp/agent/models.yml'), patchYaml, [
+      edit(['providers', 'piroute'], {
+        baseUrl: `${url}/v1`,
+        // omp reads apiKey as an env-var name (or literal fallback); keep the token in env.
+        apiKey: PI_ROUTE_API_KEY,
+        api: 'openai-completions',
+        auth: 'apiKey',
+        discovery: { type: 'litellm' },
+        modelOverrides: Object.fromEntries(all.map((m) => [m.id, ompModelOverride(m)]))
+      })
+    ]),
+    await mergedWrite(join(home, '.omp/agent/config.yml'), patchYaml, [
+      edit(['modelRoles', 'default'], `piroute/${main.id}`),
+      ...(fast ? [edit(['modelRoles', 'smol'], `piroute/${fast.id}`)] : [])
+    ])
   ]
 }
 
@@ -388,26 +373,20 @@ const piWrites = async (
   const all = dedupById([...defaults, ...smols])
   const main = defaults[0]!
   return [
-    await plannedWrite(
-      join(home, '.pi/agent/models.json'),
-      json({
-        providers: {
-          piroute: {
-            name: 'pi-route',
-            baseUrl: `${url}/v1`,
-            // pi expands ${VAR} in apiKey; keep the token in env.
-            apiKey: `\${${PI_ROUTE_API_KEY}}`,
-            api: 'openai-completions',
-            models: [],
-            modelOverrides: Object.fromEntries(all.map((m) => [m.id, piOverride(m)]))
-          }
-        }
+    await mergedWrite(join(home, '.pi/agent/models.json'), patchJson, [
+      edit(['providers', 'piroute'], {
+        name: 'pi-route',
+        baseUrl: `${url}/v1`,
+        apiKey: `\${${PI_ROUTE_API_KEY}}`,
+        api: 'openai-completions',
+        models: [],
+        modelOverrides: Object.fromEntries(all.map((m) => [m.id, piOverride(m)]))
       })
-    ),
-    await plannedWrite(
-      join(home, '.pi/agent/settings.json'),
-      json({ defaultProvider: 'piroute', defaultModel: main.id })
-    )
+    ]),
+    await mergedWrite(join(home, '.pi/agent/settings.json'), patchJson, [
+      edit(['defaultProvider'], 'piroute'),
+      edit(['defaultModel'], main.id)
+    ])
   ]
 }
 
@@ -438,35 +417,21 @@ const openclawWrites = async (
 ): Promise<PlannedWrite[]> => {
   const all = dedupById([...defaults, ...smols])
   const main = defaults[0]!
-  return [
-    await plannedWrite(
-      join(home, '.openclaw/openclaw.json'),
-      json({
-        models: {
-          mode: 'merge',
-          providers: {
-            piroute: {
-              baseUrl: `${url}/v1`,
-              // openclaw expands ${VAR} in apiKey; keep the token in env.
-              apiKey: `\${${PI_ROUTE_API_KEY}}`,
-              api: 'openai-completions',
-              models: all.map(openclawModel)
-            }
-          }
-        },
-        agents: {
-          defaults: {
-            model: { primary: `piroute/${main.id}` },
-            models: { 'piroute/*': {} }
-          }
-        }
-      })
-    )
+  const edits: Edit[] = [
+    edit(['models', 'mode'], 'merge'),
+    edit(['models', 'providers', 'piroute'], {
+      baseUrl: `${url}/v1`,
+      apiKey: `\${${PI_ROUTE_API_KEY}}`,
+      api: 'openai-completions',
+      models: all.map(openclawModel)
+    }),
+    edit(['agents', 'defaults', 'model', 'primary'], `piroute/${main.id}`),
+    edit(['agents', 'defaults', 'models', 'piroute/*'], {})
   ]
+  return [await mergedWrite(join(home, '.openclaw/openclaw.json'), patchJson, edits)]
 }
 
 const buildSetupWrites = async (
-  options: RouterOptions,
   harness: Harness,
   url: string,
   home: string,
@@ -476,7 +441,7 @@ const buildSetupWrites = async (
   if (harness === 'claude') return claudeWrites(url, home, defaults, smols)
   if (harness === 'codex') return codexWrites(url, home, defaults, smols)
   if (harness === 'qwen') return qwenWrites(url, home, defaults, smols)
-  if (harness === 'opencode') return opencodeWrites(url, options, home, defaults, smols)
+  if (harness === 'opencode') return opencodeWrites(url, home, defaults, smols)
   if (harness === 'omp') return ompWrites(url, home, defaults, smols)
   if (harness === 'pi') return piWrites(url, home, defaults, smols)
   return openclawWrites(url, home, defaults, smols)
@@ -492,7 +457,7 @@ export const setupModels = async (
   const defaults = roleModels(options, catalog, 'default')
   if (defaults.length === 0) throw new Error('Missing pipeline.default exact-match role')
   const smols = roleModels(options, catalog, 'smol')
-  const writes = await buildSetupWrites(options, harness, opts.url, home, defaults, smols)
+  const writes = await buildSetupWrites(harness, opts.url, home, defaults, smols)
   if (!opts.dry) await applyWrites(writes)
   return writes
 }
