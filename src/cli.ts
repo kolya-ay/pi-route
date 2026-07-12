@@ -6,15 +6,16 @@ import { getOAuthProvider, type OAuthCredentials } from '@mariozechner/pi-ai/oau
 import cac from 'cac'
 import { z } from 'zod'
 
-import { writeCredentials } from './auth/credentials'
-import { deriveName } from './auth/name-derivers'
+import { refreshAndStore, writeCredentials } from './auth/credentials'
 import { registerAllOAuthProviders } from './auth/register-all-oauth'
 import { AGENTS } from './cli/agents'
 import { listModelIds, renderPlannedWrites, setupModels, showModel } from './cli/models'
+import { formatProviderList, removeCredential, upsertProviderBlock } from './cli/provider-config'
 import { formatTable, runStats } from './cli/stats'
-import { type EnvPathOverrides, readEnvConfig } from './config/env'
+import { type EnvConfig, type EnvPathOverrides, readEnvConfig } from './config/env'
 import { ConfigError } from './config/errors'
 import { loadConfig } from './config/loader'
+import { readRuntimeState } from './config/state'
 import { collectLimitsSnapshot } from './limits'
 import { buildCatalog } from './pipeline/catalog'
 import { createState } from './state'
@@ -55,49 +56,129 @@ const pkg = (await Bun.file(new URL('../package.json', import.meta.url)).json())
 
 const cli = cac('pi-route')
 
-cli.option('-c, --config <path>', 'Config file path (default: ~/.config/pi-route.yaml)')
+cli.option(
+  '-c, --config <path>',
+  'Config file path (default: $XDG_CONFIG_HOME/pi-route/config.yaml)'
+)
 cli.option('--auth-dir <dir>', 'Auth/credentials directory')
+
+type ProviderOpts = {
+  config?: string
+  authDir?: string
+  url?: string
+  key?: string
+  keyEnv?: string
+  type?: string
+}
+
+const providerAuth = async (
+  env: EnvConfig,
+  name: string,
+  typeArg: string | undefined
+): Promise<void> => {
+  registerAllOAuthProviders()
+  const oauthId = typeArg ?? name
+  const provider = getOAuthProvider(oauthId)
+  if (!provider) {
+    throw usageError(
+      `unknown OAuth provider type "${oauthId}" — pass one: pi-route provider ${name} auth <type>`
+    )
+  }
+  const creds: OAuthCredentials = await provider.login({
+    onAuth: ({ url }: { url: string }) => {
+      console.error(`Open in browser: ${url}`)
+      tryOpen(url)
+    },
+    onPrompt: async () => '',
+    onProgress: (msg: string) => console.error(`… ${msg}`)
+  })
+  const credentialFile: CredentialFile = { ...creds, provider: oauthId }
+  await writeCredentials(env.authDir, name, credentialFile)
+  // OAuth ids map 1:1 to the config `type`, except antigravity (id google-antigravity).
+  const configType = oauthId === 'google-antigravity' ? 'antigravity' : oauthId
+  await upsertProviderBlock(env.configPath, name, { type: configType, account: name })
+  console.log(`Logged in + registered provider "${name}" (${configType})`)
+}
+
+const providerSet = async (env: EnvConfig, name: string, opts: ProviderOpts): Promise<void> => {
+  const type = opts.type ?? 'openai-compatible'
+  if (type === 'openai-compatible' && !opts.url) {
+    throw usageError('provider set: --url is required for openai-compatible providers')
+  }
+  // Literal --key wins; else write a $VAR reference (default $<NAME>_API_KEY).
+  const apiKey = opts.key ?? `$${opts.keyEnv ?? `${name.toUpperCase()}_API_KEY`}`
+  const block: Record<string, unknown> = {
+    type,
+    ...(opts.url ? { baseUrl: opts.url } : {}),
+    apiKey
+  }
+  await upsertProviderBlock(env.configPath, name, block)
+  console.log(`Registered provider "${name}" (${type})`)
+}
+
+const providerRefresh = async (env: EnvConfig, name: string): Promise<void> => {
+  registerAllOAuthProviders()
+  const { options, state: runtime } = await loadConfig(env.configPath, env.authDir)
+  const state = createState(options, buildCatalog(options), runtime, env.authDir)
+  await refreshAndStore(state, { credential: 'oauth' as const, name }, createTel())
+  console.log(`Refreshed ${name}`)
+}
+
+const providerLogout = (env: EnvConfig, name: string): void => {
+  const removed = removeCredential(env.authDir, name)
+  console.log(removed ? `Removed credential ${name}` : `No credential file for ${name}`)
+}
+
+const printProviderList = async (env: EnvConfig): Promise<void> => {
+  const { options } = await loadConfig(env.configPath, env.authDir)
+  const runtime = await readRuntimeState(env.authDir)
+  const invalid = new Set(
+    Object.entries(runtime.accounts)
+      .filter(([, v]) => v.isInvalid)
+      .map(([k]) => k)
+  )
+  console.log(formatProviderList(options, invalid))
+}
 
 cli
   .command(
-    'login <type> [name]',
-    'Authenticate an OAuth provider (types: anthropic, openai-codex, google-antigravity)'
+    'provider [...args]',
+    'Manage providers: <name> auth [type] | <name> set --url … | list | <name> refresh | <name> logout'
   )
-  .action(
-    async (
-      type: string,
-      name: string | undefined,
-      options: { config?: string; authDir?: string }
-    ) => {
-      registerAllOAuthProviders()
-      const provider = getOAuthProvider(type)
-      if (!provider) throw usageError(`unknown OAuth provider: "${type}"`)
-
-      const env = readEnvConfig(toOverrides(options))
-      const creds: OAuthCredentials = await provider.login({
-        onAuth: ({ url }: { url: string }) => {
-          console.error(`Open in browser: ${url}`)
-          tryOpen(url)
-        },
-        onPrompt: async () => '',
-        onProgress: (msg: string) => console.error(`… ${msg}`)
-      })
-
-      const resolved = name ?? deriveName(type, creds)
-      if (!resolved) {
-        throw usageError(`name required for provider "${type}": pi-route login ${type} <name>`)
-      }
-
-      const credentialFile: CredentialFile = { ...creds, provider: type }
-      await writeCredentials(env.authDir, resolved, credentialFile)
-      console.log(`Logged in: ${type}/${resolved}`)
+  .option('--url <url>', 'openai-compatible base URL (set)')
+  .option('--key <key>', 'literal API key written to config (set)')
+  .option('--key-env <name>', 'env var name, written as $NAME (set)')
+  .option('--type <type>', 'provider type (set; default openai-compatible)')
+  .action(async (args: string[], opts: ProviderOpts) => {
+    const env = readEnvConfig(toOverrides(opts))
+    if (args.length === 1 && args[0] === 'list') return void (await printProviderList(env))
+    const [name, verb, typeArg] = args
+    if (!name || !verb) {
+      throw usageError(
+        'usage: pi-route provider <name> <auth|set|refresh|logout>  |  pi-route provider list'
+      )
     }
-  )
+    switch (verb) {
+      case 'auth':
+        return void (await providerAuth(env, name, typeArg))
+      case 'set':
+        return void (await providerSet(env, name, opts))
+      case 'refresh':
+        return void (await providerRefresh(env, name))
+      case 'logout':
+        return void providerLogout(env, name)
+      default:
+        throw usageError(`unknown provider verb "${verb}" (expected auth|set|refresh|logout)`)
+    }
+  })
 
 cli
   .command('serve', 'Start the HTTP server')
-  .action(async (options: { config?: string; authDir?: string }) => {
-    await import('./serve').then((m) => m.startServer(toOverrides(options)))
+  .option('--watch', 'Reload config on file changes (also enabled by PI_ROUTE_WATCH=1)')
+  .action(async (options: { config?: string; authDir?: string; watch?: boolean }) => {
+    await import('./serve').then((m) =>
+      m.startServer(toOverrides(options), { watch: options.watch === true })
+    )
   })
 
 cli
