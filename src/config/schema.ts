@@ -50,6 +50,12 @@ const ProviderSchema = z
 
 type RawProvider = z.infer<typeof ProviderSchema>
 
+// The OAuth credential file is `<type>-<account>.json`. Fold that basename into
+// `account.name` at parse time so every reader (resolve, refresh, scheduler, the
+// in-memory cache) looks it up consistently — and two providers sharing an account
+// value across types (e.g. both `account: main`) resolve to distinct files.
+export const credentialName = (type: string, account: string): string => `${type}-${account}`
+
 // Desugar the surface into the internal Account union so all runtime consumers
 // (registry, scheduler, resolve, dispatch) keep reading the shape they always have.
 const normalizeAccount = (raw: RawProvider): Account => {
@@ -59,13 +65,13 @@ const normalizeAccount = (raw: RawProvider): Account => {
   }
   const acc = raw.account
   if (typeof acc === 'string') {
-    return { credential: 'oauth', name: acc, ...disabled }
+    return { credential: 'oauth', name: credentialName(raw.type, acc), ...disabled }
   }
   // acc is defined and an object here (refine guarantees exactly one of apiKey/account).
   const obj = acc as { name: string; projectId?: string }
   return {
     credential: 'oauth',
-    name: obj.name,
+    name: credentialName(raw.type, obj.name),
     ...(obj.projectId !== undefined ? { projectId: obj.projectId } : {}),
     ...disabled
   }

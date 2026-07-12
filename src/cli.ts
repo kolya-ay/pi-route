@@ -15,6 +15,7 @@ import { formatTable, runStats } from './cli/stats'
 import { type EnvConfig, type EnvPathOverrides, readEnvConfig } from './config/env'
 import { ConfigError } from './config/errors'
 import { loadConfig } from './config/loader'
+import { credentialName } from './config/schema'
 import { readRuntimeState } from './config/state'
 import { collectLimitsSnapshot } from './limits'
 import { buildCatalog } from './pipeline/catalog'
@@ -93,9 +94,9 @@ const providerAuth = async (
     onProgress: (msg: string) => console.error(`… ${msg}`)
   })
   const credentialFile: CredentialFile = { ...creds, provider: oauthId }
-  await writeCredentials(env.authDir, name, credentialFile)
   // OAuth ids map 1:1 to the config `type`, except antigravity (id google-antigravity).
   const configType = oauthId === 'google-antigravity' ? 'antigravity' : oauthId
+  await writeCredentials(env.authDir, credentialName(configType, name), credentialFile)
   await upsertProviderBlock(env.configPath, name, { type: configType, account: name })
   console.log(`Logged in + registered provider "${name}" (${configType})`)
 }
@@ -119,13 +120,25 @@ const providerSet = async (env: EnvConfig, name: string, opts: ProviderOpts): Pr
 const providerRefresh = async (env: EnvConfig, name: string): Promise<void> => {
   registerAllOAuthProviders()
   const { options, state: runtime } = await loadConfig(env.configPath, env.authDir)
+  const account = options.providers[name]?.account
+  if (account?.credential !== 'oauth') {
+    throw usageError(`provider "${name}" has no OAuth credential to refresh`)
+  }
   const state = createState(options, buildCatalog(options), runtime, env.authDir)
-  await refreshAndStore(state, { credential: 'oauth' as const, name }, createTel())
+  await refreshAndStore(state, account, createTel())
   console.log(`Refreshed ${name}`)
 }
 
-const providerLogout = (env: EnvConfig, name: string): void => {
-  const removed = removeCredential(env.authDir, name)
+const providerLogout = async (env: EnvConfig, name: string): Promise<void> => {
+  // The file is `<type>-<account>.json`; only the config knows the type, so resolve
+  // the account's derived name (credentialName) rather than guessing from `name`.
+  const { options } = await loadConfig(env.configPath, env.authDir)
+  const account = options.providers[name]?.account
+  if (account?.credential !== 'oauth') {
+    console.log(`No OAuth credential for ${name}`)
+    return
+  }
+  const removed = removeCredential(env.authDir, account.name)
   console.log(removed ? `Removed credential ${name}` : `No credential file for ${name}`)
 }
 
@@ -166,7 +179,7 @@ cli
       case 'refresh':
         return void (await providerRefresh(env, name))
       case 'logout':
-        return void providerLogout(env, name)
+        return void (await providerLogout(env, name))
       default:
         throw usageError(`unknown provider verb "${verb}" (expected auth|set|refresh|logout)`)
     }

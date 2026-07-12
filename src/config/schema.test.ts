@@ -9,14 +9,17 @@ describe('parseConfig — providers', () => {
     expect(opts.providers.cerebras?.account).toEqual({ credential: 'key', key: 'sk-foo' })
   })
 
-  test('account string desugars to oauth account', () => {
+  test('account string desugars to oauth account keyed <type>-<account>', () => {
     const opts = parseConfig({
       providers: { anthropic: { type: 'anthropic', account: 'main' } }
     })
-    expect(opts.providers.anthropic?.account).toEqual({ credential: 'oauth', name: 'main' })
+    expect(opts.providers.anthropic?.account).toEqual({
+      credential: 'oauth',
+      name: 'anthropic-main'
+    })
   })
 
-  test('account object carries projectId', () => {
+  test('account object carries projectId; name keyed <type>-<account>', () => {
     const opts = parseConfig({
       providers: {
         ag: { type: 'antigravity', account: { name: 'user@gmail.com', projectId: 'p123' } }
@@ -24,7 +27,7 @@ describe('parseConfig — providers', () => {
     })
     expect(opts.providers.ag?.account).toEqual({
       credential: 'oauth',
-      name: 'user@gmail.com',
+      name: 'antigravity-user@gmail.com',
       projectId: 'p123'
     })
   })
