@@ -662,14 +662,22 @@ test('models install zed writes the pi-route provider, default_model, and edit p
     'cerebras/llama-3.3-70b',
     'cerebras/qwen-3-32b'
   ])
-  expect(provider.available_models[0].capabilities.tools).toBe(true)
+  // All four schema-required capability fields present (Zed warns "Missing property" otherwise).
+  expect(provider.available_models[0].capabilities).toEqual({
+    tools: true,
+    images: false,
+    parallel_tool_calls: false,
+    prompt_cache_key: false
+  })
   expect(settings.agent.default_model).toEqual({
     provider: 'pi-route',
     model: 'cerebras/llama3.1-8b',
     enable_thinking: false
   })
   expect(settings.edit_predictions.open_ai_compatible_api.model).toBe('cerebras/qwen-3-32b')
-  expect(settings.features.edit_prediction_provider).toBe('open_ai_compatible_api')
+  expect(settings.edit_predictions.provider).toBe('open_ai_compatible_api')
+  // The stale top-level `features` key is rejected by current Zed; never write it.
+  expect(settings.features).toBeUndefined()
 })
 
 test('models install openclaw overwrites a legacy string agents.defaults.model', async () => {
