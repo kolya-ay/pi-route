@@ -9,13 +9,8 @@ import { z } from 'zod'
 import { writeCredentials } from './auth/credentials'
 import { deriveName } from './auth/name-derivers'
 import { registerAllOAuthProviders } from './auth/register-all-oauth'
-import {
-  type Harness,
-  listModelIds,
-  renderPlannedWrites,
-  setupModels,
-  showModel
-} from './cli/models'
+import { AGENTS } from './cli/agents'
+import { listModelIds, renderPlannedWrites, setupModels, showModel } from './cli/models'
 import { formatTable, runStats } from './cli/stats'
 import { type EnvPathOverrides, readEnvConfig } from './config/env'
 import { ConfigError } from './config/errors'
@@ -123,8 +118,10 @@ const loadRouterOptions = async (options: { config?: string; authDir?: string })
   return routerOptions
 }
 
+const agentNames = AGENTS.map((a) => a.name).join(', ')
+
 cli
-  .command('models [sub] [model]', 'List / show / install models')
+  .command('models [sub] [model]', `List / show / install models (install agents: ${agentNames})`)
   .option('--home-dir <dir>', 'Home directory for install (default: $HOME)')
   .option('--dry', 'Print planned writes without changing files')
   .action(
@@ -141,19 +138,17 @@ cli
         return
       }
       if (sub === 'install') {
-        if (!model)
-          throw usageError('models install requires a harness: pi-route models install <harness>')
-        const KNOWN_HARNESSES: Record<string, true> = {
-          claude: true,
-          codex: true,
-          qwen: true,
-          opencode: true,
-          omp: true,
-          pi: true,
-          openclaw: true,
-          zed: true
+        if (!model) {
+          console.log(
+            [
+              'Available agents:',
+              ...AGENTS.map((a) => `  ${a.name.padEnd(10)} ${a.description}`)
+            ].join('\n')
+          )
+          return
         }
-        if (!KNOWN_HARNESSES[model]) throw usageError(`unknown models install harness: ${model}`)
+        if (!AGENTS.some((a) => a.name === model))
+          throw usageError(`unknown models install agent: ${model}`)
         // Bake pi-route's own URL into client configs (clients don't uniformly
         // expand shell vars). The token is a secret — it stays in the client's
         // PI_ROUTE_API_KEY / ANTHROPIC_AUTH_TOKEN env var, never written to a file.
@@ -164,7 +159,7 @@ cli
           url: `http://${host}:${env.port}`
         }
         if (options.homeDir) setupOpts.homeDir = options.homeDir
-        const writes = await setupModels(routerOptions, model as Harness, setupOpts)
+        const writes = await setupModels(routerOptions, model, setupOpts)
         if (options.dry) console.log(renderPlannedWrites(writes))
         return
       }

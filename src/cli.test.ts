@@ -204,6 +204,7 @@ test('models install claude --dry prints a human table and writes nothing', asyn
   expect(stdout).toContain('create')
   expect(stdout).toContain('cerebras/llama3.1-8b')
   expect(existsSync(join(home, '.claude', 'settings.json'))).toBe(false)
+  expect(stdout).toMatch(/\n {2}\+ /) // unified-diff addition lines
 })
 
 test('models install claude without pipeline.default fails', async () => {
@@ -469,7 +470,7 @@ test('models install openclaw merges, preserving other providers and comments', 
   expect(parsed.agents.defaults.model.primary).toContain('piroute/')
 })
 
-test('models install unknown harness exits 2', async () => {
+test('models install unknown agent exits 2', async () => {
   const dir = tmp()
   const cfg = setupConfig(dir)
   const { stderr, exitCode } = await run([
@@ -483,7 +484,26 @@ test('models install unknown harness exits 2', async () => {
     '--dry'
   ])
   expect(exitCode).toBe(2)
-  expect(stderr.toLowerCase()).toContain('harness')
+  expect(stderr.toLowerCase()).toContain('agent')
+})
+
+test('models install with no agent lists the available agents', async () => {
+  const dir = tmp()
+  const cfg = setupConfig(dir)
+  const { stdout, exitCode } = await run([
+    'models',
+    'install',
+    '-c',
+    cfg,
+    '--auth-dir',
+    join(dir, 'auth')
+  ])
+  expect(exitCode).toBe(0)
+  expect(stdout.toLowerCase()).toContain('available agents')
+  // Anchor to the padded name column so 'pi' can't match inside 'pi-route'.
+  for (const name of ['claude', 'codex', 'omp', 'opencode', 'openclaw', 'pi', 'qwen', 'zed']) {
+    expect(stdout).toMatch(new RegExp(`\\n  ${name} `))
+  }
 })
 
 test('models install dedups a model that is in both default and smol groups', async () => {
