@@ -1,16 +1,15 @@
 import { getModel } from '@mariozechner/pi-ai'
-import type { Catalog } from '../pipeline/catalog'
+import type { Catalog, ModelMeta } from '../pipeline/catalog'
 import { exposeIncludes } from '../pipeline/match'
+import { toModelMeta } from '../pipeline/metadata'
 import type { RouterOptions } from '../types'
-
-type Model = ReturnType<typeof getModel>
 
 // Display + filter order for reasoning effort levels (high→minimal), matching
 // the legacy /v1/models output.
 // Note: pi-ai ThinkingLevel also has 'xhigh'; intentionally excluded to match legacy output.
 const EFFORTS = ['high', 'medium', 'low', 'minimal'] as const
 
-export type Resolved = { id: string; owned_by: string; model: Model | null }
+export type Resolved = { id: string; owned_by: string; model: ModelMeta | null }
 
 // address → provider/leaf → pi-ai Model. Never throws; unknown → { model: null }.
 export const resolveModel = (opts: RouterOptions, catalog: Catalog, address: string): Resolved => {
@@ -27,7 +26,7 @@ export const resolveModel = (opts: RouterOptions, catalog: Catalog, address: str
       provider.type as Parameters<typeof getModel>[0],
       modelId as Parameters<typeof getModel>[1]
     )
-    return { id: address, owned_by, model: m ?? null }
+    return { id: address, owned_by, model: m ? toModelMeta(m) : null }
   } catch {
     return { id: address, owned_by, model: null }
   }
@@ -53,26 +52,23 @@ export type Capabilities = {
   reasoningEffortParam: boolean
 }
 
-// Hybrid derivation: real signals from Model/compat; assume-true only for
-// tools/temperature (no pi-ai field represents them). compat is optional and
-// only meaningful for openai-completions; read it structurally to avoid fighting
-// the conditional `compat` type.
-export const capabilities = (m: Model): Capabilities => {
+// Hybrid derivation: real signals from ModelMeta; assume-true only for
+// tools/temperature (no pi-ai field represents them).
+export const capabilities = (m: ModelMeta): Capabilities => {
   const vision = Array.isArray(m.input) && m.input.includes('image')
   const reasoning = Boolean(m.reasoning)
-  const map = m.thinkingLevelMap as Partial<Record<string, string | null>> | undefined
+  const map = m.thinkingLevelMap
   const efforts = !reasoning
     ? []
     : map
       ? EFFORTS.filter((e) => map[e] !== null && map[e] !== undefined)
       : [...EFFORTS]
-  const compat = (m as unknown as { compat?: { supportsReasoningEffort?: boolean } }).compat
-  const reasoningEffortParam = reasoning && compat?.supportsReasoningEffort !== false
+  const reasoningEffortParam = reasoning && m.supportsReasoningEffort !== false
   return { vision, reasoning, tools: true, temperature: true, efforts, reasoningEffortParam }
 }
 
 // Input modalities with a safe default (some catalog entries omit `input`).
-const inputModalities = (m: Model): string[] =>
+const inputModalities = (m: ModelMeta): string[] =>
   Array.isArray(m.input) && m.input.length > 0 ? m.input : ['text']
 
 // pi-ai cost is USD per MILLION tokens. A: per-token string.

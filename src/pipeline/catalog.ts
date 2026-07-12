@@ -3,6 +3,20 @@ import { getModels } from '@mariozechner/pi-ai'
 import type { RouterOptions } from '../types'
 import { hasGlobMetachars } from './match'
 
+// Our own metadata subset — the union of fields the projection functions read.
+// Every metadata source (pi-ai, live fetch, guess, fallback, override) produces this,
+// so nothing downstream depends on pi-ai's full Model type.
+export type ModelMeta = {
+  name: string
+  contextWindow?: number
+  maxTokens?: number
+  cost?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }
+  reasoning?: boolean
+  input?: string[]
+  thinkingLevelMap?: Record<string, string | null>
+  supportsReasoningEffort?: boolean
+}
+
 export type Catalog = {
   addresses: Set<string>
   leafFor: Map<string, string>
