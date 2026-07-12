@@ -231,6 +231,40 @@ test('models install claude without pipeline.default fails', async () => {
   expect(stderr).toContain('default')
 })
 
+test('models install accepts a bare-list (non-exact) default pool', async () => {
+  const dir = tmp()
+  const cfg = join(dir, 'router.yaml')
+  writeFileSync(
+    cfg,
+    [
+      'providers:',
+      '  cerebras:',
+      '    type: cerebras',
+      '    apiKey: x',
+      'pipeline:',
+      '  default:',
+      '    - cerebras/llama3.1-8b',
+      '    - cerebras/llama-3.3-70b',
+      'expose:',
+      '  - default'
+    ].join('\n') + '\n'
+  )
+  const { stdout, exitCode } = await run([
+    'models',
+    'install',
+    'claude',
+    '-c',
+    cfg,
+    '--auth-dir',
+    join(dir, 'auth'),
+    '--home-dir',
+    join(dir, 'home'),
+    '--dry'
+  ])
+  expect(exitCode).toBe(0)
+  expect(stdout).toContain('cerebras/llama3.1-8b')
+})
+
 test('models install codex --dry writes config.toml + model_catalog_json', async () => {
   const dir = tmp()
   const cfg = setupConfig(dir)

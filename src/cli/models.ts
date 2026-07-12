@@ -57,10 +57,8 @@ const roleModels = (
   catalog: Catalog,
   role: 'default' | 'smol'
 ): RoleModel[] => {
-  const entry = options.pipeline.find(
-    (p) => p.name === role && p.kind === 'pool' && p.match === 'exact'
-  )
-  if (!entry || entry.kind !== 'pool') return []
+  const entry = options.pipeline.find((p) => p.name === role && p.kind === 'pool')
+  if (entry?.kind !== 'pool') return []
   return entry.to.filter(isPlain).map((target) => {
     // The target (as written) is the real backend address the client sends;
     // the leaf provides metadata.
