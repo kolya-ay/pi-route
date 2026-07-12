@@ -17,10 +17,38 @@ export const AccountSchema = z.discriminatedUnion('credential', [
 ])
 
 const ProviderTypeSchema = z.string()
+
+const DiscoverStrategySchema = z.enum([
+  'auto',
+  'openai-models-list',
+  'openai',
+  'litellm',
+  'guess',
+  'fallback'
+])
+
+const ModelMetaOverrideSchema = z.object({
+  name: z.string().optional(),
+  contextWindow: z.number().optional(),
+  maxTokens: z.number().optional(),
+  cost: z
+    .object({
+      input: z.number().optional(),
+      output: z.number().optional(),
+      cacheRead: z.number().optional(),
+      cacheWrite: z.number().optional()
+    })
+    .optional(),
+  reasoning: z.boolean().optional(),
+  input: z.array(z.string()).optional()
+})
+
 const ProviderSchema = z.object({
   type: ProviderTypeSchema,
   baseUrl: z.string().optional(),
-  account: AccountSchema
+  account: AccountSchema,
+  discover: z.array(DiscoverStrategySchema).optional(),
+  modelOverrides: z.record(z.string(), ModelMetaOverrideSchema).optional()
 })
 
 const StrategySchema = z.enum(['round-robin', 'sticky', 'fill-first', 'failover'])

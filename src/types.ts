@@ -72,10 +72,36 @@ export type Account = { disabled?: boolean | undefined } & (
 
 // === Config ===
 
+export type DiscoverStrategy =
+  | 'auto'
+  | 'openai-models-list'
+  | 'openai'
+  | 'litellm'
+  | 'guess'
+  | 'fallback'
+
+export type ModelMetaOverride = {
+  name?: string | undefined
+  contextWindow?: number | undefined
+  maxTokens?: number | undefined
+  cost?:
+    | {
+        input?: number | undefined
+        output?: number | undefined
+        cacheRead?: number | undefined
+        cacheWrite?: number | undefined
+      }
+    | undefined
+  reasoning?: boolean | undefined
+  input?: string[] | undefined
+}
+
 export type ProviderConfig = {
   type: ProviderType
   baseUrl?: string | undefined
   account: Account
+  discover?: DiscoverStrategy[] | undefined
+  modelOverrides?: Record<string, ModelMetaOverride> | undefined
 }
 
 export type BalancingStrategyName = 'round-robin' | 'sticky' | 'fill-first' | 'failover'

@@ -158,6 +158,40 @@ describe('parseConfig — collision', () => {
   })
 })
 
+describe('provider discover + modelOverrides', () => {
+  test('parses discover chain and modelOverrides map', () => {
+    const opts = parseConfig({
+      providers: {
+        chutes: {
+          type: 'openai-compatible',
+          baseUrl: 'https://llm.chutes.ai/v1',
+          account: { credential: 'key', key: 'x' },
+          discover: ['auto'],
+          modelOverrides: { 'MiniMaxAI/MiniMax-M2.5-TEE': { contextWindow: 204800 } }
+        }
+      }
+    })
+    expect(opts.providers.chutes!.discover).toEqual(['auto'])
+    expect(opts.providers.chutes!.modelOverrides!['MiniMaxAI/MiniMax-M2.5-TEE']).toEqual({
+      contextWindow: 204800
+    })
+  })
+
+  test('rejects an unknown discover strategy', () => {
+    expect(() =>
+      parseConfig({
+        providers: {
+          p: {
+            type: 'openai-compatible',
+            account: { credential: 'key', key: 'x' },
+            discover: ['nope']
+          }
+        }
+      })
+    ).toThrow()
+  })
+})
+
 describe('parseConfig — opencode option', () => {
   test('absent → undefined', () => {
     const opts = parseConfig({ providers: {} })
