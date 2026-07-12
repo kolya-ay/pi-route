@@ -88,6 +88,8 @@ describe('scheduleRefresh', () => {
 
     await Bun.sleep(2500)
     expect(refreshed).toBe(true)
+    // A successful refresh reschedules a far-future timer; cancel it so it doesn't dangle.
+    cancelRefresh(state, 'a')
   }, 5000)
 })
 
@@ -119,6 +121,12 @@ describe('refresh failure backoff', () => {
       expires: Date.now() + 61_500
     })
     const state = mkState(dir)
+    // Pre-seed to MAX_FAILURES-1 so this single failed fire tips into give-up, which
+    // deletes the timer (scheduler.ts:96-98) instead of scheduling another backoff retry.
+    // Without this, the retry loop keeps firing for ~30s after the test ends — and once
+    // afterEach restores the real fetch, those late fires hit the network (ECONNREFUSED)
+    // and flake whichever unrelated test happens to be running then.
+    state.refreshFailures.set('a', 5)
 
     globalThis.fetch = (async () =>
       new Response(JSON.stringify({ error: 'invalid_grant' }), {
@@ -126,8 +134,7 @@ describe('refresh failure backoff', () => {
       })) as unknown as typeof fetch
 
     scheduleRefresh(state, 'p1', { credential: 'oauth', name: 'a' }, tel)
-    // Wait long enough for first fire + 5 backoff attempts (1+2+4+8+16+32 = 63s — too long).
-    // Instead, manually drive: fire one failure, then verify counter.
+    // Wait for the single fire (~1.5s timer + network round-trip) to complete.
     await Bun.sleep(2500)
     expect(state.refreshFailures.get('a') ?? 0).toBeGreaterThanOrEqual(1)
     // Verify an account.refresh span was created AND its status is ERROR
