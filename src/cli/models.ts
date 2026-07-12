@@ -5,6 +5,7 @@ import { homedir } from 'node:os'
 import { buildCatalog, type Catalog } from '../pipeline/catalog'
 import { exposeIncludes } from '../pipeline/match'
 import {
+  displayName,
   exposedAddresses,
   type LiteLLMEntry,
   type ModelsDevModel,
@@ -63,10 +64,13 @@ const roleModels = (
     // The target (as written) is the real backend address the client sends;
     // the leaf provides metadata.
     const leaf = catalog.leafFor.get(target) ?? target
-    const model = resolveModel(options, catalog, leaf).model
+    const { provider, model } = resolveModel(options, catalog, leaf)
+    // Prefix the bare name (not `leaf`, which already carries the provider) so the
+    // metadata-miss fallback doesn't double it: `Cerebras/gpt-oss-120b`.
+    const bare = model?.name ?? leaf.slice(leaf.indexOf('/') + 1)
     return {
       id: target,
-      name: model?.name ?? leaf,
+      name: displayName(provider, bare),
       ...(model?.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
       ...(model?.maxTokens !== undefined ? { maxTokens: model.maxTokens } : {}),
       ...(model?.reasoning !== undefined ? { reasoning: model.reasoning } : {}),

@@ -8,13 +8,23 @@ import type { RouterOptions } from '../types'
 // Note: pi-ai ThinkingLevel also has 'xhigh'; intentionally excluded to match legacy output.
 const EFFORTS = ['high', 'medium', 'low', 'minimal'] as const
 
-export type Resolved = { id: string; owned_by: string; model: ModelMeta | null }
+export type Resolved = { id: string; owned_by: string; provider: string; model: ModelMeta | null }
+
+const capitalize = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1)
+
+// Provider-prefixed display name, e.g. "Nvidia/Kimi K2.6".
+export const displayName = (provider: string, name: string): string =>
+  `${capitalize(provider)}/${name}`
 
 // address → provider/leaf → pi-ai Model. Never throws; unknown → { model: null }.
 export const resolveModel = (opts: RouterOptions, catalog: Catalog, address: string): Resolved => {
   const [ownedBy] = address.split('/')
   const owned_by = address.includes('/') ? (ownedBy ?? address) : address
-  return { id: address, owned_by, model: resolveMetadata(opts, catalog, address) }
+  // Backend provider = first segment of the resolved leaf, so aliases/pools prefix
+  // with the real provider (alias `solo` → `Cerebras/…`, not `Solo/…`).
+  const leaf = catalog.leafFor.get(address) ?? address
+  const provider = leaf.includes('/') ? leaf.slice(0, leaf.indexOf('/')) : owned_by
+  return { id: address, owned_by, provider, model: resolveMetadata(opts, catalog, address) }
 }
 
 // Sorted list of addresses passing the expose allowlist. Shared by all three
@@ -91,7 +101,11 @@ export const toOpenAIModel = (r: Resolved): OpenAIModelEntry => {
   // Endpoint A lists unknown/unresolvable models as bare entries; B and C omit them.
   if (!m) return base
   const cap = capabilities(m)
-  const entry: OpenAIModelEntry = { ...base, name: m.name, type: 'language' }
+  const entry: OpenAIModelEntry = {
+    ...base,
+    name: displayName(r.provider, m.name),
+    type: 'language'
+  }
   if (m.contextWindow !== undefined) {
     entry.context_length = m.contextWindow
     entry.context_window = m.contextWindow
@@ -180,7 +194,7 @@ export const toModelsDevModel = (r: Resolved): ModelsDevModel | null => {
   const inputMods = inputModalities(m)
   return {
     id: r.id,
-    name: m.name,
+    name: displayName(r.provider, m.name),
     attachment: cap.vision,
     reasoning: cap.reasoning,
     tool_call: cap.tools,

@@ -1,7 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 import { buildCatalog } from '../pipeline/catalog'
 import type { RouterOptions } from '../types'
-import { capabilities, perTokenString, resolveModel, toOpenAIModel } from './model-projection'
+import {
+  capabilities,
+  displayName,
+  perTokenString,
+  resolveModel,
+  toModelsDevModel,
+  toOpenAIModel
+} from './model-projection'
 
 const opts = (over: Partial<RouterOptions> = {}): RouterOptions => ({
   providers: { cerebras: { type: 'cerebras', account: { credential: 'key', key: 'k' } } },
@@ -31,11 +38,34 @@ describe('resolveModel', () => {
   test('unknown provider → null model, keeps id/owned_by', () => {
     const o = opts({ providers: {} })
     const r = resolveModel(o, buildCatalog(o), 'ghost/model-x')
-    expect(r).toEqual({ id: 'ghost/model-x', owned_by: 'ghost', model: null })
+    expect(r).toEqual({ id: 'ghost/model-x', owned_by: 'ghost', provider: 'ghost', model: null })
   })
   test('known cerebras leaf resolves a Model', () => {
     const r = firstKnown(opts())
     expect(r?.model).toBeTruthy()
+  })
+})
+
+describe('displayName (provider-prefixed)', () => {
+  test('capitalizes the provider and slash-joins', () => {
+    expect(displayName('nvidia', 'Kimi K2.6')).toBe('Nvidia/Kimi K2.6')
+    expect(displayName('cerebras', 'GPT-OSS 120B')).toBe('Cerebras/GPT-OSS 120B')
+  })
+  test('endpoints emit the prefixed name for a resolved model', () => {
+    const r = firstKnown(opts())
+    if (!r?.model) return
+    expect(toOpenAIModel(r).name).toBe(displayName(r.provider, r.model.name))
+    expect(toModelsDevModel(r)?.name).toBe(displayName(r.provider, r.model.name))
+  })
+  test('prefix uses the backend provider for an alias (solo → Cerebras/…)', () => {
+    const o = opts({
+      pipeline: [{ kind: 'alias', name: 'solo', target: 'cerebras/gpt-oss-120b' }],
+      expose: ['solo']
+    })
+    const r = resolveModel(o, buildCatalog(o), 'solo')
+    expect(r.owned_by).toBe('solo') // address-based
+    expect(r.provider).toBe('cerebras') // leaf/backend-based
+    if (r.model) expect(toOpenAIModel(r).name?.startsWith('Cerebras/')).toBe(true)
   })
 })
 
@@ -53,7 +83,7 @@ describe('capabilities', () => {
 
 describe('toOpenAIModel', () => {
   test('degrades to base entry when model is null', () => {
-    expect(toOpenAIModel({ id: 'a/b', owned_by: 'a', model: null })).toEqual({
+    expect(toOpenAIModel({ id: 'a/b', owned_by: 'a', provider: 'a', model: null })).toEqual({
       id: 'a/b',
       object: 'model',
       created: 0,
