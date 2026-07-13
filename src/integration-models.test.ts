@@ -9,7 +9,7 @@ let dir: string
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'pi-route-models-'))
   process.env.PI_ROUTE_CONFIG = join(dir, 'router.yaml')
-  process.env.PI_ROUTE_AUTH = dir
+  process.env.PI_ROUTE_STATE = dir
   await writeFile(
     process.env.PI_ROUTE_CONFIG,
     `providers:\n  cerebras:\n    type: cerebras\n    apiKey: sk\n`
@@ -17,7 +17,7 @@ beforeEach(async () => {
 })
 afterEach(async () => {
   delete process.env.PI_ROUTE_CONFIG
-  delete process.env.PI_ROUTE_AUTH
+  delete process.env.PI_ROUTE_STATE
   await rm(dir, { recursive: true, force: true })
 })
 
@@ -68,8 +68,8 @@ describe('/v1/models — client compatibility', () => {
 })
 
 describe('/model/info — LiteLLM masquerade (endpoint B)', () => {
-  test('is token-gated: 401 without a token when PI_ROUTE_TOKEN is set', async () => {
-    process.env.PI_ROUTE_TOKEN = 'sk-test'
+  test('is token-gated: 401 without a token when PI_ROUTE_AUTH_TOKEN is set', async () => {
+    process.env.PI_ROUTE_AUTH_TOKEN = 'sk-test'
     try {
       const router = await createApp()
       const r = await router.app.request('/model/info')
@@ -81,7 +81,7 @@ describe('/model/info — LiteLLM masquerade (endpoint B)', () => {
       const body = (await ok.json()) as { data: unknown[] }
       expect(Array.isArray(body.data)).toBe(true)
     } finally {
-      delete process.env.PI_ROUTE_TOKEN
+      delete process.env.PI_ROUTE_AUTH_TOKEN
     }
   })
 
@@ -106,9 +106,9 @@ describe('/api.json — models.dev masquerade (endpoint C)', () => {
   test('public (no token) + host-derived api url when opencode: true', async () => {
     await writeFile(
       process.env.PI_ROUTE_CONFIG as string,
-      `providers:\n  cerebras:\n    type: cerebras\n    apiKey: sk\nopencode: true\n`
+      `providers:\n  cerebras:\n    type: cerebras\n    apiKey: sk\nserver:\n  opencode: true\n`
     )
-    process.env.PI_ROUTE_TOKEN = 'sk-test'
+    process.env.PI_ROUTE_AUTH_TOKEN = 'sk-test'
     try {
       const router = await createApp()
       // No Authorization header, yet reachable:
@@ -120,14 +120,14 @@ describe('/api.json — models.dev masquerade (endpoint C)', () => {
       expect(body['pi-route'].api).toBe('http://127.0.0.1:2130/v1')
       expect(Object.keys(body['pi-route'].models).length).toBeGreaterThan(0)
     } finally {
-      delete process.env.PI_ROUTE_TOKEN
+      delete process.env.PI_ROUTE_AUTH_TOKEN
     }
   })
 
   test('api override wins over host', async () => {
     await writeFile(
       process.env.PI_ROUTE_CONFIG as string,
-      `providers:\n  cerebras:\n    type: cerebras\n    apiKey: sk\nopencode:\n  api: https://pi.example.com/v1\n`
+      `providers:\n  cerebras:\n    type: cerebras\n    apiKey: sk\nserver:\n  opencode:\n    api: https://pi.example.com/v1\n`
     )
     const router = await createApp()
     const r = await router.app.request('http://127.0.0.1:2130/api.json')

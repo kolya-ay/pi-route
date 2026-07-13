@@ -41,13 +41,13 @@ export const createApp = async (
   }
 
   const env = readEnvConfig(envOverrides)
-  const { options, state: runtime } = await loadConfig(env.configPath, env.authDir)
+  const { options, state: runtime } = await loadConfig(env.configPath, env.stateDir)
   const catalog = buildCatalog(options)
   await enrichLiveMeta(options, catalog)
 
   initOtel({ otlpUrl: env.otlpUrl, serviceName: env.serviceName })
   const tel = createTel()
-  const state = createState(options, catalog, runtime, env.authDir)
+  const state = createState(options, catalog, runtime, env.stateDir)
 
   for (const [providerName, config] of Object.entries(state.options.providers)) {
     scheduleRefresh(state, providerName, config.account, tel)
@@ -73,7 +73,7 @@ export const createApp = async (
     })
   )
   const modelInfoPaths = ['/model/info', '/v1/model/info', '/v2/model/info', '/model_group/info']
-  const authMw = createAuthMiddleware(env.tokens)
+  const authMw = createAuthMiddleware(env.authToken ?? state.options.server?.authToken)
   app.use('/v1/*', authMw)
   // Endpoint B aliases outside /v1/* need the same token; /v1/model/info is already covered by /v1/*.
   for (const p of modelInfoPaths) if (!p.startsWith('/v1/')) app.use(p, authMw)
@@ -89,9 +89,10 @@ export const createApp = async (
   const modelInfoBody = buildModelInfoBody(state.options, state.catalog)
   for (const p of modelInfoPaths) app.get(p, (c) => c.json(modelInfoBody))
 
-  if (state.options.opencode) {
+  const opencode = state.options.server?.opencode
+  if (opencode) {
     const opencodeModels = buildOpencodeModels(state.options, state.catalog)
-    const apiOverride = state.options.opencode.api
+    const apiOverride = opencode.api
     // Public (no authMw): OpenCode fetches /api.json without a bearer token.
     app.get('/api.json', (c) =>
       c.json(renderApiJson(opencodeModels, resolveApiUrl(c.req, apiOverride)))

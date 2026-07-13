@@ -220,27 +220,30 @@ describe('provider discover + modelOverrides', () => {
   })
 })
 
-describe('parseConfig — opencode option', () => {
-  test('absent → undefined', () => {
-    const opts = parseConfig({ providers: {} })
-    expect(opts.opencode).toBeUndefined()
-    expect('opencode' in opts).toBe(false)
+describe('parseConfig — server section', () => {
+  test('parses a server section with authToken and opencode', () => {
+    const opts = parseConfig({
+      providers: {},
+      pipeline: {},
+      server: { authToken: 'sk-gate', opencode: true }
+    })
+    expect(opts.server?.authToken).toBe('sk-gate')
+    expect(opts.server?.opencode).toEqual({})
   })
-  test('false → undefined', () => {
-    const opts = parseConfig({ providers: {}, opencode: false })
-    expect(opts.opencode).toBeUndefined()
-    expect('opencode' in opts).toBe(false)
+  test('server.opencode object keeps its api override', () => {
+    const opts = parseConfig({
+      providers: {},
+      pipeline: {},
+      server: { opencode: { api: 'https://host/v1' } }
+    })
+    expect(opts.server?.opencode).toEqual({ api: 'https://host/v1' })
   })
-  test('true → empty object (enabled, host-derived url)', () => {
-    const opts = parseConfig({ providers: {}, opencode: true })
-    expect(opts.opencode).toEqual({})
+  test('a top-level opencode key is no longer accepted as config', () => {
+    const opts = parseConfig({ providers: {}, pipeline: {}, opencode: true })
+    expect(opts.server).toBeUndefined()
   })
-  test('empty object → empty object', () => {
-    const opts = parseConfig({ providers: {}, opencode: {} })
-    expect(opts.opencode).toEqual({})
-  })
-  test('object with api override', () => {
-    const opts = parseConfig({ providers: {}, opencode: { api: 'https://x/v1' } })
-    expect(opts.opencode).toEqual({ api: 'https://x/v1' })
+  test('server.opencode false desugars to undefined', () => {
+    const opts = parseConfig({ providers: {}, pipeline: {}, server: { opencode: false } })
+    expect(opts.server?.opencode).toBeUndefined()
   })
 })

@@ -9,7 +9,7 @@ let dir: string
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'pi-route-app-'))
   process.env.PI_ROUTE_CONFIG = join(dir, 'router.yaml')
-  process.env.PI_ROUTE_AUTH = dir
+  process.env.PI_ROUTE_STATE = dir
   await writeFile(
     process.env.PI_ROUTE_CONFIG,
     `providers:\n  cerebras:\n    type: cerebras\n    apiKey: sk-test\n`
@@ -18,8 +18,8 @@ beforeEach(async () => {
 
 afterEach(async () => {
   delete process.env.PI_ROUTE_CONFIG
-  delete process.env.PI_ROUTE_AUTH
-  delete process.env.PI_ROUTE_TOKEN
+  delete process.env.PI_ROUTE_STATE
+  delete process.env.PI_ROUTE_AUTH_TOKEN
   await rm(dir, { recursive: true, force: true })
 })
 
@@ -65,12 +65,27 @@ describe('createApp', () => {
   })
 
   test('/v1/limits is mounted under authenticated /v1/* routes', async () => {
-    process.env.PI_ROUTE_TOKEN = 't'
+    process.env.PI_ROUTE_AUTH_TOKEN = 't'
     const router = await createApp()
     const response = await router.app.request('/v1/limits', {
       headers: { authorization: 'Bearer t' }
     })
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ providers: [] })
+  })
+
+  test('server.authToken set only in config (no env var) gates requests', async () => {
+    delete process.env.PI_ROUTE_AUTH_TOKEN
+    await writeFile(
+      process.env.PI_ROUTE_CONFIG as string,
+      `providers:\n  cerebras:\n    type: cerebras\n    apiKey: sk-test\n\npipeline:\n  alpha: cerebras/llama3.1-8b\n\nexpose:\n  - alpha\n\nserver:\n  authToken: sk-cfg\n`
+    )
+    const router = await createApp()
+    const unauthed = await router.app.request('/v1/models')
+    expect(unauthed.status).toBe(401)
+    const authed = await router.app.request('/v1/models', {
+      headers: { authorization: 'Bearer sk-cfg' }
+    })
+    expect(authed.status).toBe(200)
   })
 })

@@ -102,11 +102,18 @@ const PipelineValueSchema = z.union([
   PipelineEntryObjectSchema
 ])
 
+const OpencodeSchema = z.union([z.boolean(), z.object({ api: z.string().optional() })])
+
+const ServerSchema = z.object({
+  authToken: z.string().optional(),
+  opencode: OpencodeSchema.optional()
+})
+
 const RootSchema = z.object({
   providers: z.record(z.string(), ProviderSchema).default({}),
   pipeline: z.record(z.string(), PipelineValueSchema).default({}),
   expose: z.array(z.string()).default([]),
-  opencode: z.union([z.boolean(), z.object({ api: z.string().optional() })]).optional()
+  server: ServerSchema.optional()
 })
 
 const desugar = (name: string, value: z.infer<typeof PipelineValueSchema>): PipelineEntry => {
@@ -145,13 +152,22 @@ export const parseConfig = (raw: unknown): RouterOptions => {
     pipeline.push(desugar(name, value))
   }
 
+  const rawOpencode = parsed.server?.opencode
   // exactOptionalPropertyTypes: Zod infers api as `string | undefined`; narrow to `api?: string`.
   const opencode: { api?: string } | undefined =
-    parsed.opencode === undefined || parsed.opencode === false
+    rawOpencode === undefined || rawOpencode === false
       ? undefined
-      : parsed.opencode === true
+      : rawOpencode === true
         ? {}
-        : (parsed.opencode as { api?: string })
+        : (rawOpencode as { api?: string })
+
+  const server =
+    parsed.server === undefined
+      ? undefined
+      : {
+          ...(parsed.server.authToken !== undefined ? { authToken: parsed.server.authToken } : {}),
+          ...(opencode !== undefined ? { opencode } : {})
+        }
 
   return {
     providers: Object.fromEntries(
@@ -159,6 +175,6 @@ export const parseConfig = (raw: unknown): RouterOptions => {
     ),
     pipeline,
     expose: parsed.expose,
-    ...(opencode !== undefined ? { opencode } : {})
+    ...(server !== undefined && Object.keys(server).length > 0 ? { server } : {})
   }
 }
