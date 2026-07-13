@@ -1,13 +1,14 @@
+import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { xdgConfigHome, xdgDataHome } from './xdg'
+import { xdgConfigHome, xdgStateHome } from './xdg'
 
 export type EnvConfig = {
   port: number
   host: string
-  tokens: string[]
+  authToken?: string
   configPath: string
-  authDir: string
+  stateDir: string
   // Bun.serve idle timeout in seconds. Default 120 (Bun's default of 10 kills
   // slow upstreams + multi-request keep-alive clients like Claude Code).
   // 0 disables Bun's idle timeout (HTTP/1.1 only). Cap is 255 per Bun's API.
@@ -21,7 +22,9 @@ export type EnvConfig = {
 
 export type EnvPathOverrides = {
   configPath?: string
-  authDir?: string
+  stateDir?: string
+  port?: number
+  host?: string
 }
 
 const parsePort = (raw: string | undefined): number => {
@@ -70,24 +73,48 @@ const resolveOtlpUrl = (): string => {
 const expandHomeDir = (path: string): string =>
   path.startsWith('~/') ? join(homedir(), path.slice(2)) : path
 
+const resolveAuthToken = (): string | undefined => {
+  const fromEnv = process.env.PI_ROUTE_AUTH_TOKEN
+  if (fromEnv) return fromEnv
+  const credDir = process.env.CREDENTIALS_DIRECTORY
+  if (credDir) {
+    const path = join(credDir, 'pi_route_token')
+    if (existsSync(path)) return readFileSync(path, 'utf8').trim()
+  }
+  return undefined
+}
+
+// euid 0 = a bare `sudo pi-route serve` with no systemd. The shipped system unit
+// runs as a non-root user and sets paths explicitly, so this only catches the
+// hand-run-as-root case.
+const isSystemMode = (): boolean => typeof process.getuid === 'function' && process.getuid() === 0
+
+const resolveConfigPath = (override: string | undefined): string => {
+  const explicit = override ?? process.env.PI_ROUTE_CONFIG
+  if (explicit) return expandHomeDir(explicit)
+  if (isSystemMode()) return '/etc/pi-route.yml'
+  return join(xdgConfigHome(), 'pi-route.yml')
+}
+
+const resolveStateDir = (override: string | undefined): string => {
+  const explicit = override ?? process.env.PI_ROUTE_STATE
+  if (explicit) return expandHomeDir(explicit)
+  const systemd = process.env.STATE_DIRECTORY
+  if (systemd) return systemd.split(':')[0] as string
+  if (isSystemMode()) return '/var/lib/pi-route'
+  return join(xdgStateHome(), 'pi-route')
+}
+
 export const readEnvConfig = (overrides: EnvPathOverrides = {}): EnvConfig => {
-  const configPath = expandHomeDir(
-    overrides.configPath ??
-      process.env.PI_ROUTE_CONFIG ??
-      join(xdgConfigHome(), 'pi-route', 'config.yaml')
-  )
-  const authDir = expandHomeDir(
-    overrides.authDir ?? process.env.PI_ROUTE_AUTH ?? join(xdgDataHome(), 'pi-route', 'auth')
-  )
+  const configPath = resolveConfigPath(overrides.configPath)
+  const stateDir = resolveStateDir(overrides.stateDir)
+  const authToken = resolveAuthToken()
   return {
-    port: parsePort(process.env.PI_ROUTE_PORT),
-    host: process.env.PI_ROUTE_HOST ?? '127.0.0.1',
-    tokens: (process.env.PI_ROUTE_TOKEN ?? '')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean),
+    port: overrides.port ?? parsePort(process.env.PI_ROUTE_PORT),
+    host: overrides.host ?? process.env.PI_ROUTE_HOST ?? '127.0.0.1',
+    ...(authToken !== undefined && { authToken }),
     configPath,
-    authDir,
+    stateDir,
     idleTimeout: parseIdleTimeout(process.env.PI_ROUTE_IDLE_TIMEOUT),
     otlpUrl: resolveOtlpUrl(),
     capturePrompts: process.env.PI_ROUTE_CAPTURE_PROMPTS === '1',

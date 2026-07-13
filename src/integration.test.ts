@@ -9,11 +9,11 @@ let dir: string
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'pi-route-int-'))
   process.env.PI_ROUTE_CONFIG = join(dir, 'router.yaml')
-  process.env.PI_ROUTE_AUTH = dir
+  process.env.PI_ROUTE_STATE = dir
 })
 afterEach(async () => {
   delete process.env.PI_ROUTE_CONFIG
-  delete process.env.PI_ROUTE_AUTH
+  delete process.env.PI_ROUTE_STATE
   await rm(dir, { recursive: true, force: true })
 })
 

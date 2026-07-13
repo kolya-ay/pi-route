@@ -10,4 +10,4 @@ const xdgDir = (envVar: string, fallback: string): string => {
 }
 
 export const xdgConfigHome = (): string => xdgDir('XDG_CONFIG_HOME', '.config')
-export const xdgDataHome = (): string => xdgDir('XDG_DATA_HOME', '.local/share')
+export const xdgStateHome = (): string => xdgDir('XDG_STATE_HOME', '.local/state')

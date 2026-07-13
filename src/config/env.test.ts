@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, test } from 'bun:test'
-import { homedir } from 'node:os'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { interpolateEnvVars, readEnvConfig } from './env'
 
@@ -29,56 +30,79 @@ describe('readEnvConfig', () => {
   afterEach(() => {
     delete process.env.PI_ROUTE_PORT
     delete process.env.PI_ROUTE_HOST
-    delete process.env.PI_ROUTE_TOKEN
+    delete process.env.PI_ROUTE_AUTH_TOKEN
+    delete process.env.CREDENTIALS_DIRECTORY
     delete process.env.PI_ROUTE_CONFIG
-    delete process.env.PI_ROUTE_AUTH
+    delete process.env.PI_ROUTE_STATE
+    delete process.env.STATE_DIRECTORY
     delete process.env.PI_ROUTE_IDLE_TIMEOUT
   })
   test('defaults', () => {
     delete process.env.PI_ROUTE_PORT
     delete process.env.PI_ROUTE_HOST
-    delete process.env.PI_ROUTE_TOKEN
+    delete process.env.PI_ROUTE_AUTH_TOKEN
+    delete process.env.CREDENTIALS_DIRECTORY
     delete process.env.PI_ROUTE_CONFIG
-    delete process.env.PI_ROUTE_AUTH
+    delete process.env.PI_ROUTE_STATE
+    delete process.env.STATE_DIRECTORY
     delete process.env.PI_ROUTE_IDLE_TIMEOUT
     delete process.env.XDG_CONFIG_HOME
-    delete process.env.XDG_DATA_HOME
+    delete process.env.XDG_STATE_HOME
     const e = readEnvConfig()
     expect(e.port).toBe(3000)
     expect(e.host).toBe('127.0.0.1')
-    expect(e.tokens).toEqual([])
-    expect(e.configPath).toBe(join(homedir(), '.config/pi-route/config.yaml'))
-    expect(e.authDir).toBe(join(homedir(), '.local/share/pi-route/auth'))
+    expect(e.authToken).toBeUndefined()
+    expect(e.configPath).toBe(join(homedir(), '.config/pi-route.yml'))
+    expect(e.stateDir).toBe(join(homedir(), '.local/state/pi-route'))
     expect(e.idleTimeout).toBe(120)
   })
   test('overrides via env', () => {
     process.env.PI_ROUTE_PORT = '3030'
     process.env.PI_ROUTE_HOST = '0.0.0.0'
-    process.env.PI_ROUTE_TOKEN = 'a,b,c'
+    process.env.PI_ROUTE_AUTH_TOKEN = 'sk-secret'
     process.env.PI_ROUTE_CONFIG = '/tmp/r.yaml'
-    process.env.PI_ROUTE_AUTH = '/tmp/auth'
+    process.env.PI_ROUTE_STATE = '/tmp/state'
     process.env.PI_ROUTE_IDLE_TIMEOUT = '30'
     const e = readEnvConfig()
     expect(e.port).toBe(3030)
     expect(e.host).toBe('0.0.0.0')
-    expect(e.tokens).toEqual(['a', 'b', 'c'])
+    expect(e.authToken).toBe('sk-secret')
     expect(e.configPath).toBe('/tmp/r.yaml')
-    expect(e.authDir).toBe('/tmp/auth')
+    expect(e.stateDir).toBe('/tmp/state')
     expect(e.idleTimeout).toBe(30)
+  })
+  test('reads the auth token from a systemd credential file when the env var is unset', () => {
+    delete process.env.PI_ROUTE_AUTH_TOKEN
+    const dir = mkdtempSync(join(tmpdir(), 'pi-route-cred-'))
+    writeFileSync(join(dir, 'pi_route_token'), 'sk-from-file\n')
+    process.env.CREDENTIALS_DIRECTORY = dir
+    expect(readEnvConfig().authToken).toBe('sk-from-file')
   })
   test('expands tildes in env paths', () => {
     process.env.PI_ROUTE_CONFIG = '~/router.yaml'
-    process.env.PI_ROUTE_AUTH = '~/.auth/pi-route'
+    process.env.PI_ROUTE_STATE = '~/.state/pi-route'
     const e = readEnvConfig()
     expect(e.configPath).toBe(join(homedir(), 'router.yaml'))
-    expect(e.authDir).toBe(join(homedir(), '.auth/pi-route'))
+    expect(e.stateDir).toBe(join(homedir(), '.state/pi-route'))
   })
   test('cli-style overrides win over env vars', () => {
     process.env.PI_ROUTE_CONFIG = '/tmp/env.yaml'
-    process.env.PI_ROUTE_AUTH = '/tmp/env-auth'
-    const e = readEnvConfig({ configPath: '/tmp/flag.yaml', authDir: '/tmp/flag-auth' })
+    process.env.PI_ROUTE_STATE = '/tmp/env-state'
+    const e = readEnvConfig({ configPath: '/tmp/flag.yaml', stateDir: '/tmp/flag-state' })
     expect(e.configPath).toBe('/tmp/flag.yaml')
-    expect(e.authDir).toBe('/tmp/flag-auth')
+    expect(e.stateDir).toBe('/tmp/flag-state')
+  })
+  test('port/host overrides win over env and default', () => {
+    process.env.PI_ROUTE_PORT = '3030'
+    process.env.PI_ROUTE_HOST = '10.0.0.1'
+    const e = readEnvConfig({ port: 8080, host: '0.0.0.0' })
+    expect(e.port).toBe(8080)
+    expect(e.host).toBe('0.0.0.0')
+  })
+  test('honors systemd $STATE_DIRECTORY, taking the first colon-separated dir', () => {
+    process.env.STATE_DIRECTORY = '/var/lib/pi-route:/var/lib/other'
+    const e = readEnvConfig()
+    expect(e.stateDir).toBe('/var/lib/pi-route')
   })
   test('throws on invalid port', () => {
     process.env.PI_ROUTE_PORT = 'abc'
