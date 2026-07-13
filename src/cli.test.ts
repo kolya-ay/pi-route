@@ -78,7 +78,7 @@ const modelsConfig = (dir: string): string => {
   const cfg = join(dir, 'router.yaml')
   writeFileSync(
     cfg,
-    [
+    `${[
       'providers:',
       '  cerebras:',
       '    type: cerebras',
@@ -89,7 +89,7 @@ const modelsConfig = (dir: string): string => {
       '    to: cerebras/llama3.1-8b',
       'expose:',
       '  - default'
-    ].join('\n') + '\n'
+    ].join('\n')}\n`
   )
   return cfg
 }
@@ -157,7 +157,7 @@ const setupConfig = (dir: string): string => {
   const cfg = join(dir, 'router.yaml')
   writeFileSync(
     cfg,
-    [
+    `${[
       'providers:',
       '  cerebras:',
       '    type: cerebras',
@@ -173,7 +173,7 @@ const setupConfig = (dir: string): string => {
       '    to: cerebras/qwen-3-32b',
       'expose:',
       '  - default'
-    ].join('\n') + '\n'
+    ].join('\n')}\n`
   )
   return cfg
 }
@@ -208,14 +208,14 @@ test('models install claude without pipeline.default fails', async () => {
   const cfg = join(dir, 'router.yaml')
   writeFileSync(
     cfg,
-    [
+    `${[
       'providers:',
       '  cerebras:',
       '    type: cerebras',
       '    apiKey: x',
       'pipeline: {}',
       'expose: []'
-    ].join('\n') + '\n'
+    ].join('\n')}\n`
   )
   const { stderr, exitCode } = await run([
     'models',
@@ -236,7 +236,7 @@ test('models install accepts a bare-list (non-exact) default pool', async () => 
   const cfg = join(dir, 'router.yaml')
   writeFileSync(
     cfg,
-    [
+    `${[
       'providers:',
       '  cerebras:',
       '    type: cerebras',
@@ -247,7 +247,7 @@ test('models install accepts a bare-list (non-exact) default pool', async () => 
       '    - cerebras/llama-3.3-70b',
       'expose:',
       '  - default'
-    ].join('\n') + '\n'
+    ].join('\n')}\n`
   )
   const { stdout, exitCode } = await run([
     'models',
@@ -539,7 +539,7 @@ test('models install dedups a model that is in both default and fast groups', as
   const cfg = join(dir, 'router.yaml')
   writeFileSync(
     cfg,
-    [
+    `${[
       'providers:',
       '  cerebras:',
       '    type: cerebras',
@@ -555,7 +555,7 @@ test('models install dedups a model that is in both default and fast groups', as
       '    to: cerebras/shared-model',
       'expose:',
       '  - default'
-    ].join('\n') + '\n'
+    ].join('\n')}\n`
   )
   const home = join(dir, 'home')
   await run([

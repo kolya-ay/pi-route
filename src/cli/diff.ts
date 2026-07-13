@@ -6,8 +6,9 @@ type Op = { tag: ' ' | '+' | '-'; line: string }
 // don't diff a spurious empty last line. Empty string => no lines.
 const toLines = (s: string): string[] => (s === '' ? [] : s.replace(/\n$/, '').split('\n'))
 
-// LCS line diff. `lcs` is memoized recursion rather than a mutable DP table; the
-// only mutation is the memo cache. O(n*m) — fine for config-file-sized inputs.
+// LCS line diff. `lcs` is memoized recursion rather than a mutable DP table;
+// the backtrack then walks i/j forward, emitting ops. O(n*m) — fine for
+// config-file-sized inputs.
 const diffOps = (a: string[], b: string[]): Op[] => {
   const memo = new Map<string, number>()
   const lcs = (i: number, j: number): number => {
@@ -19,15 +20,25 @@ const diffOps = (a: string[], b: string[]): Op[] => {
     memo.set(key, val)
     return val
   }
-  const walk = (i: number, j: number, acc: Op[]): Op[] => {
-    if (i >= a.length && j >= b.length) return acc
-    if (i < a.length && j < b.length && a[i] === b[j])
-      return walk(i + 1, j + 1, [...acc, { tag: ' ', line: a[i]! }])
-    if (j >= b.length || (i < a.length && lcs(i + 1, j) >= lcs(i, j + 1)))
-      return walk(i + 1, j, [...acc, { tag: '-', line: a[i]! }])
-    return walk(i, j + 1, [...acc, { tag: '+', line: b[j]! }])
+  const ops: Op[] = []
+  let i = 0
+  let j = 0
+  while (i < a.length || j < b.length) {
+    const ai = a[i]
+    const bj = b[j]
+    if (ai !== undefined && bj !== undefined && ai === bj) {
+      ops.push({ tag: ' ', line: ai })
+      i++
+      j++
+    } else if (ai !== undefined && (bj === undefined || lcs(i + 1, j) >= lcs(i, j + 1))) {
+      ops.push({ tag: '-', line: ai })
+      i++
+    } else if (bj !== undefined) {
+      ops.push({ tag: '+', line: bj })
+      j++
+    }
   }
-  return walk(0, 0, [])
+  return ops
 }
 
 // Unchanged lines kept around each change; longer gaps collapse to "  ⋯".
@@ -41,10 +52,10 @@ export const unifiedDiff = (before: string, after: string): string => {
   if (ops.every((o) => o.tag === ' ')) return '  (no changes)'
   const near = (i: number): boolean =>
     ops.slice(Math.max(0, i - CONTEXT), i + CONTEXT + 1).some((o) => o.tag !== ' ')
-  return ops
-    .reduce<string[]>((acc, o, i) => {
-      if (o.tag !== ' ' || near(i)) return [...acc, `  ${o.tag} ${o.line}`]
-      return acc[acc.length - 1] === '  ⋯' ? acc : [...acc, '  ⋯']
-    }, [])
-    .join('\n')
+  const lines: string[] = []
+  ops.forEach((o, i) => {
+    if (o.tag !== ' ' || near(i)) lines.push(`  ${o.tag} ${o.line}`)
+    else if (lines[lines.length - 1] !== '  ⋯') lines.push('  ⋯')
+  })
+  return lines.join('\n')
 }

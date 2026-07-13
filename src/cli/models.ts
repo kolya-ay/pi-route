@@ -68,13 +68,14 @@ const roleModels = (
     // Prefix the bare name (not `leaf`, which already carries the provider) so the
     // metadata-miss fallback doesn't double it: `Cerebras/gpt-oss-120b`.
     const bare = model?.name ?? leaf.slice(leaf.indexOf('/') + 1)
+    const input = model?.input
     return {
       id: target,
       name: displayName(provider, bare),
       ...(model?.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
       ...(model?.maxTokens !== undefined ? { maxTokens: model.maxTokens } : {}),
       ...(model?.reasoning !== undefined ? { reasoning: model.reasoning } : {}),
-      ...(Array.isArray(model?.input) ? { input: model!.input } : {}),
+      ...(Array.isArray(input) ? { input } : {}),
       ...(model?.cost !== undefined ? { cost: model.cost } : {})
     }
   })
@@ -95,14 +96,15 @@ export const setupModels = async (
   const home = opts.homeDir ?? homedir()
   const catalog = buildCatalog(options)
   const defaults = roleModels(options, catalog, 'default')
-  if (defaults.length === 0) throw new Error('Missing pipeline.default exact-match role')
+  const main = defaults[0]
+  if (!main) throw new Error('Missing pipeline.default exact-match role')
   const fasts = roleModels(options, catalog, 'fast')
   const all = dedupById([...defaults, ...fasts])
   const writes = await agent.write({
     url: opts.url,
     home,
     all,
-    main: defaults[0]!,
+    main,
     fast: fasts[0] ?? null
   })
   if (!opts.dry) await applyWrites(writes)

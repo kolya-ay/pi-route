@@ -47,5 +47,16 @@
   },
   "files": {
     "includes": ["src/**/*.ts"]
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["**/*.test.ts"],
+      "linter": {
+        "rules": {
+          "style": { "noNonNullAssertion": "off" },
+          "suspicious": { "noTemplateCurlyInString": "off" }
+        }
+      }
+    }
+  ]
 }
