@@ -69,7 +69,7 @@ test('limits with a valid empty config exits 0 and prints JSON', async () => {
   const dir = tmp()
   const cfg = join(dir, 'router.yaml')
   writeFileSync(cfg, 'providers: {}\npipeline: {}\nexpose: []\n')
-  const { stdout, exitCode } = await run(['limits', '-c', cfg, '--auth-dir', join(dir, 'auth')])
+  const { stdout, exitCode } = await run(['limits', '-c', cfg, '--state-dir', join(dir, 'auth')])
   expect(exitCode).toBe(0)
   expect(() => JSON.parse(stdout)).not.toThrow()
 })
@@ -97,7 +97,7 @@ const modelsConfig = (dir: string): string => {
 test('models lists exposed model ids one per line', async () => {
   const dir = tmp()
   const cfg = modelsConfig(dir)
-  const { stdout, exitCode } = await run(['models', '-c', cfg, '--auth-dir', join(dir, 'auth')])
+  const { stdout, exitCode } = await run(['models', '-c', cfg, '--state-dir', join(dir, 'auth')])
   expect(exitCode).toBe(0)
   expect(stdout.trim()).toBe('default')
 })
@@ -110,7 +110,7 @@ test('models list matches models output', async () => {
     'list',
     '-c',
     cfg,
-    '--auth-dir',
+    '--state-dir',
     join(dir, 'auth')
   ])
   expect(exitCode).toBe(0)
@@ -126,7 +126,7 @@ test('models show prints JSON with id and projection keys', async () => {
     'default',
     '-c',
     cfg,
-    '--auth-dir',
+    '--state-dir',
     join(dir, 'auth')
   ])
   expect(exitCode).toBe(0)
@@ -146,7 +146,7 @@ test('models show missing exits non-zero with a clear message', async () => {
     'nope',
     '-c',
     cfg,
-    '--auth-dir',
+    '--state-dir',
     join(dir, 'auth')
   ])
   expect(exitCode).not.toBe(0)
@@ -188,7 +188,7 @@ test('models install claude --dry prints a human table and writes nothing', asyn
     'claude',
     '-c',
     cfg,
-    '--auth-dir',
+    '--state-dir',
     join(dir, 'auth'),
     '--home-dir',
     home,
@@ -223,7 +223,7 @@ test('models install claude without pipeline.default fails', async () => {
     'claude',
     '-c',
     cfg,
-    '--auth-dir',
+    '--state-dir',
     join(dir, 'auth'),
     '--dry'
   ])
@@ -255,7 +255,7 @@ test('models install accepts a bare-list (non-exact) default pool', async () => 
     'claude',
     '-c',
     cfg,
-    '--auth-dir',
+    '--state-dir',
     join(dir, 'auth'),
     '--home-dir',
     join(dir, 'home'),
@@ -275,7 +275,7 @@ test('models install codex --dry writes config.toml + model_catalog_json', async
     'codex',
     '-c',
     cfg,
-    '--auth-dir',
+    '--state-dir',
     join(dir, 'auth'),
     '--home-dir',
     home,
@@ -290,7 +290,7 @@ test('models install codex --dry writes config.toml + model_catalog_json', async
     'codex',
     '-c',
     cfg,
-    '--auth-dir',
+    '--state-dir',
     join(dir, 'auth'),
     '--home-dir',
     home
@@ -324,7 +324,7 @@ test('models install omp writes litellm discovery, all members, modelRoles.smol'
     'omp',
     '-c',
     cfg,
-    '--auth-dir',
+    '--state-dir',
     join(dir, 'auth'),
     '--home-dir',
     home
@@ -366,7 +366,7 @@ test('models install pi writes modelOverrides for all members + defaultModel', a
     'pi',
     '-c',
     cfg,
-    '--auth-dir',
+    '--state-dir',
     join(dir, 'auth'),
     '--home-dir',
     home
@@ -394,7 +394,7 @@ test('models install qwen writes all members as openai modelProviders array', as
     'qwen',
     '-c',
     cfg,
-    '--auth-dir',
+    '--state-dir',
     join(dir, 'auth'),
     '--home-dir',
     home
@@ -420,7 +420,7 @@ test('models install opencode writes provider models map + small_model', async (
     'opencode',
     '-c',
     cfg,
-    '--auth-dir',
+    '--state-dir',
     join(dir, 'auth'),
     '--home-dir',
     home
@@ -446,7 +446,7 @@ test('models install openclaw writes all members statically + wildcard', async (
     'openclaw',
     '-c',
     cfg,
-    '--auth-dir',
+    '--state-dir',
     join(dir, 'auth'),
     '--home-dir',
     home
@@ -484,7 +484,7 @@ test('models install openclaw merges, preserving other providers and comments', 
     'openclaw',
     '-c',
     cfg,
-    '--auth-dir',
+    '--state-dir',
     join(dir, 'auth'),
     '--home-dir',
     home
@@ -507,7 +507,7 @@ test('models install unknown agent exits 2', async () => {
     'bogus',
     '-c',
     cfg,
-    '--auth-dir',
+    '--state-dir',
     join(dir, 'auth'),
     '--dry'
   ])
@@ -523,7 +523,7 @@ test('models install with no agent lists the available agents', async () => {
     'install',
     '-c',
     cfg,
-    '--auth-dir',
+    '--state-dir',
     join(dir, 'auth')
   ])
   expect(exitCode).toBe(0)
@@ -564,7 +564,7 @@ test('models install dedups a model that is in both default and fast groups', as
     'claude',
     '-c',
     cfg,
-    '--auth-dir',
+    '--state-dir',
     join(dir, 'auth'),
     '--home-dir',
     home
@@ -585,7 +585,7 @@ test('models install claude (non-dry) writes availableModels + real main + haiku
     'claude',
     '-c',
     cfg,
-    '--auth-dir',
+    '--state-dir',
     join(dir, 'auth'),
     '--home-dir',
     home
@@ -627,7 +627,7 @@ test('models install claude merges into an existing settings.json, preserving co
     'claude',
     '-c',
     cfg,
-    '--auth-dir',
+    '--state-dir',
     join(dir, 'auth'),
     '--home-dir',
     home
@@ -649,7 +649,7 @@ test('models install zed writes the pi-route provider, default_model, and edit p
     'zed',
     '-c',
     cfg,
-    '--auth-dir',
+    '--state-dir',
     join(dir, 'auth'),
     '--home-dir',
     home
@@ -697,7 +697,7 @@ test('models install openclaw overwrites a legacy string agents.defaults.model',
     'openclaw',
     '-c',
     cfg,
-    '--auth-dir',
+    '--state-dir',
     join(dir, 'auth'),
     '--home-dir',
     home
@@ -723,7 +723,7 @@ test('models install openclaw preserves sibling keys when model is an object', a
     'openclaw',
     '-c',
     cfg,
-    '--auth-dir',
+    '--state-dir',
     join(dir, 'auth'),
     '--home-dir',
     home
@@ -736,6 +736,17 @@ test('models install openclaw preserves sibling keys when model is an object', a
   })
 })
 
+test('serve --port rejects a non-integer', async () => {
+  const proc = Bun.spawn(['bun', CLI, 'serve', '--port', 'abc'], {
+    stderr: 'pipe',
+    env: { ...process.env, PI_ROUTE_CONFIG: '/nonexistent-on-purpose.yml' }
+  })
+  const err = await new Response(proc.stderr).text()
+  await proc.exited
+  expect(proc.exitCode).toBe(2)
+  expect(err).toContain('--port must be an integer')
+})
+
 test('models install zed with no fast role omits edit_predictions and features', async () => {
   const dir = tmp()
   const cfg = modelsConfig(dir)
@@ -746,7 +757,7 @@ test('models install zed with no fast role omits edit_predictions and features',
     'zed',
     '-c',
     cfg,
-    '--auth-dir',
+    '--state-dir',
     join(dir, 'auth'),
     '--home-dir',
     home

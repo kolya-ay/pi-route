@@ -9,6 +9,7 @@ import { z } from 'zod'
 import { refreshAndStore, writeCredentials } from './auth/credentials'
 import { registerAllOAuthProviders } from './auth/register-all-oauth'
 import { AGENTS } from './cli/agents'
+import { generateCompletion } from './cli/completion'
 import { listModelIds, renderPlannedWrites, setupModels, showModel } from './cli/models'
 import { formatProviderList, removeCredential, upsertProviderBlock } from './cli/provider-config'
 import { formatTable, runStats } from './cli/stats'
@@ -28,10 +29,10 @@ import type { CredentialFile } from './types'
 const usageError = (message: string): Error =>
   Object.assign(new Error(message), { name: 'CACError' })
 
-const toOverrides = (options: { config?: string; authDir?: string }): EnvPathOverrides => {
+const toOverrides = (options: { config?: string; stateDir?: string }): EnvPathOverrides => {
   const overrides: EnvPathOverrides = {}
   if (options.config) overrides.configPath = options.config
-  if (options.authDir) overrides.authDir = options.authDir
+  if (options.stateDir) overrides.stateDir = options.stateDir
   return overrides
 }
 
@@ -59,13 +60,13 @@ const cli = cac('pi-route')
 
 cli.option(
   '-c, --config <path>',
-  'Config file path (default: $XDG_CONFIG_HOME/pi-route/config.yaml)'
+  'Config file path (default: $XDG_CONFIG_HOME/pi-route.yml, or /etc/pi-route.yml as root)'
 )
-cli.option('--auth-dir <dir>', 'Auth/credentials directory')
+cli.option('--state-dir <dir>', 'Credentials/state directory')
 
 type ProviderOpts = {
   config?: string
-  authDir?: string
+  stateDir?: string
   url?: string
   key?: string
   keyEnv?: string
@@ -96,7 +97,7 @@ const providerAuth = async (
   const credentialFile: CredentialFile = { ...creds, provider: oauthId }
   // OAuth ids map 1:1 to the config `type`, except antigravity (id google-antigravity).
   const configType = oauthId === 'google-antigravity' ? 'antigravity' : oauthId
-  await writeCredentials(env.authDir, credentialName(configType, name), credentialFile)
+  await writeCredentials(env.stateDir, credentialName(configType, name), credentialFile)
   await upsertProviderBlock(env.configPath, name, { type: configType, account: name })
   console.log(`Logged in + registered provider "${name}" (${configType})`)
 }
@@ -119,12 +120,12 @@ const providerSet = async (env: EnvConfig, name: string, opts: ProviderOpts): Pr
 
 const providerRefresh = async (env: EnvConfig, name: string): Promise<void> => {
   registerAllOAuthProviders()
-  const { options, state: runtime } = await loadConfig(env.configPath, env.authDir)
+  const { options, state: runtime } = await loadConfig(env.configPath, env.stateDir)
   const account = options.providers[name]?.account
   if (account?.credential !== 'oauth') {
     throw usageError(`provider "${name}" has no OAuth credential to refresh`)
   }
-  const state = createState(options, buildCatalog(options), runtime, env.authDir)
+  const state = createState(options, buildCatalog(options), runtime, env.stateDir)
   await refreshAndStore(state, account, createTel())
   console.log(`Refreshed ${name}`)
 }
@@ -132,19 +133,19 @@ const providerRefresh = async (env: EnvConfig, name: string): Promise<void> => {
 const providerLogout = async (env: EnvConfig, name: string): Promise<void> => {
   // The file is `<type>-<account>.json`; only the config knows the type, so resolve
   // the account's derived name (credentialName) rather than guessing from `name`.
-  const { options } = await loadConfig(env.configPath, env.authDir)
+  const { options } = await loadConfig(env.configPath, env.stateDir)
   const account = options.providers[name]?.account
   if (account?.credential !== 'oauth') {
     console.log(`No OAuth credential for ${name}`)
     return
   }
-  const removed = removeCredential(env.authDir, account.name)
+  const removed = removeCredential(env.stateDir, account.name)
   console.log(removed ? `Removed credential ${name}` : `No credential file for ${name}`)
 }
 
 const printProviderList = async (env: EnvConfig): Promise<void> => {
-  const { options } = await loadConfig(env.configPath, env.authDir)
-  const runtime = await readRuntimeState(env.authDir)
+  const { options } = await loadConfig(env.configPath, env.stateDir)
+  const runtime = await readRuntimeState(env.stateDir)
   const invalid = new Set(
     Object.entries(runtime.accounts)
       .filter(([, v]) => v.isInvalid)
@@ -187,28 +188,49 @@ cli
 
 cli
   .command('serve', 'Start the HTTP server')
+  .option('--port <port>', 'Listen port (overrides PI_ROUTE_PORT)')
+  .option('--host <host>', 'Listen host (overrides PI_ROUTE_HOST)')
   .option('--watch', 'Reload config on file changes (also enabled by PI_ROUTE_WATCH=1)')
-  .action(async (options: { config?: string; authDir?: string; watch?: boolean }) => {
-    await import('./serve').then((m) =>
-      m.startServer(toOverrides(options), { watch: options.watch === true })
-    )
-  })
+  .action(
+    async (options: {
+      config?: string
+      stateDir?: string
+      port?: string
+      host?: string
+      watch?: boolean
+    }) => {
+      const overrides = toOverrides(options)
+      if (options.port !== undefined) {
+        const port = Number(options.port)
+        if (!Number.isInteger(port))
+          throw usageError(`--port must be an integer, got "${options.port}"`)
+        overrides.port = port
+      }
+      if (options.host !== undefined) overrides.host = options.host
+      await import('./serve').then((m) =>
+        m.startServer(overrides, { watch: options.watch === true })
+      )
+    }
+  )
 
 cli
   .command('limits', 'Print a rate-limit snapshot as JSON')
-  .action(async (options: { config?: string; authDir?: string }) => {
+  .action(async (options: { config?: string; stateDir?: string }) => {
     registerAllOAuthProviders()
     const env = readEnvConfig(toOverrides(options))
-    const { options: routerOptions, state: runtime } = await loadConfig(env.configPath, env.authDir)
+    const { options: routerOptions, state: runtime } = await loadConfig(
+      env.configPath,
+      env.stateDir
+    )
     const catalog = buildCatalog(routerOptions)
-    const state = createState(routerOptions, catalog, runtime, env.authDir)
+    const state = createState(routerOptions, catalog, runtime, env.stateDir)
     const snapshot = await collectLimitsSnapshot(state, createTel())
     console.log(JSON.stringify(snapshot, null, 2))
   })
 
-const loadRouterOptions = async (options: { config?: string; authDir?: string }) => {
+const loadRouterOptions = async (options: { config?: string; stateDir?: string }) => {
   const env = readEnvConfig(toOverrides(options))
-  const { options: routerOptions } = await loadConfig(env.configPath, env.authDir)
+  const { options: routerOptions } = await loadConfig(env.configPath, env.stateDir)
   return routerOptions
 }
 
@@ -222,7 +244,7 @@ cli
     async (
       sub: string | undefined,
       model: string | undefined,
-      options: { config?: string; authDir?: string; homeDir?: string; dry?: boolean }
+      options: { config?: string; stateDir?: string; homeDir?: string; dry?: boolean }
     ) => {
       const routerOptions = await loadRouterOptions(options)
       if (sub === 'show') {
@@ -291,6 +313,15 @@ cli.command('query', 'Deprecated: use the OTel viewer UI').action(() => {
     ].join('\n')
   )
 })
+
+cli
+  .command('completion [shell]', 'Print a shell completion script (bash|zsh|fish)')
+  .action((shell: string | undefined) => {
+    if (shell !== 'bash' && shell !== 'zsh' && shell !== 'fish') {
+      throw usageError('usage: pi-route completion <bash|zsh|fish>')
+    }
+    console.log(generateCompletion(cli, shell))
+  })
 
 cli.help()
 cli.version(pkg.version)

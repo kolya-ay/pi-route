@@ -21,40 +21,43 @@ export const startServer = async (
   })
   console.log(`Router listening on http://${server.hostname}:${server.port}`)
 
-  const watchEnabled = opts.watch === true || process.env.PI_ROUTE_WATCH === '1'
-  if (watchEnabled) {
-    // Serialize reloads: createApp does network I/O, so two rapid saves could
-    // otherwise race on `current` — serving stale config and leaking the newer
-    // state's refresh timers. A reload in flight defers the next to one re-run.
-    let reloading = false
-    let again = false
-    const reload = async (): Promise<void> => {
-      if (reloading) {
-        again = true
-        return
-      }
-      reloading = true
-      try {
-        const next = await createApp(appOpts, overrides)
-        const previous = current
-        server.reload({ fetch: next.app.fetch })
-        // Cancel the just-replaced state's refresh timers so they don't
-        // double-schedule alongside the new state's.
-        for (const name of [...previous.timers.keys()]) cancelRefresh(previous, name)
-        current = next
-        console.log('Config reloaded')
-      } catch (error) {
-        console.error(
-          `Config reload failed — keeping previous config: ${error instanceof Error ? error.message : String(error)}`
-        )
-      } finally {
-        reloading = false
-        if (again) {
-          again = false
-          void reload()
-        }
+  // Serialize reloads: createApp does network I/O, so two rapid triggers could
+  // otherwise race on `current` — serving stale config and leaking the newer
+  // state's refresh timers. A reload in flight defers the next to one re-run.
+  let reloading = false
+  let again = false
+  const reload = async (): Promise<void> => {
+    if (reloading) {
+      again = true
+      return
+    }
+    reloading = true
+    try {
+      const next = await createApp(appOpts, overrides)
+      const previous = current
+      server.reload({ fetch: next.app.fetch })
+      for (const name of [...previous.timers.keys()]) cancelRefresh(previous, name)
+      current = next
+      console.log('Config reloaded')
+    } catch (error) {
+      console.error(
+        `Config reload failed — keeping previous config: ${error instanceof Error ? error.message : String(error)}`
+      )
+    } finally {
+      reloading = false
+      if (again) {
+        again = false
+        void reload()
       }
     }
+  }
+
+  // SIGHUP is the production reload trigger (systemd ExecReload); always on.
+  process.on('SIGHUP', () => void reload())
+
+  // File-watch is a dev/opt-in convenience.
+  const watchEnabled = opts.watch === true || process.env.PI_ROUTE_WATCH === '1'
+  if (watchEnabled) {
     watchConfig(env.configPath, () => void reload())
     console.log(`Watching ${env.configPath} for changes`)
   }

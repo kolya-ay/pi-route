@@ -1,0 +1,16 @@
+[Unit]
+Description=pi-route (user)
+After=network-online.target
+
+[Service]
+Type=exec
+ExecStart=%h/.local/bin/pi-route serve
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+StateDirectory=pi-route
+
+# No LoadCredential in --user units: set the token via the environment or config.
+# Environment=PI_ROUTE_AUTH_TOKEN=sk-...     # or `server.authToken` in the config
+
+[Install]
+WantedBy=default.target
