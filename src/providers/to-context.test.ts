@@ -6,7 +6,7 @@ import type {
   TextContent,
   ToolCall,
   ToolResultMessage
-} from '@mariozechner/pi-ai'
+} from '@earendil-works/pi-ai'
 
 import { anthropicToContext, openaiToContext, responsesToContext } from './to-context'
 

@@ -2,7 +2,7 @@
 
 import { Hono } from 'hono'
 
-import type { ProviderEntry } from '../providers/registry'
+import type { ProviderEntry } from '../types'
 
 import { createDispatchHandler } from './dispatch'
 

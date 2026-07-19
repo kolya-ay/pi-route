@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
+import { buildTestModels } from '../models/test-models'
 import { buildCatalog } from '../pipeline/catalog'
+import { createState } from '../state'
 import type { RouterOptions } from '../types'
 import { createModelsRoute } from './models'
 
@@ -12,10 +14,17 @@ const opts = (over: Partial<RouterOptions> = {}): RouterOptions => ({
   ...over
 })
 
+// createModelsRoute reads options/catalog/models from state at request time.
+const routeFor = (o: RouterOptions) => {
+  const models = buildTestModels(o)
+  const state = createState(o, buildCatalog(o, models), models, { accounts: {} }, '/tmp')
+  return createModelsRoute(state)
+}
+
 describe('/v1/models', () => {
   test('emits OpenAI envelope', async () => {
     const o = opts()
-    const app = createModelsRoute(o, buildCatalog(o))
+    const app = routeFor(o)
     const r = await app.request('/')
     const body = (await r.json()) as { object: string; data: { id: string }[] }
     expect(body.object).toBe('list')
@@ -25,7 +34,7 @@ describe('/v1/models', () => {
 
   test('every entry has id and object', async () => {
     const o = opts()
-    const app = createModelsRoute(o, buildCatalog(o))
+    const app = routeFor(o)
     const r = await app.request('/')
     const body = (await r.json()) as { data: Record<string, unknown>[] }
     for (const e of body.data) {
@@ -39,7 +48,7 @@ describe('/v1/models', () => {
       pipeline: [{ kind: 'alias', name: 'opus', target: 'cerebras/llama-3.3-70b' }],
       expose: ['opus']
     })
-    const app = createModelsRoute(o, buildCatalog(o))
+    const app = routeFor(o)
     const r = await app.request('/')
     const body = (await r.json()) as { data: { id: string }[] }
     expect(body.data.map((e) => e.id)).toEqual(['opus'])
@@ -47,7 +56,7 @@ describe('/v1/models', () => {
 
   test('expose filter (allow-then-exclude)', async () => {
     const o = opts({ expose: ['**', '!cerebras/llama3.1-8b'] })
-    const app = createModelsRoute(o, buildCatalog(o))
+    const app = routeFor(o)
     const r = await app.request('/')
     const body = (await r.json()) as { data: { id: string }[] }
     expect(body.data.some((e) => e.id === 'cerebras/llama3.1-8b')).toBe(false)
@@ -55,7 +64,7 @@ describe('/v1/models', () => {
 
   test('emits pricing as per-token string when pi-ai has cost', async () => {
     const o = opts()
-    const app = createModelsRoute(o, buildCatalog(o))
+    const app = routeFor(o)
     const r = await app.request('/')
     const body = (await r.json()) as { data: { pricing?: { prompt: string } }[] }
     const withPricing = body.data.find((e) => e.pricing?.prompt !== undefined)
@@ -67,7 +76,7 @@ describe('/v1/models', () => {
 
   test('route body is stable across requests', async () => {
     const o = opts()
-    const app = createModelsRoute(o, buildCatalog(o))
+    const app = routeFor(o)
     const a = await (await app.request('/')).json()
     const b = await (await app.request('/')).json()
     expect(a).toEqual(b)
@@ -77,7 +86,7 @@ describe('/v1/models', () => {
 describe('/v1/models — enriched fields', () => {
   test('route emits enriched Vercel keys for known leaves', async () => {
     const o = opts()
-    const app = createModelsRoute(o, buildCatalog(o))
+    const app = routeFor(o)
     const r = await app.request('/')
     const body = (await r.json()) as {
       data: Array<{ context_length?: number; context_window?: number }>

@@ -1,6 +1,6 @@
 // src/providers/to-sse.ts
 
-import type { AssistantMessage, AssistantMessageEvent, ToolCall } from '@mariozechner/pi-ai'
+import type { AssistantMessage, AssistantMessageEvent, ToolCall } from '@earendil-works/pi-ai'
 
 import type { IncomingRequest } from '../types'
 

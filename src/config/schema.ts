@@ -41,7 +41,7 @@ const ProviderSchema = z
     apiKey: z.string().optional(),
     account: AccountValueSchema.optional(),
     disabled: z.boolean().optional(),
-    discover: z.array(DiscoverStrategySchema).optional(),
+    discover: z.union([z.literal(false), z.array(DiscoverStrategySchema)]).optional(),
     modelOverrides: z.record(z.string(), ModelMetaOverrideSchema).optional()
   })
   .refine((p) => (p.apiKey === undefined) !== (p.account === undefined), {

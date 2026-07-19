@@ -1,4 +1,4 @@
-import { getModels } from '@mariozechner/pi-ai'
+import type { Models } from '@earendil-works/pi-ai'
 
 import type { RouterOptions } from '../types'
 import { hasGlobMetachars } from './match'
@@ -23,22 +23,14 @@ export type Catalog = {
   liveMeta: Map<string, ModelMeta> // address -> live-fetched metadata (empty until enriched)
 }
 
-const safeGetModels = (type: string): { id: string }[] => {
-  try {
-    return getModels(type as Parameters<typeof getModels>[0]) as { id: string }[]
-  } catch {
-    return []
-  }
-}
-
-export const buildCatalog = (opts: RouterOptions): Catalog => {
+export const buildCatalog = (opts: RouterOptions, models: Models): Catalog => {
   const addresses = new Set<string>()
   const leafFor = new Map<string, string>()
   const liveMeta = new Map<string, ModelMeta>()
 
-  // 1. Provider leaf addresses from pi-ai
-  for (const [name, p] of Object.entries(opts.providers)) {
-    for (const m of safeGetModels(p.type)) {
+  // 1. Provider leaf addresses from the Models collection (keyed by config name)
+  for (const name of Object.keys(opts.providers)) {
+    for (const m of models.getModels(name)) {
       const addr = `${name}/${m.id}`
       addresses.add(addr)
       leafFor.set(addr, addr)

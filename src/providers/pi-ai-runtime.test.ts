@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
-import { createAssistantMessageEventStream } from '@mariozechner/pi-ai'
-import type { Account, IncomingRequest } from '../types'
+import { createAssistantMessageEventStream } from '@earendil-works/pi-ai'
+import type { IncomingRequest } from '../types'
 import { capMaxTokens, jsonResponse, makeMetadata, streamingResponse } from './pi-ai-runtime'
 
 describe('capMaxTokens', () => {
@@ -47,20 +47,17 @@ describe('makeMetadata', () => {
     stream: false
   } as IncomingRequest
 
-  it('builds metadata with account name when present', () => {
-    const account: Account = { credential: 'oauth', name: 'me@example.com' }
+  it('builds metadata from the request and provider name', () => {
     const start = Date.now() - 250
-    const m = makeMetadata(baseRequest, 'prov-1', account, start)
+    const m = makeMetadata(baseRequest, 'prov-1', start)
     expect(m.requestId).toBe('req-1')
     expect(m.provider).toBe('prov-1')
     expect(m.model).toBe('mdl-1')
-    expect(m.account).toBe('me@example.com')
     expect(m.latencyMs).toBeGreaterThanOrEqual(0)
   })
 
-  it('omits account when credential has no name', () => {
-    const account: Account = { credential: 'key', key: 'sk-test' }
-    const m = makeMetadata(baseRequest, 'prov-1', account, Date.now())
+  it('does not set an account field', () => {
+    const m = makeMetadata(baseRequest, 'prov-1', Date.now())
     expect('account' in m).toBe(false)
   })
 })

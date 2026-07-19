@@ -3,6 +3,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readRuntimeState } from '../config/state'
+import { buildTestModels } from '../models/test-models'
 import { buildCatalog } from '../pipeline/catalog'
 import { createState, type RouterState } from '../state'
 import type { RouterOptions } from '../types'
@@ -21,8 +22,10 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'pi-admin-'))
 })
 
-const mkState = (options: RouterOptions = baseOpts): RouterState =>
-  createState(options, buildCatalog(options), { accounts: {} }, dir)
+const mkState = (options: RouterOptions = baseOpts): RouterState => {
+  const models = buildTestModels(options)
+  return createState(options, buildCatalog(options, models), models, { accounts: {} }, dir)
+}
 
 describe('admin/accounts', () => {
   test('listAccounts returns one entry per provider', () => {

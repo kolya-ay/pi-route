@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 
-import { createAssistantMessageEventStream } from '@mariozechner/pi-ai'
+import { createAssistantMessageEventStream } from '@earendil-works/pi-ai'
 
 import { wrapStreamForMetrics } from './stream-metrics'
 import { createTel } from './tel'

@@ -1,25 +1,29 @@
 // src/routes/dispatch.test.ts
 
 import { describe, expect, test } from 'bun:test'
+import type { MutableModels } from '@earendil-works/pi-ai'
 import { Hono } from 'hono'
 import { timing } from 'hono/timing'
 import { buildCatalog } from '../pipeline/catalog'
-import type { ProviderEntry } from '../providers/registry'
 import { createState } from '../state'
 import type { Env } from '../telemetry/hono-env'
 import { createTel } from '../telemetry/tel'
 import { useTestExporter } from '../telemetry/test-fixture'
-import type { Account, Provider, RouterOptions } from '../types'
+import type { Account, Provider, ProviderEntry, RouterOptions } from '../types'
 import { createDispatchHandler } from './dispatch'
 
 const exporter = useTestExporter()
+
+// Dispatch routes on pipeline-literal addresses and a mock registry, so the
+// catalog needs no real provider catalogs — a Models stub with empty listings.
+const stubModels = { getModels: () => [], getModel: () => undefined } as unknown as MutableModels
 
 // Each request gets a root span via tel.withSpan('http.server.request', …) so
 // provider_fallback / provider_error_final events have a parent to attach to,
 // mirroring the @hono/otel middleware that wraps requests in production.
 const mkApp = (options: RouterOptions, registry: Map<string, ProviderEntry>): Hono<Env> => {
-  const catalog = buildCatalog(options)
-  const state = createState(options, catalog, { accounts: {} }, '/tmp')
+  const catalog = buildCatalog(options, stubModels)
+  const state = createState(options, catalog, stubModels, { accounts: {} }, '/tmp')
   const tel = createTel()
   const app = new Hono<Env>()
   app.use('*', timing())

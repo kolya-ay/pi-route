@@ -205,6 +205,20 @@ describe('provider discover + modelOverrides', () => {
     })
   })
 
+  test('discover: false parses through as an opt-out', () => {
+    const opts = parseConfig({
+      providers: {
+        chutes: {
+          type: 'openai-compatible',
+          baseUrl: 'https://llm.chutes.ai/v1',
+          apiKey: 'x',
+          discover: false
+        }
+      }
+    })
+    expect(opts.providers.chutes!.discover).toBe(false)
+  })
+
   test('rejects an unknown discover strategy', () => {
     expect(() =>
       parseConfig({

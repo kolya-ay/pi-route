@@ -1,3 +1,4 @@
+import type { Models } from '@earendil-works/pi-ai'
 import type { Catalog } from '../pipeline/catalog'
 import type { RouterOptions } from '../types'
 import {
@@ -7,16 +8,17 @@ import {
   toModelsDevModel
 } from './model-projection'
 
-// Boot-computable: the models map (keyed by pi-route address).
+// The models map (keyed by pi-route address).
 export const buildOpencodeModels = (
   options: RouterOptions,
-  catalog: Catalog
+  catalog: Catalog,
+  models: Models
 ): Record<string, ModelsDevModel> =>
   Object.fromEntries(
     exposedAddresses(options, catalog)
       .map((addr): [string, ModelsDevModel | null] => [
         addr,
-        toModelsDevModel(resolveModel(options, catalog, addr))
+        toModelsDevModel(resolveModel(options, catalog, models, addr))
       ])
       .filter((e): e is [string, ModelsDevModel] => e[1] !== null)
   )

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Hono } from 'hono'
 import { readRuntimeState } from '../config/state'
+import { buildTestModels } from '../models/test-models'
 import { buildCatalog } from '../pipeline/catalog'
 import { createState, type RouterState } from '../state'
 import type { RouterOptions } from '../types'
@@ -27,7 +28,8 @@ beforeEach(async () => {
 const mkApp = (
   options: RouterOptions = baseOpts
 ): { app: Hono<{ Variables: { requestId: string } }>; state: RouterState } => {
-  const state = createState(options, buildCatalog(options), { accounts: {} }, dir)
+  const models = buildTestModels(options)
+  const state = createState(options, buildCatalog(options, models), models, { accounts: {} }, dir)
   const app = new Hono<{ Variables: { requestId: string } }>()
   mountAdmin(app, state, { authKey })
   return { app, state }

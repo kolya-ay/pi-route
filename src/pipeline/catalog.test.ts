@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { buildTestModels } from '../models/test-models'
 import type { RouterOptions } from '../types'
 import { buildCatalog } from './catalog'
 
@@ -9,9 +10,12 @@ const baseOpts = (over: Partial<RouterOptions> = {}): RouterOptions => ({
   ...over
 })
 
+// Build the catalog against a real Models over the same options.
+const build = (o: RouterOptions) => buildCatalog(o, buildTestModels(o))
+
 describe('buildCatalog', () => {
-  test('adds pi-ai catalog addresses for known provider types', () => {
-    const c = buildCatalog(
+  test('adds catalog addresses for known provider types', () => {
+    const c = build(
       baseOpts({
         providers: {
           cerebras: { type: 'cerebras', account: { credential: 'key', key: 'k' } }
@@ -21,11 +25,26 @@ describe('buildCatalog', () => {
     expect([...c.addresses].some((a) => a.startsWith('cerebras/'))).toBe(true)
   })
 
-  test('adds literal pipeline targets without globs', () => {
-    const c = buildCatalog(
+  test('anthropic provider surfaces cc/claude-opus-4-8', () => {
+    const c = build(
       baseOpts({
         providers: {
-          chutes: { type: 'openai-compatible', account: { credential: 'key', key: 'k' } }
+          cc: { type: 'anthropic', account: { credential: 'oauth', name: 'anthropic-cc' } }
+        }
+      })
+    )
+    expect(c.addresses.has('cc/claude-opus-4-8')).toBe(true)
+  })
+
+  test('adds literal pipeline targets without globs', () => {
+    const c = build(
+      baseOpts({
+        providers: {
+          chutes: {
+            type: 'openai-compatible',
+            baseUrl: 'https://llm.chutes.ai/v1',
+            account: { credential: 'key', key: 'k' }
+          }
         },
         pipeline: [{ kind: 'alias', name: 'opus', target: 'chutes/zai-org/GLM-5.1-TEE' }]
       })
@@ -34,7 +53,7 @@ describe('buildCatalog', () => {
   })
 
   test('alias names are addressable', () => {
-    const c = buildCatalog(
+    const c = build(
       baseOpts({
         pipeline: [{ kind: 'alias', name: 'opus', target: 'foo/bar' }]
       })
@@ -43,7 +62,7 @@ describe('buildCatalog', () => {
   })
 
   test('pool prefix addresses are addressable', () => {
-    const c = buildCatalog(
+    const c = build(
       baseOpts({
         providers: { p: { type: 'cerebras', account: { credential: 'key', key: 'k' } } },
         pipeline: [
@@ -66,7 +85,7 @@ describe('buildCatalog', () => {
     }
   })
   test('exact-match pools do not derive prefix addresses', () => {
-    const c = buildCatalog(
+    const c = build(
       baseOpts({
         providers: { p: { type: 'cerebras', account: { credential: 'key', key: 'k' } } },
         pipeline: [
@@ -91,7 +110,7 @@ describe('buildCatalog', () => {
   })
 
   test('exact-match default pool targeting a provider leaf is only addressable by bare default', () => {
-    const c = buildCatalog(
+    const c = build(
       baseOpts({
         providers: { p: { type: 'cerebras', account: { credential: 'key', key: 'k' } } },
         pipeline: [
@@ -110,7 +129,7 @@ describe('buildCatalog', () => {
   })
 
   test('alias leafFor resolves one hop', () => {
-    const c = buildCatalog(
+    const c = build(
       baseOpts({
         providers: { p: { type: 'cerebras', account: { credential: 'key', key: 'k' } } },
         pipeline: [{ kind: 'alias', name: 'opus', target: 'p/some-specific-model' }]

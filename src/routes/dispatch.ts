@@ -5,13 +5,13 @@ import type { Context } from 'hono'
 import { stream as honoStream } from 'hono/streaming'
 import { endTime, startTime } from 'hono/timing'
 
-import { resolveKey } from '../auth/resolve'
 import { readEnvConfig } from '../config/env'
 import { resolveCandidates } from '../pipeline/resolve'
-import type { ProviderEntry } from '../providers/registry'
+import { DispatchAuthError } from '../providers/models-dispatch'
 import { buildRequestCaptureAttrs, type CaptureOpts } from '../telemetry/capture'
 import type { Env } from '../telemetry/hono-env'
 import { extractSessionId } from '../telemetry/session-id'
+import type { ProviderEntry } from '../types'
 
 // Headers that must not flow from an incoming client request to the outgoing
 // upstream-provider request:
@@ -155,7 +155,9 @@ export const createDispatchHandler = (deps: DispatchDeps) => {
         },
         async (span): Promise<Response | null> => {
           try {
-            const apiKey = await resolveKey(state, safeEntry.account, tel)
+            // Models-backed providers resolve auth inside models.stream() and ignore
+            // this arg; passthrough/openai providers need their configured key.
+            const apiKey = safeEntry.account.credential === 'key' ? safeEntry.account.key : ''
             const response = await safeEntry.provider.dispatch(
               {
                 id: requestId,
@@ -217,6 +219,9 @@ export const createDispatchHandler = (deps: DispatchDeps) => {
           } catch (err: unknown) {
             const message = err instanceof Error ? err.message.slice(0, 200) : String(err)
             span.addEvent('provider_error', { 'error.message': message })
+            // An OAuth failure won't be fixed by the next candidate — short-circuit
+            // to 401 instead of failing over and masking it as a 502.
+            if (err instanceof DispatchAuthError) return c.json({ error: err.message }, 401)
             lastErr = err
             emitFallback(message)
             return null
@@ -236,6 +241,8 @@ export const createDispatchHandler = (deps: DispatchDeps) => {
       'pi.provider': lastProvider,
       'error.message': message
     })
-    return c.json({ error: message }, 502)
+    // A model the backend doesn't know is a 404, not an upstream 502.
+    const status: 404 | 502 = message.startsWith('model not found:') ? 404 : 502
+    return c.json({ error: message }, status)
   }
 }

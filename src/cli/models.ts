@@ -1,6 +1,7 @@
 // src/cli/models.ts
 
 import { homedir } from 'node:os'
+import type { Models } from '@earendil-works/pi-ai'
 
 import { buildCatalog, type Catalog } from '../pipeline/catalog'
 import { exposeIncludes } from '../pipeline/match'
@@ -29,15 +30,15 @@ export type ModelView = {
   modelsDev: ModelsDevModel | null
 }
 
-export const listModelIds = (options: RouterOptions): string[] =>
-  exposedAddresses(options, buildCatalog(options))
+export const listModelIds = (options: RouterOptions, models: Models): string[] =>
+  exposedAddresses(options, buildCatalog(options, models))
 
-export const showModel = (options: RouterOptions, id: string): ModelView => {
-  const catalog: Catalog = buildCatalog(options)
+export const showModel = (options: RouterOptions, models: Models, id: string): ModelView => {
+  const catalog: Catalog = buildCatalog(options, models)
   if (!exposeIncludes(options.expose, id) || !catalog.addresses.has(id)) {
     throw new Error(`Model not exposed: ${id}`)
   }
-  const resolved = resolveModel(options, catalog, id)
+  const resolved = resolveModel(options, catalog, models, id)
   return {
     id,
     leaf: catalog.leafFor.get(id) ?? id,
@@ -56,6 +57,7 @@ const isPlain = (item: string): boolean =>
 const roleModels = (
   options: RouterOptions,
   catalog: Catalog,
+  models: Models,
   role: 'default' | 'fast'
 ): RoleModel[] => {
   const entry = options.pipeline.find((p) => p.name === role && p.kind === 'pool')
@@ -64,7 +66,7 @@ const roleModels = (
     // The target (as written) is the real backend address the client sends;
     // the leaf provides metadata.
     const leaf = catalog.leafFor.get(target) ?? target
-    const { provider, model } = resolveModel(options, catalog, leaf)
+    const { provider, model } = resolveModel(options, catalog, models, leaf)
     // Prefix the bare name (not `leaf`, which already carries the provider) so the
     // metadata-miss fallback doesn't double it: `Cerebras/gpt-oss-120b`.
     const bare = model?.name ?? leaf.slice(leaf.indexOf('/') + 1)
@@ -88,17 +90,18 @@ export const renderPlannedWrites = (writes: PlannedWrite[]): string =>
 
 export const setupModels = async (
   options: RouterOptions,
+  models: Models,
   agentName: string,
   opts: { homeDir?: string; dry?: boolean; url: string }
 ): Promise<PlannedWrite[]> => {
   const agent = AGENTS.find((a) => a.name === agentName)
   if (!agent) throw new Error(`unknown agent: ${agentName}`)
   const home = opts.homeDir ?? homedir()
-  const catalog = buildCatalog(options)
-  const defaults = roleModels(options, catalog, 'default')
+  const catalog = buildCatalog(options, models)
+  const defaults = roleModels(options, catalog, models, 'default')
   const main = defaults[0]
   if (!main) throw new Error('Missing pipeline.default exact-match role')
-  const fasts = roleModels(options, catalog, 'fast')
+  const fasts = roleModels(options, catalog, models, 'fast')
   const all = dedupById([...defaults, ...fasts])
   const writes = await agent.write({
     url: opts.url,

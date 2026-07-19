@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test'
+import { buildTestModels } from './models/test-models'
 import { buildCatalog } from './pipeline/catalog'
 import { createState } from './state'
 import type { RouterOptions } from './types'
@@ -12,16 +13,15 @@ const minimalOptions: RouterOptions = {
 }
 
 describe('createState', () => {
-  it('returns state with provided options and empty Maps', () => {
-    const catalog = buildCatalog(minimalOptions)
+  it('returns state with provided options', () => {
+    const models = buildTestModels(minimalOptions)
+    const catalog = buildCatalog(minimalOptions, models)
     const runtime = { accounts: {} }
-    const state = createState(minimalOptions, catalog, runtime, '/tmp/auth')
+    const state = createState(minimalOptions, catalog, models, runtime, '/tmp/auth')
     expect(state.options).toBe(minimalOptions)
     expect(state.catalog).toBe(catalog)
+    expect(state.models).toBe(models)
     expect(state.runtime).toBe(runtime)
     expect(state.authDir).toBe('/tmp/auth')
-    expect(state.credentials.size).toBe(0)
-    expect(state.timers.size).toBe(0)
-    expect(state.refreshFailures.size).toBe(0)
   })
 })

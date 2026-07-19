@@ -2,12 +2,10 @@
 
 // src/cli.ts
 
-import { getOAuthProvider, type OAuthCredentials } from '@mariozechner/pi-ai/oauth'
+import type { AuthEvent, AuthInteraction, AuthPrompt } from '@earendil-works/pi-ai'
 import cac from 'cac'
 import { z } from 'zod'
 
-import { refreshAndStore, writeCredentials } from './auth/credentials'
-import { registerAllOAuthProviders } from './auth/register-all-oauth'
 import { AGENTS } from './cli/agents'
 import { generateCompletion } from './cli/completion'
 import { listModelIds, renderPlannedWrites, setupModels, showModel } from './cli/models'
@@ -19,10 +17,10 @@ import { loadConfig } from './config/loader'
 import { credentialName } from './config/schema'
 import { readRuntimeState } from './config/state'
 import { collectLimitsSnapshot } from './limits'
+import { buildModels } from './models/build'
 import { buildCatalog } from './pipeline/catalog'
 import { createState } from './state'
-import { createTel } from './telemetry/tel'
-import type { CredentialFile } from './types'
+import type { Account, RouterOptions } from './types'
 
 // cac tags its own arg/option errors with name 'CACError' (not exported). Reuse that
 // name so self-raised usage errors share the exit-2 path — no bespoke error type.
@@ -73,31 +71,44 @@ type ProviderOpts = {
   type?: string
 }
 
+// pi-ai login interaction over stdin/stdout: print auth URLs / progress, read a
+// line for any prompt. Bun's global prompt() reads a single line synchronously.
+const stdinInteraction = (): AuthInteraction => ({
+  notify(event: AuthEvent): void {
+    if (event.type === 'auth_url') {
+      console.error(`Open in browser: ${event.url}`)
+      if (event.instructions) console.error(event.instructions)
+      tryOpen(event.url)
+    } else if (event.type === 'device_code') {
+      console.error(`Enter code ${event.userCode} at ${event.verificationUri}`)
+    } else {
+      console.error(`… ${event.message}`)
+    }
+  },
+  async prompt(prompt: AuthPrompt): Promise<string> {
+    return globalThis.prompt(prompt.message) ?? ''
+  }
+})
+
 const providerAuth = async (
   env: EnvConfig,
   name: string,
   typeArg: string | undefined
 ): Promise<void> => {
-  registerAllOAuthProviders()
-  const oauthId = typeArg ?? name
-  const provider = getOAuthProvider(oauthId)
-  if (!provider) {
-    throw usageError(
-      `unknown OAuth provider type "${oauthId}" — pass one: pi-route provider ${name} auth <type>`
-    )
+  const configType = typeArg ?? name
+  // Synthesize a one-provider config so the CredentialStore writes to the same
+  // `<type>-<account>.json` file the loader resolves for a configured provider.
+  const account: Account = { credential: 'oauth', name: credentialName(configType, name) }
+  const options: RouterOptions = {
+    providers: { [name]: { type: configType, account } },
+    pipeline: [],
+    expose: []
   }
-  const creds: OAuthCredentials = await provider.login({
-    onAuth: ({ url }: { url: string }) => {
-      console.error(`Open in browser: ${url}`)
-      tryOpen(url)
-    },
-    onPrompt: async () => '',
-    onProgress: (msg: string) => console.error(`… ${msg}`)
-  })
-  const credentialFile: CredentialFile = { ...creds, provider: oauthId }
-  // OAuth ids map 1:1 to the config `type`, except antigravity (id google-antigravity).
-  const configType = oauthId === 'google-antigravity' ? 'antigravity' : oauthId
-  await writeCredentials(env.stateDir, credentialName(configType, name), credentialFile)
+  const models = buildModels(options, { stateDir: env.stateDir, authDir: env.stateDir })
+  if (!models.getProvider(name)?.auth.oauth) {
+    throw usageError(`provider type "${configType}" does not support OAuth login`)
+  }
+  await models.login(name, 'oauth', stdinInteraction())
   await upsertProviderBlock(env.configPath, name, { type: configType, account: name })
   console.log(`Logged in + registered provider "${name}" (${configType})`)
 }
@@ -119,14 +130,14 @@ const providerSet = async (env: EnvConfig, name: string, opts: ProviderOpts): Pr
 }
 
 const providerRefresh = async (env: EnvConfig, name: string): Promise<void> => {
-  registerAllOAuthProviders()
-  const { options, state: runtime } = await loadConfig(env.configPath, env.stateDir)
+  const { options } = await loadConfig(env.configPath, env.stateDir)
   const account = options.providers[name]?.account
   if (account?.credential !== 'oauth') {
     throw usageError(`provider "${name}" has no OAuth credential to refresh`)
   }
-  const state = createState(options, buildCatalog(options), runtime, env.stateDir)
-  await refreshAndStore(state, account, createTel())
+  const models = buildModels(options, { stateDir: env.stateDir, authDir: env.stateDir })
+  const auth = await models.getAuth(name)
+  if (!auth) throw usageError(`provider "${name}" is not authenticated`)
   console.log(`Refreshed ${name}`)
 }
 
@@ -216,15 +227,15 @@ cli
 cli
   .command('limits', 'Print a rate-limit snapshot as JSON')
   .action(async (options: { config?: string; stateDir?: string }) => {
-    registerAllOAuthProviders()
     const env = readEnvConfig(toOverrides(options))
     const { options: routerOptions, state: runtime } = await loadConfig(
       env.configPath,
       env.stateDir
     )
-    const catalog = buildCatalog(routerOptions)
-    const state = createState(routerOptions, catalog, runtime, env.stateDir)
-    const snapshot = await collectLimitsSnapshot(state, createTel())
+    const models = buildModels(routerOptions, { stateDir: env.stateDir, authDir: env.stateDir })
+    const catalog = buildCatalog(routerOptions, models)
+    const state = createState(routerOptions, catalog, models, runtime, env.stateDir)
+    const snapshot = await collectLimitsSnapshot(state)
     console.log(JSON.stringify(snapshot, null, 2))
   })
 
@@ -237,7 +248,10 @@ const loadRouterOptions = async (options: { config?: string; stateDir?: string }
 const agentNames = AGENTS.map((a) => a.name).join(', ')
 
 cli
-  .command('models [sub] [model]', `List / show / install models (install agents: ${agentNames})`)
+  .command(
+    'models [sub] [model]',
+    `List / show / install / refresh models (install agents: ${agentNames})`
+  )
   .option('--home-dir <dir>', 'Home directory for install (default: $HOME)')
   .option('--dry', 'Print planned writes without changing files')
   .action(
@@ -246,11 +260,23 @@ cli
       model: string | undefined,
       options: { config?: string; stateDir?: string; homeDir?: string; dry?: boolean }
     ) => {
+      const env = readEnvConfig(toOverrides(options))
       const routerOptions = await loadRouterOptions(options)
+      const models = buildModels(routerOptions, { stateDir: env.stateDir, authDir: env.stateDir })
+      if (sub === 'refresh') {
+        // Force a network fetch and persist; a running server picks the stores up
+        // at its next 4h cycle or on restart.
+        await models.refresh({ force: true })
+        for (const name of Object.keys(routerOptions.providers)) {
+          console.log(`${name}: ${models.getModels(name).length}`)
+        }
+        return
+      }
+      await models.refresh({ allowNetwork: false }) // offline restore for accurate listings
       if (sub === 'show') {
         if (!model)
           throw usageError('models show requires a model id: pi-route models show <model>')
-        console.log(JSON.stringify(showModel(routerOptions, model), null, 2))
+        console.log(JSON.stringify(showModel(routerOptions, models, model), null, 2))
         return
       }
       if (sub === 'install') {
@@ -268,21 +294,22 @@ cli
         // Bake pi-route's own URL into client configs (clients don't uniformly
         // expand shell vars). The token is a secret — it stays in the client's
         // PI_ROUTE_API_KEY / ANTHROPIC_AUTH_TOKEN env var, never written to a file.
-        const env = readEnvConfig(toOverrides(options))
         const host = env.host === '0.0.0.0' || env.host === '::' ? '127.0.0.1' : env.host
         const setupOpts: { dry: boolean; url: string; homeDir?: string } = {
           dry: Boolean(options.dry),
           url: `http://${host}:${env.port}`
         }
         if (options.homeDir) setupOpts.homeDir = options.homeDir
-        const writes = await setupModels(routerOptions, model, setupOpts)
+        const writes = await setupModels(routerOptions, models, model, setupOpts)
         if (options.dry) console.log(renderPlannedWrites(writes))
         return
       }
       if (sub !== undefined && sub !== 'list') {
-        throw usageError(`unknown models subcommand: "${sub}" (expected: list | show | install)`)
+        throw usageError(
+          `unknown models subcommand: "${sub}" (expected: list | show | install | refresh)`
+        )
       }
-      const ids = listModelIds(routerOptions)
+      const ids = listModelIds(routerOptions, models)
       if (ids.length > 0) console.log(ids.join('\n'))
     }
   )

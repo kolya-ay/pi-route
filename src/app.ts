@@ -1,20 +1,21 @@
 // src/app.ts
 
+import type { MutableModels } from '@earendil-works/pi-ai'
 import { httpInstrumentationMiddleware as otel } from '@hono/otel'
 import { bodyLimit } from 'hono/body-limit'
 import { contextStorage } from 'hono/context-storage'
 import { cors } from 'hono/cors'
 import { requestId } from 'hono/request-id'
 import { timing } from 'hono/timing'
-
 import { createAuthMiddleware } from './auth/middleware'
-import { scheduleRefresh } from './auth/scheduler'
 import { decompressRequest } from './compression'
 import { type EnvPathOverrides, readEnvConfig } from './config/env'
 import { loadConfig } from './config/loader'
+import { buildModels } from './models/build'
 import { buildCatalog } from './pipeline/catalog'
 import { enrichLiveMeta } from './pipeline/metadata'
-import { createProviderRegistry } from './providers/registry'
+import { createModelsDispatch } from './providers/models-dispatch'
+import { createPassthroughProvider } from './providers/passthrough'
 import { mountAdmin } from './routes/admin'
 import { buildOpencodeModels, renderApiJson, resolveApiUrl } from './routes/api-json'
 import { createChatCompletionsRoute } from './routes/chat-completions'
@@ -27,35 +28,82 @@ import { createResponsesRoute } from './routes/responses'
 import { createState, type RouterState } from './state'
 import { factory, type RouterApp } from './telemetry/hono-env'
 import { createTel, initOtel } from './telemetry/tel'
+import type { ProviderConfig, ProviderEntry } from './types'
 
 export type CreateAppOpts = {
   admin?: { authKey: string }
 }
 
+// Real OpenAI is the only passthrough type with a sensible default base URL;
+// other passthrough (arbitrary/unknown) types must supply their own.
+const PASSTHROUGH_BASE_URLS: Partial<Record<string, string>> = {
+  openai: 'https://api.openai.com/v1'
+}
+
+// Build one dispatch entry per configured provider. `openai` and any type the
+// Models collection doesn't back forward raw via passthrough; everything else
+// dispatches through Models (auth resolved inside models.stream). openai-compatible
+// holds no catalog, so its dispatch constructs a model on demand.
+const buildEntry = (models: MutableModels, name: string, config: ProviderConfig): ProviderEntry => {
+  const backed = models.getProvider(name) !== undefined
+  if (config.type === 'openai' || !backed) {
+    const baseUrl = config.baseUrl ?? PASSTHROUGH_BASE_URLS[config.type] ?? ''
+    if (!baseUrl) throw new Error(`provider "${name}" (type ${config.type}) requires baseUrl`)
+    return {
+      provider: createPassthroughProvider(name, config.type, baseUrl),
+      account: config.account
+    }
+  }
+  const construct = config.type === 'openai-compatible'
+  return { provider: createModelsDispatch(models, name, construct), account: config.account }
+}
+
 export const createApp = async (
   opts: CreateAppOpts = {},
   envOverrides: EnvPathOverrides = {}
-): Promise<RouterState & { app: RouterApp }> => {
+): Promise<RouterState & { app: RouterApp; stop: () => void }> => {
   if (opts.admin !== undefined && !opts.admin.authKey) {
     throw new Error('createApp: admin.authKey must be a non-empty string')
   }
 
   const env = readEnvConfig(envOverrides)
   const { options, state: runtime } = await loadConfig(env.configPath, env.stateDir)
-  const catalog = buildCatalog(options)
+
+  // Credential + model stores live under the state dir (the old registry passed
+  // env.stateDir as the authDir too).
+  const models = buildModels(options, { stateDir: env.stateDir, authDir: env.stateDir })
+  await models.refresh({ allowNetwork: false }) // offline restore of persisted overlays
+
+  const catalog = buildCatalog(options, models)
   await enrichLiveMeta(options, catalog)
 
   initOtel({ otlpUrl: env.otlpUrl, serviceName: env.serviceName })
   const tel = createTel()
-  const state = createState(options, catalog, runtime, env.stateDir)
+  const state = createState(options, catalog, models, runtime, env.stateDir)
 
-  for (const [providerName, config] of Object.entries(state.options.providers)) {
-    scheduleRefresh(state, providerName, config.account, tel)
+  // Background network refresh, then rebuild the catalog in place so listings and
+  // dispatch both see newly-discovered models. Fire once now, then every 4h.
+  const refreshAndRebuild = (): Promise<void> =>
+    models
+      .refresh()
+      .then(async () => {
+        const next = buildCatalog(options, models)
+        await enrichLiveMeta(options, next)
+        state.catalog = next
+      })
+      .catch((err) => console.error(`[models] refresh failed: ${String(err)}`))
+  void refreshAndRebuild()
+  const timer = setInterval(refreshAndRebuild, 4 * 60 * 60 * 1000)
+  timer.unref?.()
+  const stop = (): void => clearInterval(timer)
+
+  const registry = new Map<string, ProviderEntry>()
+  for (const [name, config] of Object.entries(options.providers)) {
+    registry.set(name, buildEntry(models, name, config))
   }
 
   const app = factory.createApp()
   const startTime = Date.now()
-  const registry = createProviderRegistry(state)
 
   app.use('*', cors())
   app.use('*', decompressRequest({ maxBodyBytes: env.maxBodyBytes }))
@@ -80,22 +128,28 @@ export const createApp = async (
 
   app.get('/', (c) => c.json({ name: 'pi-route', status: 'ok' }))
   app.route('/health', createHealthRoute(registry, startTime))
-  app.route('/v1/models', createModelsRoute(state.options, state.catalog))
+  app.route('/v1/models', createModelsRoute(state))
   app.route('/v1/messages', createMessagesRoute(registry))
   app.route('/v1/chat/completions', createChatCompletionsRoute(registry))
-  app.route('/v1/limits', createLimitsRoute(state, tel))
+  app.route('/v1/limits', createLimitsRoute(state))
   app.route('/v1/responses', createResponsesRoute(registry))
 
-  const modelInfoBody = buildModelInfoBody(state.options, state.catalog)
-  for (const p of modelInfoPaths) app.get(p, (c) => c.json(modelInfoBody))
+  // Per-request so a post-refresh catalog rebuild is reflected (state read live).
+  for (const p of modelInfoPaths) {
+    app.get(p, (c) => c.json(buildModelInfoBody(state.options, state.catalog, state.models)))
+  }
 
   const opencode = state.options.server?.opencode
   if (opencode) {
-    const opencodeModels = buildOpencodeModels(state.options, state.catalog)
     const apiOverride = opencode.api
     // Public (no authMw): OpenCode fetches /api.json without a bearer token.
     app.get('/api.json', (c) =>
-      c.json(renderApiJson(opencodeModels, resolveApiUrl(c.req, apiOverride)))
+      c.json(
+        renderApiJson(
+          buildOpencodeModels(state.options, state.catalog, state.models),
+          resolveApiUrl(c.req, apiOverride)
+        )
+      )
     )
   }
 
@@ -103,5 +157,5 @@ export const createApp = async (
     mountAdmin(app, state, { authKey: opts.admin.authKey })
   }
 
-  return Object.assign(state, { app })
+  return Object.assign(state, { app, stop })
 }

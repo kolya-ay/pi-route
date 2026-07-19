@@ -1,7 +1,7 @@
 // src/providers/to-sse.test.ts
 
 import { describe, expect, it } from 'bun:test'
-import type { AssistantMessage, AssistantMessageEvent } from '@mariozechner/pi-ai'
+import type { AssistantMessage, AssistantMessageEvent } from '@earendil-works/pi-ai'
 
 import {
   anthropicMessageToJson,

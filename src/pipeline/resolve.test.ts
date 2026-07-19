@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { buildTestModels } from '../models/test-models'
 import type { RouterOptions } from '../types'
 import { buildCatalog } from './catalog'
 import { resolveCandidates } from './resolve'
@@ -14,7 +15,7 @@ const opts = (over: Partial<RouterOptions> = {}): RouterOptions => ({
 })
 
 const resolve = (o: RouterOptions, model: string, req: { thinking?: boolean } = {}) =>
-  resolveCandidates(o, buildCatalog(o), model, req)
+  resolveCandidates(o, buildCatalog(o, buildTestModels(o)), model, req)
 
 const first = (o: RouterOptions, model: string, req: { thinking?: boolean } = {}) => {
   const list = resolve(o, model, req)

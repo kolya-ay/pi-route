@@ -4,11 +4,12 @@ import type {
   AssistantMessage,
   AssistantMessageEvent,
   AssistantMessageEventStream
-} from '@mariozechner/pi-ai'
+} from '@earendil-works/pi-ai'
 
 import { wrapStreamForMetrics } from '../telemetry/stream-metrics'
-import type { Account, IncomingRequest, ProviderResponse } from '../types'
+import type { IncomingRequest, ProviderResponse } from '../types'
 
+import { mapAuthError } from './models-dispatch'
 import { formatJson, formatSse } from './to-sse'
 
 // Self-heal transient 429/5xx via pi-ai's SDK-level retry. 3 attempts caps
@@ -28,14 +29,12 @@ export const capMaxTokens = <M extends { maxTokens: number }>(
 export const makeMetadata = (
   request: IncomingRequest,
   providerName: string,
-  account: Account,
   startMs: number
 ): ProviderResponse['metadata'] => ({
   requestId: request.id,
   provider: providerName,
   model: request.model,
-  latencyMs: Date.now() - startMs,
-  ...('name' in account ? { account: account.name } : {})
+  latencyMs: Date.now() - startMs
 })
 
 // Costs are per-token rates lifted from the pi-ai catalog Model.
@@ -85,7 +84,13 @@ export const jsonResponse = async (
   for await (const event of events) {
     if (event.type === 'done') message = event.message
     if (event.type === 'error') {
-      throw new Error(event.error.errorMessage ?? 'pi-ai stream error')
+      // Route through mapAuthError so an in-stream OAuth-refresh failure becomes a
+      // DispatchAuthError (→ 401) instead of a generic 502. metadata.provider names
+      // the backing provider for the login hint.
+      throw mapAuthError(
+        new Error(event.error.errorMessage ?? 'pi-ai stream error'),
+        metadata.provider
+      )
     }
   }
   if (!message) throw new Error('No response from pi-ai stream')

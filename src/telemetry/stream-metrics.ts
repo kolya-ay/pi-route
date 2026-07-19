@@ -1,4 +1,4 @@
-import type { AssistantMessageEvent, AssistantMessageEventStream } from '@mariozechner/pi-ai'
+import type { AssistantMessageEvent, AssistantMessageEventStream } from '@earendil-works/pi-ai'
 import type { Span } from '@opentelemetry/api'
 
 import { buildResponseCaptureAttr, type CaptureOpts } from './capture'

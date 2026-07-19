@@ -1,11 +1,10 @@
-import type { Api, Model } from '@mariozechner/pi-ai'
-import { getModel, getModels, getProviders } from '@mariozechner/pi-ai'
+import type { Api, Model, Models } from '@earendil-works/pi-ai'
 import type { DiscoverStrategy, ModelMetaOverride, RouterOptions } from '../types'
 import type { Catalog, ModelMeta } from './catalog'
 
 // pi-ai `Model` → our `ModelMeta`. Copies only the fields the projections use.
 export const toModelMeta = (m: Model<Api>): ModelMeta => {
-  const compat = (m as unknown as { compat?: { supportsReasoningEffort?: boolean } }).compat
+  const compat = m.compat as { supportsReasoningEffort?: boolean } | undefined
   return {
     name: m.name,
     ...(m.contextWindow !== undefined ? { contextWindow: m.contextWindow } : {}),
@@ -47,33 +46,28 @@ export const normalizeModelId = (id: string): string => {
   return out.replace(/[-_]+$/, '')
 }
 
-// Built once: normalized model id -> ModelMeta, across pi-ai's whole catalog.
-let guessIndex: Map<string, ModelMeta> | null = null
-const buildGuessIndex = (): Map<string, ModelMeta> => {
-  if (guessIndex) return guessIndex
+// Built once per Models object: normalized model id -> ModelMeta, across the
+// whole live catalog. Memoized by identity so a listing pass over many
+// addresses rebuilds the index at most once.
+const guessIndexCache = new WeakMap<Models, Map<string, ModelMeta>>()
+const buildGuessIndex = (models: Models): Map<string, ModelMeta> => {
+  const cached = guessIndexCache.get(models)
+  if (cached) return cached
   const index = new Map<string, ModelMeta>()
-  for (const provider of getProviders()) {
-    let models: { id: string }[] = []
-    try {
-      models = getModels(provider as never) as { id: string }[]
-    } catch {
-      models = []
-    }
-    for (const m of models) {
-      const meta = toModelMeta(getModel(provider as never, m.id as never))
-      const exact = m.id.slice(m.id.lastIndexOf('/') + 1).toLowerCase()
-      if (!index.has(exact)) index.set(exact, meta)
-      const norm = normalizeModelId(m.id)
-      if (!index.has(norm)) index.set(norm, meta)
-    }
+  for (const m of models.getModels()) {
+    const meta = toModelMeta(m)
+    const exact = m.id.slice(m.id.lastIndexOf('/') + 1).toLowerCase()
+    if (!index.has(exact)) index.set(exact, meta)
+    const norm = normalizeModelId(m.id)
+    if (!index.has(norm)) index.set(norm, meta)
   }
-  guessIndex = index
+  guessIndexCache.set(models, index)
   return index
 }
 
-// Match the address's leaf against pi-ai's catalog: exact leaf first, then normalized.
-export const guessFromCatalog = (address: string): ModelMeta | null => {
-  const index = buildGuessIndex()
+// Match the address's leaf against the live catalog: exact leaf first, then normalized.
+export const guessFromCatalog = (models: Models, address: string): ModelMeta | null => {
+  const index = buildGuessIndex(models)
   const leaf = address.slice(address.lastIndexOf('/') + 1).toLowerCase()
   return index.get(leaf) ?? index.get(normalizeModelId(address)) ?? null
 }
@@ -219,7 +213,7 @@ export const fetchProviderMetadata = async (
   name: string,
   provider: import('../types').ProviderConfig
 ): Promise<Map<string, ModelMeta>> => {
-  const liveStrat = expandAuto(provider.discover ?? []).find(
+  const liveStrat = expandAuto(provider.discover || []).find(
     (s) => s === 'openai-models-list' || s === 'litellm'
   )
   if (!liveStrat || !provider.baseUrl) return new Map()
@@ -252,25 +246,22 @@ const splitLeaf = (leaf: string): { providerName: string; modelId: string } => {
     : { providerName: leaf.slice(0, slash), modelId: leaf.slice(slash + 1) }
 }
 
-// Resolve one exposed address to metadata: pi-ai baseline → discover chain → override patch.
+// Resolve one exposed address to metadata: Models baseline → discover chain → override patch.
 export const resolveMetadata = (
   opts: RouterOptions,
   catalog: Catalog,
+  models: Models,
   address: string
 ): ModelMeta | null => {
   const leaf = catalog.leafFor.get(address) ?? address
   const { providerName, modelId } = splitLeaf(leaf)
   const provider = opts.providers[providerName]
 
-  // Layer 0: pi-ai static (authoritative for known providers).
+  // Layer 0: Models static/dynamic catalog (authoritative for known providers).
   let base: ModelMeta | null = null
   if (provider && modelId) {
-    try {
-      const m = getModel(provider.type as never, modelId as never)
-      base = m ? toModelMeta(m) : null
-    } catch {
-      base = null
-    }
+    const m = models.getModel(providerName, modelId)
+    base = m ? toModelMeta(m) : null
   }
 
   // Layer 1: the provider's discover chain — first hit wins.
@@ -279,7 +270,7 @@ export const resolveMetadata = (
       if (strat === 'openai-models-list' || strat === 'litellm') {
         base = catalog.liveMeta.get(leaf) ?? null
       } else if (strat === 'guess') {
-        base = guessFromCatalog(leaf)
+        base = guessFromCatalog(models, leaf)
       } else if (strat === 'fallback') {
         base = fallbackMeta(modelId || address)
       }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { getModel } from '@mariozechner/pi-ai'
+import { buildTestModels } from '../models/test-models'
 import type { RouterOptions } from '../types'
 import { buildCatalog } from './catalog'
 import {
@@ -13,10 +13,18 @@ import {
   toModelMeta
 } from './metadata'
 
+// A Models with cerebras (static catalog incl. gpt-oss-120b) for guess/toModelMeta.
+const cerebrasModels = () =>
+  buildTestModels({
+    providers: { cerebras: { type: 'cerebras', account: { credential: 'key', key: 'k' } } },
+    pipeline: [],
+    expose: []
+  })
+
 describe('toModelMeta', () => {
-  // NOTE: gpt-oss-120b assertions pin pi-ai's bundled catalog; re-confirm on dependency bumps.
-  test('maps a pi-ai model into ModelMeta with the projection fields', () => {
-    const m = getModel('cerebras', 'gpt-oss-120b')
+  // NOTE: gpt-oss-120b assertions pin the bundled catalog; re-confirm on dependency bumps.
+  test('maps a Model into ModelMeta with the projection fields', () => {
+    const m = cerebrasModels().getModel('cerebras', 'gpt-oss-120b')!
     const meta = toModelMeta(m)
     expect(meta.name).toBe(m.name)
     expect(meta.contextWindow).toBe(m.contextWindow)
@@ -33,14 +41,14 @@ describe('normalizeModelId', () => {
 })
 
 describe('guessFromCatalog', () => {
-  // NOTE: gpt-oss-120b assertions pin pi-ai's bundled catalog; re-confirm on dependency bumps.
+  // NOTE: gpt-oss-120b assertions pin the bundled catalog; re-confirm on dependency bumps.
   test("exact leaf match returns that model's metadata", () => {
-    const meta = guessFromCatalog('nvidia/openai/gpt-oss-120b')
+    const meta = guessFromCatalog(cerebrasModels(), 'nvidia/gpt-oss-120b')
     expect(meta?.contextWindow).toBeGreaterThan(0)
   })
 
   test('no match returns null', () => {
-    expect(guessFromCatalog('nvidia/totally/not-a-real-model-xyz')).toBeNull()
+    expect(guessFromCatalog(cerebrasModels(), 'nvidia/totally/not-a-real-model-xyz')).toBeNull()
   })
 })
 
@@ -79,39 +87,43 @@ describe('resolveMetadata', () => {
 
   test('fallback fills an otherwise-unknown model', () => {
     const opts = base(['fallback'])
-    const cat = buildCatalog(opts)
+    const models = cerebrasModels()
+    const cat = buildCatalog(opts, models)
     cat.addresses.add('nv/foo/bar')
     cat.leafFor.set('nv/foo/bar', 'nv/foo/bar')
-    const meta = resolveMetadata(opts, cat, 'nv/foo/bar')
+    const meta = resolveMetadata(opts, cat, models, 'nv/foo/bar')
     expect(meta?.contextWindow).toBe(200000)
   })
 
   test('guess beats fallback when listed first', () => {
     const opts = base(['guess', 'fallback'])
-    const cat = buildCatalog(opts)
-    cat.addresses.add('nv/openai/gpt-oss-120b')
-    cat.leafFor.set('nv/openai/gpt-oss-120b', 'nv/openai/gpt-oss-120b')
-    const meta = resolveMetadata(opts, cat, 'nv/openai/gpt-oss-120b')
+    const models = cerebrasModels()
+    const cat = buildCatalog(opts, models)
+    cat.addresses.add('nv/gpt-oss-120b')
+    cat.leafFor.set('nv/gpt-oss-120b', 'nv/gpt-oss-120b')
+    const meta = resolveMetadata(opts, cat, models, 'nv/gpt-oss-120b')
     expect(meta?.contextWindow).not.toBe(200000)
   })
 
   test('override patches the chain result', () => {
     const opts = base(['fallback'], { 'foo/bar': { contextWindow: 42 } })
-    const cat = buildCatalog(opts)
+    const models = cerebrasModels()
+    const cat = buildCatalog(opts, models)
     cat.addresses.add('nv/foo/bar')
     cat.leafFor.set('nv/foo/bar', 'nv/foo/bar')
-    expect(resolveMetadata(opts, cat, 'nv/foo/bar')?.contextWindow).toBe(42)
+    expect(resolveMetadata(opts, cat, models, 'nv/foo/bar')?.contextWindow).toBe(42)
   })
 
   test('live lookup keys on leaf, not address (alias resolution)', () => {
     // liveMeta is written as `${name}/${modelId}` = the leaf address.
     // An alias whose leaf points at a live entry must resolve correctly.
     const opts = base(['openai-models-list'])
-    const cat = buildCatalog(opts)
+    const models = cerebrasModels()
+    const cat = buildCatalog(opts, models)
     cat.liveMeta.set('nv/real-model', { name: 'Real', contextWindow: 40960, reasoning: false })
     cat.addresses.add('big')
     cat.leafFor.set('big', 'nv/real-model')
-    expect(resolveMetadata(opts, cat, 'big')?.contextWindow).toBe(40960)
+    expect(resolveMetadata(opts, cat, models, 'big')?.contextWindow).toBe(40960)
   })
 })
 

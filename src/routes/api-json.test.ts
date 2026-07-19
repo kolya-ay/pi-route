@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { buildTestModels } from '../models/test-models'
 import { buildCatalog } from '../pipeline/catalog'
 import type { RouterOptions } from '../types'
 import { buildOpencodeModels, renderApiJson, resolveApiUrl } from './api-json'
@@ -10,10 +11,15 @@ const opts = (over: Partial<RouterOptions> = {}): RouterOptions => ({
   ...over
 })
 
+const opencodeFor = (o: RouterOptions) => {
+  const models = buildTestModels(o)
+  return buildOpencodeModels(o, buildCatalog(o, models), models)
+}
+
 describe('buildOpencodeModels', () => {
   test('keys are addresses; cost is per-MILLION verbatim', () => {
     const o = opts()
-    const models = buildOpencodeModels(o, buildCatalog(o))
+    const models = opencodeFor(o)
     const entries = Object.values(models)
     expect(entries.length).toBeGreaterThan(0)
     for (const [key, m] of Object.entries(models)) {
@@ -27,7 +33,7 @@ describe('buildOpencodeModels', () => {
       pipeline: [{ kind: 'alias', name: 'solo', target: 'cerebras/gpt-oss-120b' }],
       expose: ['solo']
     })
-    const models = buildOpencodeModels(o, buildCatalog(o))
+    const models = opencodeFor(o)
     expect(Object.keys(models)).toEqual(['solo'])
   })
   test('includes an openai-compatible model once discover/override supplies metadata', () => {
@@ -43,10 +49,11 @@ describe('buildOpencodeModels', () => {
       pipeline: [],
       expose: ['nv/**']
     } as unknown as RouterOptions
-    const catalog = buildCatalog(o)
+    const tm = buildTestModels(o)
+    const catalog = buildCatalog(o, tm)
     catalog.addresses.add('nv/foo/bar-model')
     catalog.leafFor.set('nv/foo/bar-model', 'nv/foo/bar-model')
-    const models = buildOpencodeModels(o, catalog)
+    const models = buildOpencodeModels(o, catalog, tm)
     expect(models['nv/foo/bar-model']).toBeDefined()
     expect(models['nv/foo/bar-model']!.limit.context).toBe(200000)
   })

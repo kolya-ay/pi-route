@@ -2,19 +2,28 @@ import { afterEach, describe, expect, it } from 'bun:test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { writeCredentials } from '../auth/credentials'
+import { buildModels } from '../models/build'
 import { buildCatalog } from '../pipeline/catalog'
 import { createState } from '../state'
-import { createTel } from '../telemetry/tel'
-import type { RouterOptions } from '../types'
+import type { CredentialFile, RouterOptions } from '../types'
 import { createLimitsRoute } from './limits'
 
 const originalFetch = globalThis.fetch
 
 const makeTempDir = async () => mkdtemp(join(tmpdir(), 'pi-route-limits-route-'))
 
-const makeState = (options: RouterOptions, authDir: string) =>
-  createState(options, buildCatalog(options), { accounts: {} }, authDir)
+const writeCredentialFile = async (
+  authDir: string,
+  accountName: string,
+  credentials: CredentialFile
+): Promise<void> => {
+  await Bun.write(join(authDir, `${accountName}.json`), JSON.stringify(credentials, null, 2))
+}
+
+const makeState = (options: RouterOptions, authDir: string) => {
+  const models = buildModels(options, { stateDir: authDir, authDir })
+  return createState(options, buildCatalog(options, models), models, { accounts: {} }, authDir)
+}
 
 afterEach(() => {
   globalThis.fetch = originalFetch
@@ -32,7 +41,7 @@ describe('/v1/limits', () => {
         pipeline: [],
         expose: []
       }
-      const app = createLimitsRoute(makeState(options, dir), createTel())
+      const app = createLimitsRoute(makeState(options, dir))
       const response = await app.request('/')
 
       expect(response.status).toBe(200)
@@ -50,12 +59,16 @@ describe('/v1/limits', () => {
         providers: {
           claude: { type: 'anthropic', account: { credential: 'key', key: 'sk-ant' } },
           codex: { type: 'openai-codex', account: { credential: 'key', key: 'sk-codex' } },
-          ignored: { type: 'openai', account: { credential: 'key', key: 'sk-openai' } }
+          ignored: {
+            type: 'openai',
+            baseUrl: 'https://api.openai.com/v1',
+            account: { credential: 'key', key: 'sk-openai' }
+          }
         },
         pipeline: [],
         expose: []
       }
-      const app = createLimitsRoute(makeState(options, dir), createTel())
+      const app = createLimitsRoute(makeState(options, dir))
       const response = await app.request('/')
       const body = (await response.json()) as { providers: { name: string; type: string }[] }
 
@@ -69,13 +82,13 @@ describe('/v1/limits', () => {
 
   it('returns mixed provider statuses in one response', async () => {
     const dir = await makeTempDir()
-    await writeCredentials(dir, 'claude-oauth', {
+    await writeCredentialFile(dir, 'claude-oauth', {
       provider: 'anthropic',
       refresh: 'refresh-1',
       access: 'claude-token',
       expires: Date.now() + 60_000
     })
-    await writeCredentials(dir, 'codex-oauth', {
+    await writeCredentialFile(dir, 'codex-oauth', {
       provider: 'openai-codex',
       refresh: 'refresh-2',
       access:
@@ -113,7 +126,7 @@ describe('/v1/limits', () => {
         pipeline: [],
         expose: []
       }
-      const app = createLimitsRoute(makeState(options, dir), createTel())
+      const app = createLimitsRoute(makeState(options, dir))
       const response = await app.request('/')
       const body = (await response.json()) as {
         providers: { name: string; status: string; error_message: string | null }[]

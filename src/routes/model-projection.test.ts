@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { buildTestModels } from '../models/test-models'
 import { buildCatalog } from '../pipeline/catalog'
 import type { RouterOptions } from '../types'
 import {
@@ -18,9 +19,10 @@ const opts = (over: Partial<RouterOptions> = {}): RouterOptions => ({
 })
 
 const firstKnown = (o: RouterOptions) => {
-  const cat = buildCatalog(o)
+  const models = buildTestModels(o)
+  const cat = buildCatalog(o, models)
   for (const a of [...cat.addresses].sort()) {
-    const r = resolveModel(o, cat, a)
+    const r = resolveModel(o, cat, models, a)
     if (r.model) return r
   }
   return null
@@ -37,7 +39,8 @@ describe('cost helpers', () => {
 describe('resolveModel', () => {
   test('unknown provider → null model, keeps id/owned_by', () => {
     const o = opts({ providers: {} })
-    const r = resolveModel(o, buildCatalog(o), 'ghost/model-x')
+    const models = buildTestModels(o)
+    const r = resolveModel(o, buildCatalog(o, models), models, 'ghost/model-x')
     expect(r).toEqual({ id: 'ghost/model-x', owned_by: 'ghost', provider: 'ghost', model: null })
   })
   test('known cerebras leaf resolves a Model', () => {
@@ -62,7 +65,8 @@ describe('displayName (provider-prefixed)', () => {
       pipeline: [{ kind: 'alias', name: 'solo', target: 'cerebras/gpt-oss-120b' }],
       expose: ['solo']
     })
-    const r = resolveModel(o, buildCatalog(o), 'solo')
+    const models = buildTestModels(o)
+    const r = resolveModel(o, buildCatalog(o, models), models, 'solo')
     expect(r.owned_by).toBe('solo') // address-based
     expect(r.provider).toBe('cerebras') // leaf/backend-based
     if (r.model) expect(toOpenAIModel(r).name?.startsWith('Cerebras/')).toBe(true)

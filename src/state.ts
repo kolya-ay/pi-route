@@ -1,28 +1,26 @@
+import type { MutableModels } from '@earendil-works/pi-ai'
 import type { RuntimeState } from './config/state'
 import type { Catalog } from './pipeline/catalog'
-import type { CredentialFile, RouterOptions } from './types'
+import type { RouterOptions } from './types'
 
 export type RouterState = {
   options: RouterOptions
   catalog: Catalog
+  models: MutableModels
   runtime: RuntimeState
-  credentials: Map<string, CredentialFile>
-  timers: Map<string, ReturnType<typeof setTimeout>>
-  refreshFailures: Map<string, number>
   authDir: string
 }
 
 export const createState = (
   options: RouterOptions,
   catalog: Catalog,
+  models: MutableModels,
   runtime: RuntimeState,
   authDir: string
 ): RouterState => ({
   options,
   catalog,
+  models,
   runtime,
-  authDir,
-  credentials: new Map(),
-  timers: new Map(),
-  refreshFailures: new Map()
+  authDir
 })

@@ -1,7 +1,5 @@
 import { decodeJwt } from './auth/jwt'
-import { resolveCredential } from './auth/resolve'
 import type { RouterState } from './state'
-import type { Tel } from './telemetry/tel'
 import type { Account, ProviderConfig } from './types'
 
 export type LimitWindow = {
@@ -154,8 +152,7 @@ const parseJson = async (response: Response): Promise<Record<string, unknown> | 
 const collectAnthropicLimits = async (
   name: string,
   account: Account,
-  state: RouterState,
-  tel: Tel
+  state: RouterState
 ): Promise<ProviderLimitSnapshot> => {
   if (account.credential !== 'oauth') {
     return unauthenticated(
@@ -166,8 +163,9 @@ const collectAnthropicLimits = async (
     )
   }
 
-  const cred = await resolveCredential(state, account, tel)
-  if (!cred) {
+  const auth = await state.models.getAuth(name)
+  const token = auth?.auth.apiKey
+  if (!token) {
     return unauthenticated(
       name,
       'anthropic',
@@ -178,7 +176,7 @@ const collectAnthropicLimits = async (
 
   const response = await fetch('https://api.anthropic.com/api/oauth/usage', {
     headers: {
-      Authorization: `Bearer ${cred.access.trim()}`,
+      Authorization: `Bearer ${token.trim()}`,
       Accept: 'application/json',
       'Content-Type': 'application/json',
       'anthropic-beta': 'oauth-2025-04-20',
@@ -216,24 +214,24 @@ const collectAnthropicLimits = async (
 const collectCodexLimits = async (
   name: string,
   account: Account,
-  state: RouterState,
-  tel: Tel
+  state: RouterState
 ): Promise<ProviderLimitSnapshot> => {
   if (account.credential !== 'oauth') {
     return unauthenticated(name, 'openai-codex', 'Codex', 'OAuth login required for Codex usage.')
   }
 
-  const cred = await resolveCredential(state, account, tel)
-  if (!cred) {
+  const auth = await state.models.getAuth(name)
+  const token = auth?.auth.apiKey
+  if (!token) {
     return unauthenticated(name, 'openai-codex', 'Codex', 'OAuth login required for Codex usage.')
   }
 
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${cred.access}`,
+    Authorization: `Bearer ${token}`,
     Accept: 'application/json',
     'User-Agent': 'ai-usage-kde'
   }
-  const accountId = codexAccountId(cred.access)
+  const accountId = codexAccountId(token)
   if (accountId) headers['ChatGPT-Account-Id'] = accountId
 
   const response = await fetch('https://chatgpt.com/backend-api/wham/usage', { headers })
@@ -268,16 +266,15 @@ const collectCodexLimits = async (
 const collectProviderLimits = async (
   name: string,
   config: ProviderConfig,
-  state: RouterState,
-  tel: Tel
+  state: RouterState
 ): Promise<ProviderLimitSnapshot | null> => {
   try {
     if (config.type === 'anthropic') {
-      return await collectAnthropicLimits(name, config.account, state, tel)
+      return await collectAnthropicLimits(name, config.account, state)
     }
 
     if (config.type === 'openai-codex') {
-      return await collectCodexLimits(name, config.account, state, tel)
+      return await collectCodexLimits(name, config.account, state)
     }
   } catch {
     if (config.type === 'anthropic') {
@@ -292,13 +289,10 @@ const collectProviderLimits = async (
   return null
 }
 
-export const collectLimitsSnapshot = async (
-  state: RouterState,
-  tel: Tel
-): Promise<LimitsSnapshot> => {
+export const collectLimitsSnapshot = async (state: RouterState): Promise<LimitsSnapshot> => {
   const providers = await Promise.all(
     Object.entries(state.options.providers).map(([name, config]) =>
-      collectProviderLimits(name, config, state, tel)
+      collectProviderLimits(name, config, state)
     )
   )
 

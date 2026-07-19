@@ -1,3 +1,4 @@
+import type { Models } from '@earendil-works/pi-ai'
 import type { Catalog, ModelMeta } from '../pipeline/catalog'
 import { exposeIncludes } from '../pipeline/match'
 import { resolveMetadata } from '../pipeline/metadata'
@@ -16,15 +17,20 @@ const capitalize = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1)
 export const displayName = (provider: string, name: string): string =>
   `${capitalize(provider)}/${name}`
 
-// address → provider/leaf → pi-ai Model. Never throws; unknown → { model: null }.
-export const resolveModel = (opts: RouterOptions, catalog: Catalog, address: string): Resolved => {
+// address → provider/leaf → Model. Never throws; unknown → { model: null }.
+export const resolveModel = (
+  opts: RouterOptions,
+  catalog: Catalog,
+  models: Models,
+  address: string
+): Resolved => {
   const [ownedBy] = address.split('/')
   const owned_by = address.includes('/') ? (ownedBy ?? address) : address
   // Backend provider = first segment of the resolved leaf, so aliases/pools prefix
   // with the real provider (alias `solo` → `Cerebras/…`, not `Solo/…`).
   const leaf = catalog.leafFor.get(address) ?? address
   const provider = leaf.includes('/') ? leaf.slice(0, leaf.indexOf('/')) : owned_by
-  return { id: address, owned_by, provider, model: resolveMetadata(opts, catalog, address) }
+  return { id: address, owned_by, provider, model: resolveMetadata(opts, catalog, models, address) }
 }
 
 // Sorted list of addresses passing the expose allowlist. Shared by all three

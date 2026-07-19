@@ -1,7 +1,6 @@
 // src/serve.ts
 
 import { createApp } from './app'
-import { cancelRefresh } from './auth/scheduler'
 import { type EnvPathOverrides, readEnvConfig } from './config/env'
 import { watchConfig } from './config/watch'
 
@@ -23,7 +22,7 @@ export const startServer = async (
 
   // Serialize reloads: createApp does network I/O, so two rapid triggers could
   // otherwise race on `current` — serving stale config and leaking the newer
-  // state's refresh timers. A reload in flight defers the next to one re-run.
+  // state's refresh timer. A reload in flight defers the next to one re-run.
   let reloading = false
   let again = false
   const reload = async (): Promise<void> => {
@@ -36,7 +35,7 @@ export const startServer = async (
       const next = await createApp(appOpts, overrides)
       const previous = current
       server.reload({ fetch: next.app.fetch })
-      for (const name of [...previous.timers.keys()]) cancelRefresh(previous, name)
+      previous.stop() // clear the superseded app's background refresh interval
       current = next
       console.log('Config reloaded')
     } catch (error) {
