@@ -5,6 +5,8 @@
 //   - There is no server-side filter API; we fetch all summaries, fetch each
 //     trace, flatten spans, and aggregate client-side.
 
+import { renderTable } from './format'
+
 export type StatsBy = 'provider' | 'model' | 'day' | 'session'
 
 export type StatsRow = {
@@ -123,13 +125,9 @@ const COLS = ['key', 'requests', 'cost_usd', 'tokens_in', 'tokens_out'] as const
 
 export const formatTable = (by: StatsBy, rows: StatsRow[]): string => {
   if (rows.length === 0) return '(no rows)'
-  const header = COLS.map((c) => (c === 'key' ? by : c))
+  const headers = COLS.map((c) => (c === 'key' ? by : c))
   const cells = rows.map((r) => COLS.map((c) => String(r[c] ?? '')))
-  const widths = header.map((h, i) =>
-    Math.max(h.length, ...cells.map((row) => (row[i] ?? '').length))
-  )
-  const fmtRow = (vals: string[]): string => vals.map((v, i) => v.padEnd(widths[i] ?? 0)).join('  ')
-  return [fmtRow(header), fmtRow(widths.map((w) => '-'.repeat(w))), ...cells.map(fmtRow)].join('\n')
+  return renderTable(headers, cells)
 }
 
 export const runStats = async (args: StatsArgs): Promise<StatsRow[]> => {

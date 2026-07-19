@@ -50,20 +50,31 @@ describe('removeCredential', () => {
 })
 
 describe('formatProviderList', () => {
-  test('renders name, type, credential kind, status', () => {
-    const options = {
-      providers: {
-        chutes: { type: 'openai-compatible', account: { credential: 'key', key: 'x' } },
-        anthropic: { type: 'anthropic', account: { credential: 'oauth', name: 'anthropic' } }
-      },
-      pipeline: [],
-      expose: []
-    } as unknown as RouterOptions
-    const out = formatProviderList(options, new Set(['anthropic']))
-    expect(out).toContain('chutes')
-    expect(out).toContain('openai-compatible')
-    expect(out).toContain('key')
+  const options = {
+    providers: {
+      cerebras: { type: 'openai-compatible', account: { credential: 'apiKey', name: 'cerebras' } },
+      cc: { type: 'anthropic', account: { credential: 'oauth', name: 'anthropic-cc' } }
+    },
+    pipeline: [],
+    expose: []
+  } as unknown as RouterOptions
+
+  test('table with header and one row per provider; status column present', () => {
+    const out = formatProviderList(options, new Set(['cc']))
+    const lines = out.split('\n')
+    expect(lines[0]).toContain('PROVIDER')
+    expect(lines[0]).toContain('STATUS')
+    expect(out).toContain('cerebras')
     expect(out).toContain('ok')
-    expect(out).toContain('invalid') // anthropic flagged invalid
+    expect(out).toContain('invalid') // cc is in the invalid set
+  })
+
+  test('empty providers message', () => {
+    expect(
+      formatProviderList(
+        { providers: {}, pipeline: [], expose: [] } as unknown as RouterOptions,
+        new Set()
+      )
+    ).toBe('(no providers)')
   })
 })

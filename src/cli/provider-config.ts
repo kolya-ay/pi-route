@@ -2,6 +2,7 @@ import { existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import type { RouterOptions } from '../types'
 import { patchYaml } from './config-patch'
+import { type Colorize, dim, green, red, renderTable } from './format'
 
 // Upsert providers.<name> = block, preserving unrelated keys and block comments.
 export const upsertProviderBlock = async (
@@ -22,10 +23,17 @@ export const removeCredential = (authDir: string, name: string): boolean => {
   return true
 }
 
-export const formatProviderList = (options: RouterOptions, invalid: Set<string>): string =>
-  Object.entries(options.providers)
-    .map(([name, p]) => {
-      const status = p.account.disabled ? 'disabled' : invalid.has(name) ? 'invalid' : 'ok'
-      return `${name}  ${p.type}  ${p.account.credential}  ${status}`
-    })
-    .join('\n')
+export const formatProviderList = (options: RouterOptions, invalid: Set<string>): string => {
+  const entries = Object.entries(options.providers)
+  if (entries.length === 0) return '(no providers)'
+  const rows = entries.map(([name, p]) => {
+    const status = p.account.disabled ? 'disabled' : invalid.has(name) ? 'invalid' : 'ok'
+    return [name, p.type, p.account.credential, status]
+  })
+  const colorize: Colorize = (_ri, ci, cell) => {
+    if (ci !== 3) return cell
+    const s = cell.trim()
+    return s === 'ok' ? green(cell) : s === 'invalid' ? red(cell) : dim(cell)
+  }
+  return renderTable(['PROVIDER', 'TYPE', 'CREDENTIAL', 'STATUS'], rows, colorize)
+}

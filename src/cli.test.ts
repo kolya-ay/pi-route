@@ -65,13 +65,29 @@ test('limits with malformed config exits 3', async () => {
   expect(exitCode).toBe(3)
 })
 
-test('limits with a valid empty config exits 0 and prints JSON', async () => {
+test('limits with a valid empty config exits 0 and prints JSON with --json', async () => {
+  const dir = tmp()
+  const cfg = join(dir, 'router.yaml')
+  writeFileSync(cfg, 'providers: {}\npipeline: {}\nexpose: []\n')
+  const { stdout, exitCode } = await run([
+    'limits',
+    '-c',
+    cfg,
+    '--state-dir',
+    join(dir, 'auth'),
+    '--json'
+  ])
+  expect(exitCode).toBe(0)
+  expect(() => JSON.parse(stdout)).not.toThrow()
+})
+
+test('limits with a valid empty config exits 0 and prints the empty-table message', async () => {
   const dir = tmp()
   const cfg = join(dir, 'router.yaml')
   writeFileSync(cfg, 'providers: {}\npipeline: {}\nexpose: []\n')
   const { stdout, exitCode } = await run(['limits', '-c', cfg, '--state-dir', join(dir, 'auth')])
   expect(exitCode).toBe(0)
-  expect(() => JSON.parse(stdout)).not.toThrow()
+  expect(stdout.trim()).toBe('(no providers)')
 })
 
 const modelsConfig = (dir: string): string => {
@@ -117,7 +133,28 @@ test('models list matches models output', async () => {
   expect(stdout.trim()).toBe('default')
 })
 
-test('models show prints JSON with id and projection keys', async () => {
+test('models show --json prints JSON with id and projection keys', async () => {
+  const dir = tmp()
+  const cfg = modelsConfig(dir)
+  const { stdout, exitCode } = await run([
+    'models',
+    'show',
+    'default',
+    '--json',
+    '-c',
+    cfg,
+    '--state-dir',
+    join(dir, 'auth')
+  ])
+  expect(exitCode).toBe(0)
+  const parsed = JSON.parse(stdout) as Record<string, unknown>
+  expect(parsed.id).toBe('default')
+  expect(parsed).toHaveProperty('openai')
+  expect(parsed).toHaveProperty('litellm')
+  expect(parsed).toHaveProperty('modelsDev')
+})
+
+test('models show (no --json) prints a human-readable block', async () => {
   const dir = tmp()
   const cfg = modelsConfig(dir)
   const { stdout, exitCode } = await run([
@@ -130,11 +167,8 @@ test('models show prints JSON with id and projection keys', async () => {
     join(dir, 'auth')
   ])
   expect(exitCode).toBe(0)
-  const parsed = JSON.parse(stdout) as Record<string, unknown>
-  expect(parsed.id).toBe('default')
-  expect(parsed).toHaveProperty('openai')
-  expect(parsed).toHaveProperty('litellm')
-  expect(parsed).toHaveProperty('modelsDev')
+  expect(stdout).toContain('default')
+  expect(() => JSON.parse(stdout)).toThrow()
 })
 
 test('models show missing exits non-zero with a clear message', async () => {

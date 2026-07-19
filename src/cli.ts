@@ -8,7 +8,16 @@ import { z } from 'zod'
 
 import { AGENTS } from './cli/agents'
 import { generateCompletion } from './cli/completion'
-import { listModelIds, renderPlannedWrites, setupModels, showModel } from './cli/models'
+import { isTTY } from './cli/format'
+import { formatLimits } from './cli/limits'
+import {
+  modelRows,
+  renderModelDetail,
+  renderModelList,
+  renderPlannedWrites,
+  setupModels,
+  showModel
+} from './cli/models'
 import { formatProviderList, removeCredential, upsertProviderBlock } from './cli/provider-config'
 import { formatTable, runStats } from './cli/stats'
 import { type EnvConfig, type EnvPathOverrides, readEnvConfig } from './config/env'
@@ -225,8 +234,9 @@ cli
   )
 
 cli
-  .command('limits', 'Print a rate-limit snapshot as JSON')
-  .action(async (options: { config?: string; stateDir?: string }) => {
+  .command('limits', 'Print a rate-limit snapshot')
+  .option('--json', 'Print the raw JSON snapshot instead of a table')
+  .action(async (options: { config?: string; stateDir?: string; json?: boolean }) => {
     const env = readEnvConfig(toOverrides(options))
     const { options: routerOptions, state: runtime } = await loadConfig(
       env.configPath,
@@ -236,7 +246,8 @@ cli
     const catalog = buildCatalog(routerOptions, models)
     const state = createState(routerOptions, catalog, models, runtime, env.stateDir)
     const snapshot = await collectLimitsSnapshot(state)
-    console.log(JSON.stringify(snapshot, null, 2))
+    if (options.json) console.log(JSON.stringify(snapshot, null, 2))
+    else console.log(formatLimits(snapshot))
   })
 
 const loadRouterOptions = async (options: { config?: string; stateDir?: string }) => {
@@ -254,11 +265,18 @@ cli
   )
   .option('--home-dir <dir>', 'Home directory for install (default: $HOME)')
   .option('--dry', 'Print planned writes without changing files')
+  .option('--json', 'Print raw JSON (models show)')
   .action(
     async (
       sub: string | undefined,
       model: string | undefined,
-      options: { config?: string; stateDir?: string; homeDir?: string; dry?: boolean }
+      options: {
+        config?: string
+        stateDir?: string
+        homeDir?: string
+        dry?: boolean
+        json?: boolean
+      }
     ) => {
       const env = readEnvConfig(toOverrides(options))
       const routerOptions = await loadRouterOptions(options)
@@ -276,7 +294,11 @@ cli
       if (sub === 'show') {
         if (!model)
           throw usageError('models show requires a model id: pi-route models show <model>')
-        console.log(JSON.stringify(showModel(routerOptions, models, model), null, 2))
+        if (options.json) {
+          console.log(JSON.stringify(showModel(routerOptions, models, model), null, 2))
+        } else {
+          console.log(renderModelDetail(routerOptions, models, model))
+        }
         return
       }
       if (sub === 'install') {
@@ -309,8 +331,8 @@ cli
           `unknown models subcommand: "${sub}" (expected: list | show | install | refresh)`
         )
       }
-      const ids = listModelIds(routerOptions, models)
-      if (ids.length > 0) console.log(ids.join('\n'))
+      const rows = modelRows(routerOptions, models)
+      if (rows.length > 0) console.log(renderModelList(rows, isTTY()))
     }
   )
 

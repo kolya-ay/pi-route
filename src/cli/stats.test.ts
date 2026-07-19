@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it, test } from 'bun:test'
 
-import { runStats } from './stats'
+import { formatTable, runStats } from './stats'
 
 const originalFetch = globalThis.fetch
 
@@ -295,5 +295,21 @@ describe('runStats', () => {
     globalThis.fetch = (async (_input: Request | string | URL, _init?: RequestInit) =>
       new Response('upstream broken', { status: 500 })) as typeof fetch
     await expect(runStats({ by: 'provider', since: '7d' })).rejects.toThrow(/500/)
+  })
+})
+
+describe('formatTable', () => {
+  test('renders the group column header, rule row, and values', () => {
+    const out = formatTable('provider', [
+      { key: 'anthropic', requests: 2, cost_usd: 0.03, tokens_in: 10, tokens_out: 5 }
+    ])
+    const lines = out.split('\n')
+    expect(lines[0]).toContain('provider') // header uses the `by` label
+    expect(lines[1]).toMatch(/^-+/) // rule row
+    expect(out).toContain('anthropic')
+    expect(out).toContain('0.03')
+  })
+  test('empty rows message unchanged', () => {
+    expect(formatTable('provider', [])).toBe('(no rows)')
   })
 })
