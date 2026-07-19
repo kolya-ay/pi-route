@@ -26,8 +26,8 @@
     "*.{ts,json}": "biome check --write --no-errors-on-unmatched"
   },
   "dependencies": {
+    "@earendil-works/pi-ai": "^0.80.10",
     "@hono/otel": "^1.1.2",
-    "@mariozechner/pi-ai": "^0.73.1",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/exporter-trace-otlp-http": "^0.219.0",
     "@opentelemetry/resources": "^2.9.0",

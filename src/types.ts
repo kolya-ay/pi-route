@@ -1,6 +1,6 @@
 // src/types.ts
 
-import type { OAuthCredentials } from '@mariozechner/pi-ai/oauth'
+import type { OAuthCredentials } from '@earendil-works/pi-ai'
 import type { Span } from '@opentelemetry/api'
 
 import type { CaptureOpts } from './telemetry/capture'
@@ -23,6 +23,10 @@ export type Provider = {
   readonly type: ProviderType
   dispatch(request: IncomingRequest, account: Account, apiKey: string): Promise<ProviderResponse>
 }
+
+// A configured provider plus the account dispatch uses. Shared by the dispatch
+// routes and health; the app builds one entry per configured provider.
+export type ProviderEntry = { provider: Provider; account: Account }
 
 // Telemetry hooks threaded from dispatch.ts to providers so pi-ai-runtime can
 // wrap event streams with TTFT/tokens/cost recording and optional prompt
@@ -100,7 +104,7 @@ export type ProviderConfig = {
   type: ProviderType
   baseUrl?: string | undefined
   account: Account
-  discover?: DiscoverStrategy[] | undefined
+  discover?: false | DiscoverStrategy[] | undefined
   modelOverrides?: Record<string, ModelMetaOverride> | undefined
 }
 
