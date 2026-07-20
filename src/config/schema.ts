@@ -6,7 +6,7 @@ import type { Account, PipelineEntry, ProviderConfig, RouterOptions } from '../t
 // bare credential-name string, or an object naming it plus an optional projectId.
 const AccountValueSchema = z.union([
   z.string(),
-  z.object({ name: z.string(), projectId: z.string().optional() })
+  z.strictObject({ name: z.string(), projectId: z.string().optional() })
 ])
 
 const DiscoverStrategySchema = z.enum([
@@ -18,7 +18,7 @@ const DiscoverStrategySchema = z.enum([
   'fallback'
 ])
 
-const ModelMetaOverrideSchema = z.object({
+const ModelMetaOverrideSchema = z.strictObject({
   name: z.string().optional(),
   contextWindow: z.number().optional(),
   maxTokens: z.number().optional(),
@@ -35,7 +35,7 @@ const ModelMetaOverrideSchema = z.object({
 })
 
 const ProviderSchema = z
-  .object({
+  .strictObject({
     type: z.string(),
     baseUrl: z.string().optional(),
     apiKey: z.string().optional(),
@@ -77,19 +77,29 @@ const normalizeAccount = (raw: RawProvider): Account => {
   }
 }
 
-const normalizeProvider = (raw: RawProvider): ProviderConfig => ({
-  type: raw.type,
-  ...(raw.baseUrl !== undefined ? { baseUrl: raw.baseUrl } : {}),
-  account: normalizeAccount(raw),
-  ...(raw.discover !== undefined ? { discover: raw.discover } : {}),
-  ...(raw.modelOverrides !== undefined ? { modelOverrides: raw.modelOverrides } : {})
-})
+// openai-compatible endpoints universally serve GET /models with context and
+// pricing fields, so discovery is on unless the config opts out.
+const OPENAI_LIKE = new Set(['openai-compatible', 'openai'])
+
+const normalizeDiscover = (raw: RawProvider): ProviderConfig['discover'] =>
+  raw.discover !== undefined ? raw.discover : OPENAI_LIKE.has(raw.type) ? ['auto'] : undefined
+
+const normalizeProvider = (raw: RawProvider): ProviderConfig => {
+  const discover = normalizeDiscover(raw)
+  return {
+    type: raw.type,
+    ...(raw.baseUrl !== undefined ? { baseUrl: raw.baseUrl } : {}),
+    account: normalizeAccount(raw),
+    ...(discover !== undefined ? { discover } : {}),
+    ...(raw.modelOverrides !== undefined ? { modelOverrides: raw.modelOverrides } : {})
+  }
+}
 
 const StrategySchema = z.enum(['round-robin', 'sticky', 'fill-first', 'failover'])
 const MatchSchema = z.enum(['prefix', 'exact'])
-const WhenSchema = z.object({ thinking: z.boolean().optional() })
+const WhenSchema = z.strictObject({ thinking: z.boolean().optional() })
 
-const PipelineEntryObjectSchema = z.object({
+const PipelineEntryObjectSchema = z.strictObject({
   to: z.union([z.string(), z.array(z.string()).nonempty()]),
   match: MatchSchema.optional(),
   strategy: StrategySchema.optional(),
@@ -102,14 +112,14 @@ const PipelineValueSchema = z.union([
   PipelineEntryObjectSchema
 ])
 
-const OpencodeSchema = z.union([z.boolean(), z.object({ api: z.string().optional() })])
+const OpencodeSchema = z.union([z.boolean(), z.strictObject({ api: z.string().optional() })])
 
-const ServerSchema = z.object({
+const ServerSchema = z.strictObject({
   authToken: z.string().optional(),
   opencode: OpencodeSchema.optional()
 })
 
-const RootSchema = z.object({
+const RootSchema = z.strictObject({
   providers: z.record(z.string(), ProviderSchema).default({}),
   pipeline: z.record(z.string(), PipelineValueSchema).default({}),
   expose: z.array(z.string()).default([]),
@@ -138,12 +148,21 @@ const desugar = (name: string, value: z.infer<typeof PipelineValueSchema>): Pipe
   }
 }
 
+// A top-level key indented one level too deep lands here as a pipeline entry:
+// `expose:` under `pipeline:` parses as a pool and silently disables filtering.
+const RESERVED_PIPELINE_NAMES = new Set(['expose', 'providers', 'server'])
+
 export const parseConfig = (raw: unknown): RouterOptions => {
   const parsed = RootSchema.parse(raw)
 
   const providerNames = new Set(Object.keys(parsed.providers))
   const pipeline: PipelineEntry[] = []
   for (const [name, value] of Object.entries(parsed.pipeline)) {
+    if (RESERVED_PIPELINE_NAMES.has(name)) {
+      throw new Error(
+        `pipeline entry "${name}" is a reserved top-level key — de-indent it to the top level`
+      )
+    }
     if (providerNames.has(name)) {
       throw new Error(
         `name collision: pipeline entry "${name}" conflicts with provider; rename one`

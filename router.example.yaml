@@ -26,13 +26,13 @@ providers:
   #   apiKey: $CHUTES_API_KEY
 
 # Server-facing settings: the gate token and the OpenCode /api.json masquerade.
-server:
-  # One bearer token the server accepts. Clients present the same value as their
-  # API key (PI_ROUTE_API_KEY). Prefer $VAR or the systemd credential over a literal.
-  # authToken: $PI_ROUTE_AUTH_TOKEN
-  #
-  # Serve /api.json (models.dev shape) so OpenCode can discover models.
-  # opencode: true
+# server:
+#   One bearer token the server accepts. Clients present the same value as their
+#   API key (PI_ROUTE_API_KEY). Prefer $VAR or the systemd credential over a literal.
+#   authToken: $PI_ROUTE_AUTH_TOKEN
+#
+#   Serve /api.json (models.dev shape) so OpenCode can discover models.
+#   opencode: true
 
 # Routing pipeline. Each entry's YAML value shape declares its semantics:
 #   key: target           → alias (rewrite bare name to target)

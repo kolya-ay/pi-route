@@ -252,12 +252,75 @@ describe('parseConfig — server section', () => {
     })
     expect(opts.server?.opencode).toEqual({ api: 'https://host/v1' })
   })
-  test('a top-level opencode key is no longer accepted as config', () => {
-    const opts = parseConfig({ providers: {}, pipeline: {}, opencode: true })
-    expect(opts.server).toBeUndefined()
+  test('a top-level opencode key is rejected, not silently dropped', () => {
+    expect(() => parseConfig({ providers: {}, pipeline: {}, opencode: true })).toThrow()
   })
   test('server.opencode false desugars to undefined', () => {
     const opts = parseConfig({ providers: {}, pipeline: {}, server: { opencode: false } })
     expect(opts.server?.opencode).toBeUndefined()
+  })
+})
+
+describe('discover defaults', () => {
+  test('openai-compatible without discover defaults to auto', () => {
+    const o = parseConfig({
+      providers: { chutes: { type: 'openai-compatible', baseUrl: 'https://x/v1', apiKey: 'k' } }
+    })
+    expect(o.providers.chutes?.discover).toEqual(['auto'])
+  })
+
+  test('an explicit chain is preserved', () => {
+    const o = parseConfig({
+      providers: {
+        nvidia: {
+          type: 'openai-compatible',
+          baseUrl: 'https://x/v1',
+          apiKey: 'k',
+          discover: ['guess']
+        }
+      }
+    })
+    expect(o.providers.nvidia?.discover).toEqual(['guess'])
+  })
+
+  test('discover: false stays an opt-out', () => {
+    const o = parseConfig({
+      providers: {
+        x: { type: 'openai-compatible', baseUrl: 'https://x/v1', apiKey: 'k', discover: false }
+      }
+    })
+    expect(o.providers.x?.discover).toBe(false)
+  })
+
+  test('other provider types get no default', () => {
+    const o = parseConfig({ providers: { cc: { type: 'anthropic', account: 'cc' } } })
+    expect(o.providers.cc?.discover).toBeUndefined()
+  })
+})
+
+describe('strictness', () => {
+  test('an unknown provider key is rejected', () => {
+    expect(() =>
+      parseConfig({
+        providers: { x: { type: 'openai-compatible', basUrl: 'https://x', apiKey: 'k' } }
+      })
+    ).toThrow()
+  })
+
+  test('an unknown root key is rejected', () => {
+    expect(() => parseConfig({ providers: {}, expse: [] })).toThrow()
+  })
+
+  test('a pipeline entry named expose is rejected with a hint', () => {
+    expect(() => parseConfig({ providers: {}, pipeline: { expose: ['cc/*'] } })).toThrow(
+      /reserved top-level key/
+    )
+  })
+
+  // Only the tracked config: router.local.yaml is gitignored (live keys), so
+  // reading it here would ENOENT on a clean checkout.
+  test('the shipped example config still parses', async () => {
+    const raw = Bun.YAML.parse(await Bun.file('router.example.yaml').text())
+    expect(() => parseConfig(raw)).not.toThrow()
   })
 })

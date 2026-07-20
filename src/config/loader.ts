@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { RouterOptions } from '../types'
 import { interpolateEnvVars } from './env'
-import { ConfigError } from './errors'
+import { ConfigError, ConfigNotFoundError } from './errors'
 import { parseConfig } from './schema'
 import { readRuntimeState } from './state'
 
@@ -14,7 +14,9 @@ export const loadConfig = async (configPath: string, authDir: string) => {
     text = await Bun.file(configPath).text()
   } catch (error) {
     if (isENOENT(error)) {
-      throw new ConfigError(`Config file not found: ${configPath}\nCreate it or pass -c <path>.`)
+      throw new ConfigNotFoundError(
+        `Config file not found: ${configPath}\nCreate it or pass -c <path>.`
+      )
     }
     throw new ConfigError(
       `Cannot read config ${configPath}: ${error instanceof Error ? error.message : String(error)}`
