@@ -78,6 +78,7 @@ type ProviderOpts = {
   key?: string
   keyEnv?: string
   type?: string
+  json?: boolean
 }
 
 // pi-ai login interaction over stdin/stdout: print auth URLs / progress, read a
@@ -174,22 +175,36 @@ const printProviderList = async (env: EnvConfig): Promise<void> => {
   console.log(formatProviderList(options, invalid))
 }
 
+const printLimits = async (env: EnvConfig, json = false): Promise<void> => {
+  const { options, state: runtime } = await loadConfig(env.configPath, env.stateDir)
+  const models = buildModels(options, { stateDir: env.stateDir, authDir: env.stateDir })
+  const catalog = buildCatalog(options, models)
+  const state = createState(options, catalog, models, runtime, env.stateDir)
+  const snapshot = await collectLimitsSnapshot(state)
+  if (json) console.log(JSON.stringify(snapshot, null, 2))
+  else console.log(formatLimits(snapshot))
+}
+
 cli
   .command(
     'provider [...args]',
-    'Manage providers: <name> auth [type] | <name> set --url … | list | <name> refresh | <name> logout'
+    'Manage providers: <name> auth [type] | <name> set --url … | list | limits | <name> refresh | <name> logout'
   )
   .option('--url <url>', 'openai-compatible base URL (set)')
   .option('--key <key>', 'literal API key written to config (set)')
   .option('--key-env <name>', 'env var name, written as $NAME (set)')
   .option('--type <type>', 'provider type (set; default openai-compatible)')
+  .option('--json', 'Print the raw JSON snapshot instead of a table (limits)')
   .action(async (args: string[], opts: ProviderOpts) => {
     const env = readEnvConfig(toOverrides(opts))
-    if (args.length === 1 && args[0] === 'list') return void (await printProviderList(env))
+    if (args.length === 1) {
+      if (args[0] === 'list') return void (await printProviderList(env))
+      if (args[0] === 'limits') return void (await printLimits(env, opts.json))
+    }
     const [name, verb, typeArg] = args
     if (!name || !verb) {
       throw usageError(
-        'usage: pi-route provider <name> <auth|set|refresh|logout>  |  pi-route provider list'
+        'usage: pi-route provider <name> <auth|set|refresh|logout>  |  pi-route provider <list|limits>'
       )
     }
     switch (verb) {
@@ -232,23 +247,6 @@ cli
       )
     }
   )
-
-cli
-  .command('limits', 'Print a rate-limit snapshot')
-  .option('--json', 'Print the raw JSON snapshot instead of a table')
-  .action(async (options: { config?: string; stateDir?: string; json?: boolean }) => {
-    const env = readEnvConfig(toOverrides(options))
-    const { options: routerOptions, state: runtime } = await loadConfig(
-      env.configPath,
-      env.stateDir
-    )
-    const models = buildModels(routerOptions, { stateDir: env.stateDir, authDir: env.stateDir })
-    const catalog = buildCatalog(routerOptions, models)
-    const state = createState(routerOptions, catalog, models, runtime, env.stateDir)
-    const snapshot = await collectLimitsSnapshot(state)
-    if (options.json) console.log(JSON.stringify(snapshot, null, 2))
-    else console.log(formatLimits(snapshot))
-  })
 
 const loadRouterOptions = async (options: { config?: string; stateDir?: string }) => {
   const env = readEnvConfig(toOverrides(options))

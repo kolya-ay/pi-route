@@ -50,26 +50,27 @@ test('stats --by bogus exits 2 with a clear message', async () => {
   expect(stderr.toLowerCase()).toContain('by')
 })
 
-test('limits with a missing config exits 3', async () => {
+test('provider limits with a missing config exits 3', async () => {
   const dir = tmp()
-  const { stderr, exitCode } = await run(['limits', '-c', join(dir, 'nope.yaml')])
+  const { stderr, exitCode } = await run(['provider', 'limits', '-c', join(dir, 'nope.yaml')])
   expect(exitCode).toBe(3)
   expect(stderr).toContain('Config file not found')
 })
 
-test('limits with malformed config exits 3', async () => {
+test('provider limits with malformed config exits 3', async () => {
   const dir = tmp()
   const path = join(dir, 'router.yaml')
   writeFileSync(path, 'providers: [unclosed')
-  const { exitCode } = await run(['limits', '-c', path])
+  const { exitCode } = await run(['provider', 'limits', '-c', path])
   expect(exitCode).toBe(3)
 })
 
-test('limits with a valid empty config exits 0 and prints JSON with --json', async () => {
+test('provider limits with a valid empty config exits 0 and prints JSON with --json', async () => {
   const dir = tmp()
   const cfg = join(dir, 'router.yaml')
   writeFileSync(cfg, 'providers: {}\npipeline: {}\nexpose: []\n')
   const { stdout, exitCode } = await run([
+    'provider',
     'limits',
     '-c',
     cfg,
@@ -81,11 +82,18 @@ test('limits with a valid empty config exits 0 and prints JSON with --json', asy
   expect(() => JSON.parse(stdout)).not.toThrow()
 })
 
-test('limits with a valid empty config exits 0 and prints the empty-table message', async () => {
+test('provider limits with a valid empty config exits 0 and prints the empty-table message', async () => {
   const dir = tmp()
   const cfg = join(dir, 'router.yaml')
   writeFileSync(cfg, 'providers: {}\npipeline: {}\nexpose: []\n')
-  const { stdout, exitCode } = await run(['limits', '-c', cfg, '--state-dir', join(dir, 'auth')])
+  const { stdout, exitCode } = await run([
+    'provider',
+    'limits',
+    '-c',
+    cfg,
+    '--state-dir',
+    join(dir, 'auth')
+  ])
   expect(exitCode).toBe(0)
   expect(stdout.trim()).toBe('(no providers)')
 })
