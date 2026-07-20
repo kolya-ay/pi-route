@@ -346,21 +346,6 @@ cli
     console.log(formatTable(by, rows))
   })
 
-cli.command('query', 'Deprecated: use the OTel viewer UI').action(() => {
-  const viewer =
-    process.env.PI_ROUTE_VIEWER_URL ??
-    `http://localhost:${process.env.PI_ROUTE_VIEWER_PORT ?? '8000'}`
-  throw usageError(
-    [
-      'pi-route query is deprecated.',
-      '',
-      `Open the viewer UI: ${viewer}`,
-      'Or run ad-hoc SQL against the viewer database:',
-      '  duckdb ~/.cache/pi-route/otel.duckdb'
-    ].join('\n')
-  )
-})
-
 cli
   .command('completion [shell]', 'Print a shell completion script (bash|zsh|fish)')
   .action((shell: string | undefined) => {
