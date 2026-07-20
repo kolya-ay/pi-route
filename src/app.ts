@@ -74,7 +74,7 @@ export const createApp = async (
   const models = buildModels(options, { stateDir: env.stateDir, authDir: env.stateDir })
   await models.refresh({ allowNetwork: false }) // offline restore of persisted overlays
 
-  const catalog = buildCatalog(options, models)
+  const catalog = buildCatalog(options, models, env.stateDir)
   await enrichLiveMeta(options, catalog)
 
   initOtel({ otlpUrl: env.otlpUrl, serviceName: env.serviceName })
@@ -87,7 +87,7 @@ export const createApp = async (
     models
       .refresh()
       .then(async () => {
-        const next = buildCatalog(options, models)
+        const next = buildCatalog(options, models, env.stateDir)
         await enrichLiveMeta(options, next)
         state.catalog = next
       })

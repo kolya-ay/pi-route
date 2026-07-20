@@ -88,7 +88,7 @@ describe('resolveMetadata', () => {
   test('fallback fills an otherwise-unknown model', () => {
     const opts = base(['fallback'])
     const models = cerebrasModels()
-    const cat = buildCatalog(opts, models)
+    const cat = buildCatalog(opts, models, '/tmp')
     cat.addresses.add('nv/foo/bar')
     cat.leafFor.set('nv/foo/bar', 'nv/foo/bar')
     const meta = resolveMetadata(opts, cat, models, 'nv/foo/bar')
@@ -98,7 +98,7 @@ describe('resolveMetadata', () => {
   test('guess beats fallback when listed first', () => {
     const opts = base(['guess', 'fallback'])
     const models = cerebrasModels()
-    const cat = buildCatalog(opts, models)
+    const cat = buildCatalog(opts, models, '/tmp')
     cat.addresses.add('nv/gpt-oss-120b')
     cat.leafFor.set('nv/gpt-oss-120b', 'nv/gpt-oss-120b')
     const meta = resolveMetadata(opts, cat, models, 'nv/gpt-oss-120b')
@@ -108,7 +108,7 @@ describe('resolveMetadata', () => {
   test('override patches the chain result', () => {
     const opts = base(['fallback'], { 'foo/bar': { contextWindow: 42 } })
     const models = cerebrasModels()
-    const cat = buildCatalog(opts, models)
+    const cat = buildCatalog(opts, models, '/tmp')
     cat.addresses.add('nv/foo/bar')
     cat.leafFor.set('nv/foo/bar', 'nv/foo/bar')
     expect(resolveMetadata(opts, cat, models, 'nv/foo/bar')?.contextWindow).toBe(42)
@@ -119,7 +119,7 @@ describe('resolveMetadata', () => {
     // An alias whose leaf points at a live entry must resolve correctly.
     const opts = base(['openai-models-list'])
     const models = cerebrasModels()
-    const cat = buildCatalog(opts, models)
+    const cat = buildCatalog(opts, models, '/tmp')
     cat.liveMeta.set('nv/real-model', { name: 'Real', contextWindow: 40960, reasoning: false })
     cat.addresses.add('big')
     cat.leafFor.set('big', 'nv/real-model')

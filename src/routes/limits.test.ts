@@ -22,7 +22,13 @@ const writeCredentialFile = async (
 
 const makeState = (options: RouterOptions, authDir: string) => {
   const models = buildModels(options, { stateDir: authDir, authDir })
-  return createState(options, buildCatalog(options, models), models, { accounts: {} }, authDir)
+  return createState(
+    options,
+    buildCatalog(options, models, authDir),
+    models,
+    { accounts: {} },
+    authDir
+  )
 }
 
 afterEach(() => {

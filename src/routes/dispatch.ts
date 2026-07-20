@@ -122,9 +122,11 @@ export const createDispatchHandler = (deps: DispatchDeps) => {
         ? `provider "${decision.provider}" not in registry`
         : entry.account.disabled === true
           ? `provider "${decision.provider}" account is disabled`
-          : runtime?.isInvalid === true
-            ? `provider "${decision.provider}" account marked invalid`
-            : null
+          : !state.catalog.available.has(decision.provider)
+            ? `provider "${decision.provider}" is not logged in (run: pi-route provider login ${decision.provider})`
+            : runtime?.isInvalid === true
+              ? `provider "${decision.provider}" account marked invalid`
+              : null
       if (gateError !== null) {
         lastErr = new Error(gateError)
         emitFallback(gateError)

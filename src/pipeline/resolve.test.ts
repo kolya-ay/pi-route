@@ -15,7 +15,7 @@ const opts = (over: Partial<RouterOptions> = {}): RouterOptions => ({
 })
 
 const resolve = (o: RouterOptions, model: string, req: { thinking?: boolean } = {}) =>
-  resolveCandidates(o, buildCatalog(o, buildTestModels(o)), model, req)
+  resolveCandidates(o, buildCatalog(o, buildTestModels(o), '/tmp'), model, req)
 
 const first = (o: RouterOptions, model: string, req: { thinking?: boolean } = {}) => {
   const list = resolve(o, model, req)

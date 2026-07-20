@@ -29,7 +29,13 @@ const mkApp = (
   options: RouterOptions = baseOpts
 ): { app: Hono<{ Variables: { requestId: string } }>; state: RouterState } => {
   const models = buildTestModels(options)
-  const state = createState(options, buildCatalog(options, models), models, { accounts: {} }, dir)
+  const state = createState(
+    options,
+    buildCatalog(options, models, dir),
+    models,
+    { accounts: {} },
+    dir
+  )
   const app = new Hono<{ Variables: { requestId: string } }>()
   mountAdmin(app, state, { authKey })
   return { app, state }

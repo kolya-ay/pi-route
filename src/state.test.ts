@@ -15,7 +15,7 @@ const minimalOptions: RouterOptions = {
 describe('createState', () => {
   it('returns state with provided options', () => {
     const models = buildTestModels(minimalOptions)
-    const catalog = buildCatalog(minimalOptions, models)
+    const catalog = buildCatalog(minimalOptions, models, '/tmp')
     const runtime = { accounts: {} }
     const state = createState(minimalOptions, catalog, models, runtime, '/tmp/auth')
     expect(state.options).toBe(minimalOptions)
