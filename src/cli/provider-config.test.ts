@@ -59,8 +59,22 @@ describe('formatProviderList', () => {
     expose: []
   } as unknown as RouterOptions
 
+  const withDisabled = {
+    providers: {
+      cerebras: { type: 'openai-compatible', account: { credential: 'apiKey', name: 'cerebras' } },
+      off: {
+        type: 'openai-compatible',
+        account: { credential: 'apiKey', name: 'off', disabled: true }
+      }
+    },
+    pipeline: [],
+    expose: []
+  } as unknown as RouterOptions
+
+  const noFlags = { invalid: new Set<string>(), loggedOut: new Set<string>(), all: false }
+
   test('table with header and one row per provider; status column present', () => {
-    const out = formatProviderList(options, new Set(['cc']))
+    const out = formatProviderList(options, { ...noFlags, invalid: new Set(['cc']) })
     const lines = out.split('\n')
     expect(lines[0]).toContain('PROVIDER')
     expect(lines[0]).toContain('STATUS')
@@ -73,8 +87,18 @@ describe('formatProviderList', () => {
     expect(
       formatProviderList(
         { providers: {}, pipeline: [], expose: [] } as unknown as RouterOptions,
-        new Set()
+        noFlags
       )
     ).toBe('(no providers)')
+  })
+
+  test('an oauth provider with no credential file reports logged-out', () => {
+    const out = formatProviderList(options, { ...noFlags, loggedOut: new Set(['cc']) })
+    expect(out).toContain('logged-out')
+  })
+
+  test('disabled providers are hidden unless all is set', () => {
+    expect(formatProviderList(withDisabled, noFlags)).not.toContain('off')
+    expect(formatProviderList(withDisabled, { ...noFlags, all: true })).toContain('off')
   })
 })

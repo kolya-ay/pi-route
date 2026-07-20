@@ -2,13 +2,15 @@
 
 // src/cli.ts
 
-import type { AuthEvent, AuthInteraction, AuthPrompt } from '@earendil-works/pi-ai'
+import type { ModelsRefreshOptions } from '@earendil-works/pi-ai'
 import cac from 'cac'
 import { z } from 'zod'
 
 import { AGENTS } from './cli/agents'
 import { generateCompletion } from './cli/completion'
+import { usageError } from './cli/errors'
 import { isTTY } from './cli/format'
+import { stdinInteraction } from './cli/interaction'
 import { formatLimits } from './cli/limits'
 import {
   modelRows,
@@ -20,8 +22,10 @@ import {
 } from './cli/models'
 import { formatProviderList, removeCredential, upsertProviderBlock } from './cli/provider-config'
 import { formatTable, runStats } from './cli/stats'
+import { dispatchVerb, type Verb } from './cli/verbs'
+import { availableProviders } from './config/availability'
 import { type EnvConfig, type EnvPathOverrides, readEnvConfig } from './config/env'
-import { ConfigError } from './config/errors'
+import { ConfigError, ConfigNotFoundError } from './config/errors'
 import { loadConfig } from './config/loader'
 import { credentialName } from './config/schema'
 import { readRuntimeState } from './config/state'
@@ -31,27 +35,11 @@ import { buildCatalog } from './pipeline/catalog'
 import { createState } from './state'
 import type { Account, RouterOptions } from './types'
 
-// cac tags its own arg/option errors with name 'CACError' (not exported). Reuse that
-// name so self-raised usage errors share the exit-2 path — no bespoke error type.
-const usageError = (message: string): Error =>
-  Object.assign(new Error(message), { name: 'CACError' })
-
 const toOverrides = (options: { config?: string; stateDir?: string }): EnvPathOverrides => {
   const overrides: EnvPathOverrides = {}
   if (options.config) overrides.configPath = options.config
   if (options.stateDir) overrides.stateDir = options.stateDir
   return overrides
-}
-
-const tryOpen = (url: string): void => {
-  for (const opener of ['xdg-open', 'open']) {
-    try {
-      Bun.spawn([opener, url]).exited.catch(() => {})
-      return
-    } catch {
-      // try next opener
-    }
-  }
 }
 
 const StatsArgsSchema = z.object({
@@ -78,34 +66,43 @@ type ProviderOpts = {
   key?: string
   keyEnv?: string
   type?: string
+  all?: boolean
   json?: boolean
 }
 
-// pi-ai login interaction over stdin/stdout: print auth URLs / progress, read a
-// line for any prompt. Bun's global prompt() reads a single line synchronously.
-const stdinInteraction = (): AuthInteraction => ({
-  notify(event: AuthEvent): void {
-    if (event.type === 'auth_url') {
-      console.error(`Open in browser: ${event.url}`)
-      if (event.instructions) console.error(event.instructions)
-      tryOpen(event.url)
-    } else if (event.type === 'device_code') {
-      console.error(`Enter code ${event.userCode} at ${event.verificationUri}`)
-    } else {
-      console.error(`… ${event.message}`)
-    }
-  },
-  async prompt(prompt: AuthPrompt): Promise<string> {
-    return globalThis.prompt(prompt.message) ?? ''
-  }
-})
+// pi-ai ships OAuth flows for these; a bare `pi-route provider login anthropic`
+// is only meaningful when the name IS one of them.
+const OAUTH_TYPES = ['anthropic', 'openai-codex', 'antigravity']
 
-const providerAuth = async (
+// Resolution order: an explicit --type always wins; else the type already on
+// record for this provider (so logging in again never clobbers it); else the
+// provider name itself, but only when it is a known OAuth-capable type.
+export const resolveLoginType = async (
+  env: EnvConfig,
+  name: string,
+  explicit: string | undefined
+): Promise<string> => {
+  if (explicit) return explicit
+  // Only "no config yet" falls through to name-based inference. A config that
+  // exists but doesn't parse must surface here — otherwise the login below
+  // would go on to write a provider block into a file nobody can load.
+  const configured = await loadConfig(env.configPath, env.stateDir)
+    .then((c) => c.options.providers[name]?.type)
+    .catch((err) => {
+      if (err instanceof ConfigNotFoundError) return undefined
+      throw err
+    })
+  if (configured) return configured
+  if (OAUTH_TYPES.includes(name)) return name
+  throw usageError(`provider login ${name}: pass --type (one of: ${OAUTH_TYPES.join(', ')})`)
+}
+
+const providerLogin = async (
   env: EnvConfig,
   name: string,
   typeArg: string | undefined
 ): Promise<void> => {
-  const configType = typeArg ?? name
+  const configType = await resolveLoginType(env, name, typeArg)
   // Synthesize a one-provider config so the CredentialStore writes to the same
   // `<type>-<account>.json` file the loader resolves for a configured provider.
   const account: Account = { credential: 'oauth', name: credentialName(configType, name) }
@@ -164,7 +161,7 @@ const providerLogout = async (env: EnvConfig, name: string): Promise<void> => {
   console.log(removed ? `Removed credential ${name}` : `No credential file for ${name}`)
 }
 
-const printProviderList = async (env: EnvConfig): Promise<void> => {
+const printProviderList = async (env: EnvConfig, all = false): Promise<void> => {
   const { options } = await loadConfig(env.configPath, env.stateDir)
   const runtime = await readRuntimeState(env.stateDir)
   const invalid = new Set(
@@ -172,53 +169,79 @@ const printProviderList = async (env: EnvConfig): Promise<void> => {
       .filter(([, v]) => v.isInvalid)
       .map(([k]) => k)
   )
-  console.log(formatProviderList(options, invalid))
+  const available = availableProviders(options, env.stateDir)
+  const loggedOut = new Set(
+    Object.entries(options.providers)
+      .filter(([name, p]) => p.account.credential === 'oauth' && !available.has(name))
+      .map(([name]) => name)
+  )
+  console.log(formatProviderList(options, { invalid, loggedOut, all }))
 }
 
 const printLimits = async (env: EnvConfig, json = false): Promise<void> => {
   const { options, state: runtime } = await loadConfig(env.configPath, env.stateDir)
   const models = buildModels(options, { stateDir: env.stateDir, authDir: env.stateDir })
-  const catalog = buildCatalog(options, models)
+  const catalog = buildCatalog(options, models, env.stateDir)
   const state = createState(options, catalog, models, runtime, env.stateDir)
   const snapshot = await collectLimitsSnapshot(state)
   if (json) console.log(JSON.stringify(snapshot, null, 2))
   else console.log(formatLimits(snapshot))
 }
 
+const PROVIDER_VERBS: Verb<ProviderOpts, EnvConfig>[] = [
+  {
+    name: 'list',
+    description: 'List configured providers',
+    flags: ['--all'],
+    run: async (env, _arg, opts) => printProviderList(env, opts.all === true)
+  },
+  {
+    name: 'limits',
+    description: 'Show usage limits',
+    flags: ['--json'],
+    run: async (env, _arg, opts) => printLimits(env, opts.json)
+  },
+  {
+    name: 'login',
+    arg: '<name>',
+    description: 'Log in via OAuth and register the provider',
+    flags: ['--type'],
+    run: async (env, arg, opts) => providerLogin(env, arg as string, opts.type)
+  },
+  {
+    name: 'set',
+    arg: '<name>',
+    description: 'Register a key-based provider',
+    flags: ['--url', '--key', '--key-env', '--type'],
+    run: async (env, arg, opts) => providerSet(env, arg as string, opts)
+  },
+  {
+    name: 'refresh',
+    arg: '<name>',
+    description: 'Refresh an OAuth credential now',
+    flags: [],
+    run: async (env, arg) => providerRefresh(env, arg as string)
+  },
+  {
+    name: 'logout',
+    arg: '<name>',
+    description: 'Delete a stored credential',
+    flags: [],
+    run: async (env, arg) => providerLogout(env, arg as string)
+  }
+]
+
 cli
-  .command(
-    'provider [...args]',
-    'Manage providers: <name> auth [type] | <name> set --url … | list | limits | <name> refresh | <name> logout'
-  )
-  .option('--url <url>', 'openai-compatible base URL (set)')
-  .option('--key <key>', 'literal API key written to config (set)')
+  .command('provider [...args]', 'Manage providers (login, set, list, limits, refresh, logout)')
+  .option('-u, --url <url>', 'openai-compatible base URL (set)')
+  .option('-k, --key <key>', 'literal API key written to config (set)')
   .option('--key-env <name>', 'env var name, written as $NAME (set)')
-  .option('--type <type>', 'provider type (set; default openai-compatible)')
-  .option('--json', 'Print the raw JSON snapshot instead of a table (limits)')
+  .option('-t, --type <type>', 'provider type (login, set)')
+  .option('--all', 'Include disabled providers (list)')
+  .option('--json', 'Print the raw JSON snapshot (limits)')
   .action(async (args: string[], opts: ProviderOpts) => {
     const env = readEnvConfig(toOverrides(opts))
-    if (args.length === 1) {
-      if (args[0] === 'list') return void (await printProviderList(env))
-      if (args[0] === 'limits') return void (await printLimits(env, opts.json))
-    }
-    const [name, verb, typeArg] = args
-    if (!name || !verb) {
-      throw usageError(
-        'usage: pi-route provider <name> <auth|set|refresh|logout>  |  pi-route provider <list|limits>'
-      )
-    }
-    switch (verb) {
-      case 'auth':
-        return void (await providerAuth(env, name, typeArg))
-      case 'set':
-        return void (await providerSet(env, name, opts))
-      case 'refresh':
-        return void (await providerRefresh(env, name))
-      case 'logout':
-        return void (await providerLogout(env, name))
-      default:
-        throw usageError(`unknown provider verb "${verb}" (expected auth|set|refresh|logout)`)
-    }
+    await dispatchVerb('provider', PROVIDER_VERBS, args, opts, env)
   })
 
 cli
@@ -248,91 +271,126 @@ cli
     }
   )
 
-const loadRouterOptions = async (options: { config?: string; stateDir?: string }) => {
-  const env = readEnvConfig(toOverrides(options))
-  const { options: routerOptions } = await loadConfig(env.configPath, env.stateDir)
-  return routerOptions
+const agentNames = AGENTS.map((a) => a.name).join(', ')
+
+type ModelsOpts = {
+  config?: string
+  stateDir?: string
+  homeDir?: string
+  dry?: boolean
+  json?: boolean
 }
 
-const agentNames = AGENTS.map((a) => a.name).join(', ')
+// Defaults to an offline restore of the persisted overlays, which every
+// listing/install path needs for accurate metadata.
+const modelsAndOptions = async (
+  env: EnvConfig,
+  refresh: ModelsRefreshOptions = { allowNetwork: false }
+) => {
+  const { options: routerOptions } = await loadConfig(env.configPath, env.stateDir)
+  const models = buildModels(routerOptions, { stateDir: env.stateDir, authDir: env.stateDir })
+  await models.refresh(refresh)
+  return { routerOptions, models }
+}
+
+const printModelsList = async (env: EnvConfig): Promise<void> => {
+  const { routerOptions, models } = await modelsAndOptions(env)
+  const rows = modelRows(routerOptions, models, env.stateDir)
+  if (rows.length > 0) console.log(renderModelList(rows, isTTY()))
+}
+
+const printModelShow = async (env: EnvConfig, id: string, json: boolean): Promise<void> => {
+  const { routerOptions, models } = await modelsAndOptions(env)
+  if (json) {
+    console.log(JSON.stringify(showModel(routerOptions, models, env.stateDir, id), null, 2))
+  } else {
+    console.log(renderModelDetail(routerOptions, models, env.stateDir, id))
+  }
+}
+
+const installModels = async (
+  env: EnvConfig,
+  agentName: string | undefined,
+  opts: { homeDir?: string; dry?: boolean }
+): Promise<void> => {
+  const { routerOptions, models } = await modelsAndOptions(env)
+  if (!agentName) {
+    console.log(
+      ['Available agents:', ...AGENTS.map((a) => `  ${a.name.padEnd(10)} ${a.description}`)].join(
+        '\n'
+      )
+    )
+    return
+  }
+  if (!AGENTS.some((a) => a.name === agentName))
+    throw usageError(`unknown models install agent: ${agentName}`)
+  // Bake pi-route's own URL into client configs (clients don't uniformly
+  // expand shell vars). The token is a secret — it stays in the client's
+  // PI_ROUTE_API_KEY / ANTHROPIC_AUTH_TOKEN env var, never written to a file.
+  const host = env.host === '0.0.0.0' || env.host === '::' ? '127.0.0.1' : env.host
+  const setupOpts: { dry: boolean; url: string; homeDir?: string } = {
+    dry: Boolean(opts.dry),
+    url: `http://${host}:${env.port}`
+  }
+  if (opts.homeDir) setupOpts.homeDir = opts.homeDir
+  const writes = await setupModels(routerOptions, models, env.stateDir, agentName, setupOpts)
+  if (opts.dry) console.log(renderPlannedWrites(writes))
+}
+
+const refreshModels = async (env: EnvConfig): Promise<void> => {
+  // Force a network fetch and persist; a running server picks the stores up
+  // at its next 4h cycle or on restart.
+  const { routerOptions, models } = await modelsAndOptions(env, { force: true })
+  for (const name of Object.keys(routerOptions.providers)) {
+    console.log(`${name}: ${models.getModels(name).length}`)
+  }
+}
+
+const MODELS_VERBS: Verb<ModelsOpts, EnvConfig>[] = [
+  {
+    name: 'list',
+    description: 'List exposed models',
+    flags: [],
+    run: async (env) => printModelsList(env)
+  },
+  {
+    name: 'show',
+    arg: '<model>',
+    description: 'Show a model detail block',
+    flags: ['--json'],
+    run: async (env, arg, opts) => printModelShow(env, arg as string, opts.json === true)
+  },
+  {
+    name: 'install',
+    arg: '[agent]',
+    description: `Install agent configs (agents: ${agentNames})`,
+    flags: ['--home-dir', '--dry'],
+    run: async (env, arg, opts) =>
+      installModels(env, arg, {
+        ...(opts.homeDir ? { homeDir: opts.homeDir } : {}),
+        ...(opts.dry !== undefined ? { dry: opts.dry } : {})
+      })
+  },
+  {
+    name: 'refresh',
+    description: 'Force a network refresh of model metadata',
+    flags: [],
+    run: async (env) => refreshModels(env)
+  }
+]
 
 cli
   .command(
-    'models [sub] [model]',
+    'models [...args]',
     `List / show / install / refresh models (install agents: ${agentNames})`
   )
   .option('--home-dir <dir>', 'Home directory for install (default: $HOME)')
   .option('--dry', 'Print planned writes without changing files')
   .option('--json', 'Print raw JSON (models show)')
-  .action(
-    async (
-      sub: string | undefined,
-      model: string | undefined,
-      options: {
-        config?: string
-        stateDir?: string
-        homeDir?: string
-        dry?: boolean
-        json?: boolean
-      }
-    ) => {
-      const env = readEnvConfig(toOverrides(options))
-      const routerOptions = await loadRouterOptions(options)
-      const models = buildModels(routerOptions, { stateDir: env.stateDir, authDir: env.stateDir })
-      if (sub === 'refresh') {
-        // Force a network fetch and persist; a running server picks the stores up
-        // at its next 4h cycle or on restart.
-        await models.refresh({ force: true })
-        for (const name of Object.keys(routerOptions.providers)) {
-          console.log(`${name}: ${models.getModels(name).length}`)
-        }
-        return
-      }
-      await models.refresh({ allowNetwork: false }) // offline restore for accurate listings
-      if (sub === 'show') {
-        if (!model)
-          throw usageError('models show requires a model id: pi-route models show <model>')
-        if (options.json) {
-          console.log(JSON.stringify(showModel(routerOptions, models, model), null, 2))
-        } else {
-          console.log(renderModelDetail(routerOptions, models, model))
-        }
-        return
-      }
-      if (sub === 'install') {
-        if (!model) {
-          console.log(
-            [
-              'Available agents:',
-              ...AGENTS.map((a) => `  ${a.name.padEnd(10)} ${a.description}`)
-            ].join('\n')
-          )
-          return
-        }
-        if (!AGENTS.some((a) => a.name === model))
-          throw usageError(`unknown models install agent: ${model}`)
-        // Bake pi-route's own URL into client configs (clients don't uniformly
-        // expand shell vars). The token is a secret — it stays in the client's
-        // PI_ROUTE_API_KEY / ANTHROPIC_AUTH_TOKEN env var, never written to a file.
-        const host = env.host === '0.0.0.0' || env.host === '::' ? '127.0.0.1' : env.host
-        const setupOpts: { dry: boolean; url: string; homeDir?: string } = {
-          dry: Boolean(options.dry),
-          url: `http://${host}:${env.port}`
-        }
-        if (options.homeDir) setupOpts.homeDir = options.homeDir
-        const writes = await setupModels(routerOptions, models, model, setupOpts)
-        if (options.dry) console.log(renderPlannedWrites(writes))
-        return
-      }
-      if (sub !== undefined && sub !== 'list') {
-        throw usageError(
-          `unknown models subcommand: "${sub}" (expected: list | show | install | refresh)`
-        )
-      }
-      const rows = modelRows(routerOptions, models)
-      if (rows.length > 0) console.log(renderModelList(rows, isTTY()))
-    }
-  )
+  .action(async (args: string[], opts: ModelsOpts) => {
+    const env = readEnvConfig(toOverrides(opts))
+    await dispatchVerb('models', MODELS_VERBS, args.length > 0 ? args : ['list'], opts, env)
+  })
 
 cli
   .command('stats', 'Query telemetry from the OTel viewer')
@@ -352,7 +410,12 @@ cli
     if (shell !== 'bash' && shell !== 'zsh' && shell !== 'fish') {
       throw usageError('usage: pi-route completion <bash|zsh|fish>')
     }
-    console.log(generateCompletion(cli, shell))
+    console.log(
+      generateCompletion(cli, shell, {
+        provider: PROVIDER_VERBS.map((v) => v.name),
+        models: MODELS_VERBS.map((v) => v.name)
+      })
+    )
   })
 
 cli.help()
@@ -366,21 +429,25 @@ const exitCodeFor = (err: unknown): number => {
   return 1
 }
 
-try {
-  const parsed = cli.parse(Bun.argv, { run: false })
-  // help/version already printed by cac
-  if (parsed.options.help || parsed.options.version) {
-    process.exit(0)
-  }
-  if (!cli.matchedCommand) {
-    if (parsed.args.length === 0) {
-      cli.outputHelp()
+// Guarded so importing this module for its exports (e.g. resolveLoginType in
+// tests) never triggers argv parsing or process.exit.
+if (import.meta.main) {
+  try {
+    const parsed = cli.parse(Bun.argv, { run: false })
+    // help/version already printed by cac
+    if (parsed.options.help || parsed.options.version) {
       process.exit(0)
     }
-    throw usageError(`unknown command: ${parsed.args[0]}`)
+    if (!cli.matchedCommand) {
+      if (parsed.args.length === 0) {
+        cli.outputHelp()
+        process.exit(0)
+      }
+      throw usageError(`unknown command: ${parsed.args[0]}`)
+    }
+    await cli.runMatchedCommand()
+  } catch (err) {
+    process.stderr.write(`pi-route: ${errorMessage(err)}\n`)
+    process.exit(exitCodeFor(err))
   }
-  await cli.runMatchedCommand()
-} catch (err) {
-  process.stderr.write(`pi-route: ${errorMessage(err)}\n`)
-  process.exit(exitCodeFor(err))
 }

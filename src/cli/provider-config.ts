@@ -23,11 +23,21 @@ export const removeCredential = (authDir: string, name: string): boolean => {
   return true
 }
 
-export const formatProviderList = (options: RouterOptions, invalid: Set<string>): string => {
-  const entries = Object.entries(options.providers)
+export type ListFlags = { invalid: Set<string>; loggedOut: Set<string>; all: boolean }
+
+export const formatProviderList = (options: RouterOptions, flags: ListFlags): string => {
+  const entries = Object.entries(options.providers).filter(
+    ([, p]) => flags.all || p.account.disabled !== true
+  )
   if (entries.length === 0) return '(no providers)'
   const rows = entries.map(([name, p]) => {
-    const status = p.account.disabled ? 'disabled' : invalid.has(name) ? 'invalid' : 'ok'
+    const status = p.account.disabled
+      ? 'disabled'
+      : flags.invalid.has(name)
+        ? 'invalid'
+        : flags.loggedOut.has(name)
+          ? 'logged-out'
+          : 'ok'
     return [name, p.type, p.account.credential, status]
   })
   const colorize: Colorize = (_ri, ci, cell) => {

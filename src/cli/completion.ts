@@ -22,11 +22,18 @@ const introspect = (cli: CAC): { commands: Cmd[]; globalFlags: string[] } => {
   return { commands, globalFlags }
 }
 
-const bash = (cli: CAC): string => {
+const bash = (cli: CAC, verbs: Record<string, string[]>): string => {
   const { commands, globalFlags } = introspect(cli)
   const names = commands.map((c) => c.name).join(' ')
   const cases = commands
     .map((c) => `    ${c.name}) opts="${[...c.flags, ...globalFlags].join(' ')}" ;;`)
+    .join('\n')
+  const verbCases = Object.entries(verbs)
+    .filter(([, names]) => names.length > 0)
+    .map(
+      ([cmd, names]) =>
+        `      ${cmd}) COMPREPLY=( $(compgen -W "${names.join(' ')}" -- "$cur") ); return ;;`
+    )
     .join('\n')
   return `# bash completion for pi-route
 _pi_route() {
@@ -35,6 +42,11 @@ _pi_route() {
   if [[ $COMP_CWORD -eq 1 ]]; then
     COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
     return
+  fi
+  if [[ $COMP_CWORD -eq 2 ]]; then
+    case "\${COMP_WORDS[1]}" in
+${verbCases}
+    esac
   fi
   local opts="${globalFlags.join(' ')}"
   case "\${COMP_WORDS[1]}" in
@@ -46,22 +58,32 @@ complete -F _pi_route pi-route
 `
 }
 
-const zsh = (cli: CAC): string => {
+const zsh = (cli: CAC, verbs: Record<string, string[]>): string => {
   const { commands } = introspect(cli)
   const lines = commands.map((c) => `    '${c.name}:${c.description.replace(/'/g, '')}'`).join('\n')
+  const verbBranches = Object.entries(verbs)
+    .filter(([, names]) => names.length > 0)
+    .map(([cmd, names]) => `      ${cmd}) compadd -- ${names.join(' ')} ;;`)
+    .join('\n')
   return `#compdef pi-route
 _pi_route() {
   local -a commands
   commands=(
 ${lines}
   )
+  if (( CURRENT == 3 )); then
+    case "\${words[2]}" in
+${verbBranches}
+    esac
+    return
+  fi
   _describe 'command' commands
 }
 _pi_route "$@"
 `
 }
 
-const fish = (cli: CAC): string => {
+const fish = (cli: CAC, verbs: Record<string, string[]>): string => {
   const { commands, globalFlags } = introspect(cli)
   const cmdLines = commands
     .map(
@@ -73,21 +95,33 @@ const fish = (cli: CAC): string => {
     .filter((f) => f.startsWith('--'))
     .map((f) => `complete -c pi-route -l ${f.slice(2)}`)
     .join('\n')
+  const verbLines = Object.entries(verbs)
+    .filter(([, names]) => names.length > 0)
+    .map(
+      ([cmd, names]) =>
+        `complete -c pi-route -n '__fish_seen_subcommand_from ${cmd}' -a '${names.join(' ')}'`
+    )
+    .join('\n')
   return `# fish completion for pi-route
 complete -c pi-route -f
 ${cmdLines}
 ${flagLines}
+${verbLines}
 `
 }
 
-export const generateCompletion = (cli: CAC, shell: string): string => {
+export const generateCompletion = (
+  cli: CAC,
+  shell: string,
+  verbs: Record<string, string[]> = {}
+): string => {
   switch (shell) {
     case 'bash':
-      return bash(cli)
+      return bash(cli, verbs)
     case 'zsh':
-      return zsh(cli)
+      return zsh(cli, verbs)
     case 'fish':
-      return fish(cli)
+      return fish(cli, verbs)
     default:
       throw new Error(`unknown shell "${shell}" — expected one of: bash, zsh, fish`)
   }

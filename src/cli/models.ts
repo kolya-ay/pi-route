@@ -67,9 +67,10 @@ const inputMods = (m: ModelMeta): string[] =>
 const resolveExposed = (
   options: RouterOptions,
   models: Models,
+  authDir: string,
   id: string
 ): { resolved: Resolved; leaf: string } => {
-  const catalog: Catalog = buildCatalog(options, models)
+  const catalog: Catalog = buildCatalog(options, models, authDir)
   if (!exposeIncludes(options.expose, id) || !catalog.addresses.has(id)) {
     throw new Error(`Model not exposed: ${id}`)
   }
@@ -81,8 +82,13 @@ const resolveExposed = (
 
 // Human-readable detail block for `models show`. Mirrors showModel's resolution
 // but renders instead of projecting to JSON.
-export const renderModelDetail = (options: RouterOptions, models: Models, id: string): string => {
-  const { resolved, leaf } = resolveExposed(options, models, id)
+export const renderModelDetail = (
+  options: RouterOptions,
+  models: Models,
+  authDir: string,
+  id: string
+): string => {
+  const { resolved, leaf } = resolveExposed(options, models, authDir, id)
   const m = resolved.model
   const tier = completeness(m)
   const name = m ? displayName(resolved.provider, m.name) : id
@@ -118,8 +124,8 @@ export type ModelRow = {
 }
 
 // One display row per exposed address, with completeness tier + compact cells.
-export const modelRows = (options: RouterOptions, models: Models): ModelRow[] => {
-  const catalog = buildCatalog(options, models)
+export const modelRows = (options: RouterOptions, models: Models, authDir: string): ModelRow[] => {
+  const catalog = buildCatalog(options, models, authDir)
   return exposedAddresses(options, catalog).map((id) => {
     const { model } = resolveModel(options, catalog, models, id)
     const cap = model ? capabilities(model) : null
@@ -151,8 +157,13 @@ export const renderModelList = (rows: ModelRow[], tty: boolean): string => {
   return `${renderTable(headers, body, colorize)}\n\n${dim('full · partial · stub')}`
 }
 
-export const showModel = (options: RouterOptions, models: Models, id: string): ModelView => {
-  const { resolved, leaf } = resolveExposed(options, models, id)
+export const showModel = (
+  options: RouterOptions,
+  models: Models,
+  authDir: string,
+  id: string
+): ModelView => {
+  const { resolved, leaf } = resolveExposed(options, models, authDir, id)
   return {
     id,
     leaf,
@@ -209,13 +220,14 @@ export const renderPlannedWrites = (writes: PlannedWrite[]): string =>
 export const setupModels = async (
   options: RouterOptions,
   models: Models,
+  authDir: string,
   agentName: string,
   opts: { homeDir?: string; dry?: boolean; url: string }
 ): Promise<PlannedWrite[]> => {
   const agent = AGENTS.find((a) => a.name === agentName)
   if (!agent) throw new Error(`unknown agent: ${agentName}`)
   const home = opts.homeDir ?? homedir()
-  const catalog = buildCatalog(options, models)
+  const catalog = buildCatalog(options, models, authDir)
   const defaults = roleModels(options, catalog, models, 'default')
   const main = defaults[0]
   if (!main) throw new Error('Missing pipeline.default exact-match role')

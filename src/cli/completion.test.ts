@@ -33,4 +33,22 @@ describe('generateCompletion', () => {
   test('unknown shell throws', () => {
     expect(() => generateCompletion(sampleCli(), 'tcsh')).toThrow(/bash.*zsh.*fish/)
   })
+  test('bash completion offers provider verbs', () => {
+    const out = generateCompletion(sampleCli(), 'bash', {
+      provider: ['list', 'login'],
+      models: ['list']
+    })
+    expect(out).toContain('login')
+  })
+  test('zsh completion offers models verbs', () => {
+    const out = generateCompletion(sampleCli(), 'zsh', {
+      provider: ['list'],
+      models: ['show', 'install']
+    })
+    expect(out).toContain('install')
+  })
+  test('fish completion offers provider verbs', () => {
+    const out = generateCompletion(sampleCli(), 'fish', { provider: ['logout'], models: [] })
+    expect(out).toContain('logout')
+  })
 })

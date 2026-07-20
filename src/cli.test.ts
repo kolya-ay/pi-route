@@ -3,6 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parse as parseJsonc } from 'jsonc-parser'
+import { resolveLoginType } from './cli'
+import { readEnvConfig } from './config/env'
 
 const CLI = join(import.meta.dir, 'cli.ts')
 
@@ -96,6 +98,50 @@ test('provider limits with a valid empty config exits 0 and prints the empty-tab
   ])
   expect(exitCode).toBe(0)
   expect(stdout.trim()).toBe('(no providers)')
+})
+
+test('provider login infers the type from an existing config block', async () => {
+  const dir = tmp()
+  const cfg = join(dir, 'router.yaml')
+  writeFileSync(
+    cfg,
+    'providers:\n  codex:\n    type: openai-codex\n    account: codex\npipeline: {}\nexpose: []\n'
+  )
+  const env = readEnvConfig({ configPath: cfg, stateDir: join(dir, 'auth') })
+  expect(await resolveLoginType(env, 'codex', undefined)).toBe('openai-codex')
+})
+
+test('provider login accepts a bare known oauth type as the name', async () => {
+  const dir = tmp()
+  const env = readEnvConfig({ configPath: join(dir, 'nope.yaml'), stateDir: join(dir, 'auth') })
+  expect(await resolveLoginType(env, 'anthropic', undefined)).toBe('anthropic')
+})
+
+test('provider login surfaces a malformed config instead of inferring a type', async () => {
+  const dir = tmp()
+  const cfg = join(dir, 'router.yaml')
+  writeFileSync(cfg, 'providers: {}\npipeline: {}\nexpse: []\n') // typo'd root key
+  const env = readEnvConfig({ configPath: cfg, stateDir: join(dir, 'auth') })
+  // Without the fix this resolves to 'anthropic' (name-based inference) and the
+  // login would then write into a config that cannot be parsed.
+  await expect(resolveLoginType(env, 'anthropic', undefined)).rejects.toThrow(/Invalid config/)
+})
+
+test('provider login on an unknown name without --type is a usage error', async () => {
+  const dir = tmp()
+  const env = readEnvConfig({ configPath: join(dir, 'nope.yaml'), stateDir: join(dir, 'auth') })
+  await expect(resolveLoginType(env, 'mycodex', undefined)).rejects.toThrow(/--type/)
+})
+
+test('an explicit --type wins', async () => {
+  const dir = tmp()
+  const cfg = join(dir, 'router.yaml')
+  writeFileSync(
+    cfg,
+    'providers:\n  codex:\n    type: openai-codex\n    account: codex\npipeline: {}\nexpose: []\n'
+  )
+  const env = readEnvConfig({ configPath: cfg, stateDir: join(dir, 'auth') })
+  expect(await resolveLoginType(env, 'codex', 'anthropic')).toBe('anthropic')
 })
 
 const modelsConfig = (dir: string): string => {
@@ -193,6 +239,36 @@ test('models show missing exits non-zero with a clear message', async () => {
   ])
   expect(exitCode).not.toBe(0)
   expect(stderr).toContain('Model not exposed')
+})
+
+test('models rejects an unknown verb and lists the valid ones', async () => {
+  const dir = tmp()
+  const cfg = modelsConfig(dir)
+  const { stderr, exitCode } = await run([
+    'models',
+    'bogus',
+    '-c',
+    cfg,
+    '--state-dir',
+    join(dir, 'auth')
+  ])
+  expect(exitCode).toBe(2)
+  expect(stderr).toMatch(/list.*show.*install.*refresh/s)
+})
+
+test('models show requires a model argument', async () => {
+  const dir = tmp()
+  const cfg = modelsConfig(dir)
+  const { stderr, exitCode } = await run([
+    'models',
+    'show',
+    '-c',
+    cfg,
+    '--state-dir',
+    join(dir, 'auth')
+  ])
+  expect(exitCode).toBe(2)
+  expect(stderr).toContain('<model>')
 })
 
 const setupConfig = (dir: string): string => {
