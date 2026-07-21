@@ -37,16 +37,22 @@ type InitOtelOpts = {
   serviceName: string
 }
 
+// Last writer wins. OTel's global API ignores a second registration silently,
+// so an initOtel that left an earlier provider in place would be a no-op: under
+// bare `bun test` the first app-building test registered a provider and every
+// later test file's exporter saw zero spans, while `--isolate` (one process per
+// file) hid it entirely. Clearing the global before registering is the fix.
 export const initOtel = (opts: InitOtelOpts): void => {
   if (sdk) {
     void sdk.shutdown()
     sdk = undefined
-    enabled = false
   }
-  if (!opts.otlpUrl) {
-    enabled = false
-    return
-  }
+  // Drop the reference without shutdown() — see shutdownOtel for why shutting
+  // down the test provider would permanently silence a reused exporter.
+  testProvider = undefined
+  enabled = false
+  trace.disable()
+  if (!opts.otlpUrl) return
   sdk = new NodeSDK({
     resource: resourceFromAttributes({ 'service.name': opts.serviceName }),
     spanProcessors: [

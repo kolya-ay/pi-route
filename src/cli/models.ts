@@ -121,57 +121,7 @@ export type ModelRow = {
   cost: string
   caps: string
   tier: Tier
-}
-
-// One display row per exposed address, with completeness tier + compact cells.
-export const modelRows = (options: RouterOptions, models: Models, authDir: string): ModelRow[] => {
-  const catalog = buildCatalog(options, models, authDir)
-  return exposedAddresses(options, catalog).map((id) => {
-    const { model } = resolveModel(options, catalog, models, id)
-    const cap = model ? capabilities(model) : null
-    const flags = cap
-      ? [cap.reasoning ? 'reason' : '', cap.vision ? 'vision' : ''].filter(Boolean)
-      : []
-    return {
-      id,
-      ctx: humanCount(model?.contextWindow),
-      max: humanCount(model?.maxTokens),
-      cost: costPair(model?.cost?.input, model?.cost?.output),
-      caps: flags.length > 0 ? flags.join(' ') : '·',
-      tier: completeness(model)
-    }
-  })
-}
-
-// Non-TTY -> today's exact machine output (plain ids). TTY -> aligned table with
-// the model id tinted by completeness tier and a dim legend.
-export const renderModelList = (rows: ModelRow[], tty: boolean): string => {
-  if (!tty) return rows.map((r) => r.id).join('\n')
-  if (rows.length === 0) return ''
-  const headers = ['MODEL', 'CTX', 'MAX', '$ IN/OUT', 'CAPS']
-  const body = rows.map((r) => [r.id, r.ctx, r.max, r.cost, r.caps])
-  const colorize: Colorize = (ri, ci, cell) => {
-    if (ci !== 0) return cell
-    return tierPaint(rows[ri]?.tier ?? 'partial')(cell)
-  }
-  return `${renderTable(headers, body, colorize)}\n\n${dim('full · partial · stub')}`
-}
-
-export const showModel = (
-  options: RouterOptions,
-  models: Models,
-  authDir: string,
-  id: string
-): ModelView => {
-  const { resolved, leaf } = resolveExposed(options, models, authDir, id)
-  return {
-    id,
-    leaf,
-    owned_by: resolved.owned_by,
-    openai: toOpenAIModel(resolved),
-    litellm: toLiteLLMInfo(resolved),
-    modelsDev: toModelsDevModel(resolved)
-  }
+  roles: string[]
 }
 
 // --- Role resolution ---
@@ -206,6 +156,93 @@ const roleModels = (
       ...(model?.cost !== undefined ? { cost: model.cost } : {})
     }
   })
+}
+
+// Only `default` and `fast` are surfaced: they are the two roles the code acts
+// on, and the two `models install` bakes into agent configs. Other pipeline
+// entries are user convention with no behavior attached.
+const ROLES = ['default', 'fast'] as const
+
+const rolesByAddress = (
+  options: RouterOptions,
+  catalog: Catalog,
+  models: Models
+): Map<string, string[]> => {
+  const out = new Map<string, string[]>()
+  for (const role of ROLES) {
+    for (const { id } of roleModels(options, catalog, models, role)) {
+      out.set(id, [...(out.get(id) ?? []), role])
+    }
+  }
+  return out
+}
+
+// One display row per exposed address, with completeness tier + compact cells.
+export const modelRows = (options: RouterOptions, models: Models, authDir: string): ModelRow[] => {
+  const catalog = buildCatalog(options, models, authDir)
+  const roles = rolesByAddress(options, catalog, models)
+  return exposedAddresses(options, catalog).map((id) => {
+    const { model } = resolveModel(options, catalog, models, id)
+    const cap = model ? capabilities(model) : null
+    const flags = cap
+      ? [cap.reasoning ? 'reason' : '', cap.vision ? 'vision' : ''].filter(Boolean)
+      : []
+    return {
+      id,
+      ctx: humanCount(model?.contextWindow),
+      max: humanCount(model?.maxTokens),
+      cost: costPair(model?.cost?.input, model?.cost?.output),
+      caps: flags.length > 0 ? flags.join(' ') : '·',
+      tier: completeness(model),
+      roles: roles.get(id) ?? []
+    }
+  })
+}
+
+// Non-TTY -> today's exact machine output (plain ids). TTY -> aligned table with
+// the model id tinted by completeness tier and a dim legend.
+export const renderModelList = (rows: ModelRow[], tty: boolean): string => {
+  if (!tty) return rows.map((r) => r.id).join('\n')
+  if (rows.length === 0) return ''
+  const headers = ['MODEL', 'CTX', 'MAX', '$ IN/OUT', 'ROLE', 'CAPS']
+  const body = rows.map((r) => [
+    r.id,
+    r.ctx,
+    r.max,
+    r.cost,
+    r.roles.length > 0 ? r.roles.join('·') : '·',
+    r.caps
+  ])
+  const colorize: Colorize = (ri, ci, cell) => {
+    if (ci === 0) return tierPaint(rows[ri]?.tier ?? 'partial')(cell)
+    if (ci !== 4) return cell
+    const roles = rows[ri]?.roles ?? []
+    // Paint only the role words inside the already-padded cell — renderTable
+    // measured the width on the plain string, so the padding must survive.
+    if (roles.length === 0) return cell.replace('·', dim('·'))
+    return roles.reduce(
+      (acc, role) => acc.replace(role, (role === 'fast' ? cyan : green)(role)),
+      cell
+    )
+  }
+  return `${renderTable(headers, body, colorize)}\n\n${dim('full · partial · stub')}`
+}
+
+export const showModel = (
+  options: RouterOptions,
+  models: Models,
+  authDir: string,
+  id: string
+): ModelView => {
+  const { resolved, leaf } = resolveExposed(options, models, authDir, id)
+  return {
+    id,
+    leaf,
+    owned_by: resolved.owned_by,
+    openai: toOpenAIModel(resolved),
+    litellm: toLiteLLMInfo(resolved),
+    modelsDev: toModelsDevModel(resolved)
+  }
 }
 
 // --- Planned writes ---

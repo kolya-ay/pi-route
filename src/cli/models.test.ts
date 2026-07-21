@@ -53,9 +53,18 @@ describe('renderModelList', () => {
       max: '41k',
       cost: '.35/.75',
       caps: 'reason',
-      tier: 'full'
+      tier: 'full',
+      roles: ['default', 'fast']
     },
-    { id: 'nvidia/x/deepseek-v4', ctx: '—', max: '—', cost: '—/—', caps: '·', tier: 'stub' }
+    {
+      id: 'nvidia/x/deepseek-v4',
+      ctx: '—',
+      max: '—',
+      cost: '—/—',
+      caps: '·',
+      tier: 'stub',
+      roles: []
+    }
   ]
   test('plain ids, one per line, when not a TTY', () => {
     expect(renderModelList(rows, false)).toBe('cerebras/gpt-oss-120b\nnvidia/x/deepseek-v4')
@@ -70,6 +79,45 @@ describe('renderModelList', () => {
     expect(out).toContain('cerebras/gpt-oss-120b')
     expect(out).toContain('nvidia/x/deepseek-v4')
     expect(out).toContain('full · partial · stub') // legend
+  })
+  test('TTY output carries a ROLE column with joined role names', () => {
+    const out = renderModelList(rows, true)
+    expect(out).toContain('ROLE')
+    expect(out).toContain('default·fast')
+  })
+  // renderTable measures widths on PLAIN strings and pads BEFORE colorize runs,
+  // so a colorize that changes a cell's visible length skews the whole table.
+  test('role coloring does not disturb column alignment', () => {
+    // ESC built at runtime: a literal control character in a regex trips biome.
+    const ansi = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g')
+    const stripAnsi = (s: string): string => s.replace(ansi, '')
+    const { FORCE_COLOR, NO_COLOR } = process.env
+    let colored: string
+    let plain: string
+    try {
+      process.env.NO_COLOR = '1'
+      delete process.env.FORCE_COLOR
+      plain = renderModelList(rows, true)
+      delete process.env.NO_COLOR
+      process.env.FORCE_COLOR = '1'
+      colored = renderModelList(rows, true)
+    } finally {
+      if (FORCE_COLOR === undefined) delete process.env.FORCE_COLOR
+      else process.env.FORCE_COLOR = FORCE_COLOR
+      if (NO_COLOR === undefined) delete process.env.NO_COLOR
+      else process.env.NO_COLOR = NO_COLOR
+    }
+    // Color must have actually been applied, else this test proves nothing.
+    expect(colored).not.toBe(plain)
+    expect(stripAnsi(colored)).toBe(plain)
+
+    const lines = stripAnsi(colored).split('\n')
+    const capsCol = lines[0]?.indexOf('CAPS') ?? -1
+    expect(capsCol).toBeGreaterThan(0)
+    for (const [i, row] of rows.entries()) {
+      const line = lines[2 + i] ?? ''
+      expect(line.slice(capsCol)).toBe(row.caps)
+    }
   })
 })
 

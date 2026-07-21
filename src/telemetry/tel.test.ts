@@ -1,9 +1,38 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 
 import { SpanStatusCode } from '@opentelemetry/api'
+import { InMemorySpanExporter } from '@opentelemetry/sdk-trace-base'
 
-import { createTel, initOtel, shutdownOtel } from './tel'
+import { _setTestExporter, createTel, initOtel, shutdownOtel } from './tel'
 import { useTestExporter } from './test-fixture'
+
+describe('initOtel', () => {
+  it('a later registration wins over an earlier one', async () => {
+    const first = new InMemorySpanExporter()
+    _setTestExporter(first)
+    const second = new InMemorySpanExporter()
+    _setTestExporter(second)
+
+    await createTel().withSpan('probe', {}, async () => undefined)
+
+    expect(second.getFinishedSpans().map((s) => s.name)).toContain('probe')
+    expect(first.getFinishedSpans()).toHaveLength(0)
+    await shutdownOtel()
+  })
+
+  it('initOtel after a test exporter does not leave the old provider registered', async () => {
+    const exporter = new InMemorySpanExporter()
+    _setTestExporter(exporter)
+    initOtel({ otlpUrl: '', serviceName: 'pi-route-test' })
+    _setTestExporter(exporter)
+    exporter.reset()
+
+    await createTel().withSpan('after-init', {}, async () => undefined)
+
+    expect(exporter.getFinishedSpans().map((s) => s.name)).toContain('after-init')
+    await shutdownOtel()
+  })
+})
 
 describe('Tel facade — disabled (no exporters)', () => {
   beforeEach(() => initOtel({ otlpUrl: '', serviceName: 't' }))
