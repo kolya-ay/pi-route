@@ -9,6 +9,7 @@ import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter'
 import { fileCredentialStore } from '../auth/credential-store'
 import { antigravityProvider } from '../providers/antigravity-provider'
 import type { ProviderConfig, RouterOptions } from '../types'
+import { withEndpointCatalog } from './endpoint-catalog'
 import { withRemoteCatalog } from './remote-catalog'
 import { fileModelsStore } from './store'
 
@@ -48,6 +49,33 @@ const buildOne = (name: string, config: ProviderConfig): Provider | undefined =>
   return undefined // passthrough and unknown types stay outside Models
 }
 
+// Overlay a dynamic catalog on top of a built provider: pi.dev's published
+// catalog for known upstream types, or the endpoint's own /models for
+// everything else with a baseUrl. `discover: false` opts out of both.
+//
+// `disabled` only gates the endpoint-catalog branch: it stops this task's new
+// wrapper from sending the account's own key to the account's own endpoint
+// while the account is meant to be off. It does not gate withRemoteCatalog —
+// that fetch carries no credential (it hits pi.dev keyed by upstream type),
+// so there is no leak to prevent, and a disabled account's static/pi.dev
+// catalog listing is pre-existing behavior this task should not change.
+//
+// A provider that already brings its own `refreshModels` (e.g. antigravity's
+// Cloud Code discovery) is left alone rather than matched on `config.baseUrl`
+// — `ProviderSchema` permits `baseUrl` on any type, but antigravity ignores it
+// and ships its own dynamic catalog, so keying off "config has a baseUrl"
+// would silently replace working discovery with a GET to the wrong endpoint.
+const wrapProvider = (built: Provider, config: ProviderConfig): Provider => {
+  if (config.discover === false) return built
+  if (FACTORIES[config.type]) return withRemoteCatalog(built, config.type)
+  if (built.refreshModels) return built
+  if (!config.baseUrl || config.account.disabled === true) return built
+  return withEndpointCatalog(
+    built,
+    config.account.credential === 'key' ? { apiKey: config.account.key } : {}
+  )
+}
+
 export const buildModels = (options: RouterOptions, dirs: BuildDirs): MutableModels => {
   const models = createModels({
     credentials: fileCredentialStore(dirs.authDir, options),
@@ -56,10 +84,7 @@ export const buildModels = (options: RouterOptions, dirs: BuildDirs): MutableMod
   for (const [name, config] of Object.entries(options.providers)) {
     const built = buildOne(name, config)
     if (!built) continue
-    const upstream = FACTORIES[config.type] ? config.type : undefined
-    const wrapped =
-      upstream && config.discover !== false ? withRemoteCatalog(built, upstream) : built
-    models.setProvider(wrapped)
+    models.setProvider(wrapProvider(built, config))
   }
   return models
 }

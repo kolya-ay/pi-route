@@ -47,4 +47,84 @@ describe('buildModels', () => {
     expect(models.getProvider('chutes')?.baseUrl).toBe('https://llm.chutes.ai/v1')
     expect(models.getModels('chutes')).toEqual([])
   })
+
+  test('openai-compatible providers get an endpoint catalog unless discover is false', () => {
+    const withDiscoverOptions = {
+      providers: {
+        nvidia: {
+          type: 'openai-compatible',
+          baseUrl: 'https://example.test/v1',
+          discover: ['guess'],
+          account: { credential: 'key', name: 'nvidia', key: 'k' }
+        },
+        quiet: {
+          type: 'openai-compatible',
+          baseUrl: 'https://quiet.test/v1',
+          discover: false,
+          account: { credential: 'key', name: 'quiet', key: 'k' }
+        }
+      },
+      pipeline: [],
+      expose: []
+    } as unknown as RouterOptions
+
+    const models = buildModels(withDiscoverOptions, { stateDir: dirs(), authDir: dirs() })
+
+    expect(models.getProvider('nvidia')?.refreshModels).toBeDefined()
+    expect(models.getProvider('quiet')?.refreshModels).toBeUndefined()
+  })
+
+  test('a disabled account never gets an endpoint catalog, even with a baseUrl', () => {
+    const disabledOptions = {
+      providers: {
+        nvidia: {
+          type: 'openai-compatible',
+          baseUrl: 'https://example.test/v1',
+          account: { credential: 'key', name: 'nvidia', key: 'k', disabled: true }
+        }
+      },
+      pipeline: [],
+      expose: []
+    } as unknown as RouterOptions
+
+    const models = buildModels(disabledOptions, { stateDir: dirs(), authDir: dirs() })
+
+    expect(models.getProvider('nvidia')?.refreshModels).toBeUndefined()
+  })
+
+  test('antigravity keeps its own discovery instead of the endpoint catalog when config sets a baseUrl', async () => {
+    const originalFetch = globalThis.fetch
+    let calls = 0
+    globalThis.fetch = (async () => {
+      calls += 1
+      return new Response('{}', { status: 200 })
+    }) as unknown as typeof fetch
+
+    try {
+      const antigravityOptions = {
+        providers: {
+          ag: {
+            type: 'antigravity',
+            baseUrl: 'https://not-antigravity.test/v1',
+            account: { credential: 'oauth', name: 'antigravity' }
+          }
+        },
+        pipeline: [],
+        expose: []
+      } as unknown as RouterOptions
+
+      const models = buildModels(antigravityOptions, { stateDir: dirs(), authDir: dirs() })
+      // No oauth credential is passed, so antigravity's own fetchModels returns
+      // early without ever calling fetch. withEndpointCatalog has no such gate
+      // and would fetch regardless — this is what distinguishes "left alone"
+      // from "silently rewrapped".
+      await models.getProvider('ag')?.refreshModels?.({
+        store: { read: async () => undefined, write: async () => {}, delete: async () => {} },
+        allowNetwork: true
+      })
+      expect(calls).toBe(0)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
 })

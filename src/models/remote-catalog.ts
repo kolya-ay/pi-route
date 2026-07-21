@@ -11,7 +11,7 @@ export type RemoteCatalogOpts = {
   baseUrl?: string
 }
 
-const mergeModels = (
+export const mergeModels = (
   baseline: readonly Model<Api>[],
   dynamic: readonly Model<Api>[]
 ): Model<Api>[] => {
