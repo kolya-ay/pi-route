@@ -85,4 +85,24 @@ describe('withRemoteCatalog', () => {
     await wrapped.refreshModels?.({ store: providerStore(store, 'cc'), allowNetwork: true })
     expect(wrapped.getModels().map((m) => m.id)).toContain('stored-model')
   })
+
+  test('aborts the pi.dev fetch when it exceeds the timeout', async () => {
+    const store = storeFor()
+    let seenSignal: AbortSignal | undefined
+    const wrapped = withRemoteCatalog(fakeProvider(), 'anthropic', {
+      timeoutMs: 10,
+      fetcher: (_url, init) => {
+        seenSignal = init?.signal ?? undefined
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')))
+        })
+      }
+    })
+    await wrapped.refreshModels?.({
+      store: providerStore(store, 'cc'),
+      allowNetwork: true
+    })
+    expect(seenSignal).toBeDefined()
+    expect(seenSignal?.aborted).toBe(true)
+  })
 })

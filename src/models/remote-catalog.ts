@@ -3,12 +3,19 @@ import type { Api, Model, Provider, RefreshModelsContext } from '@earendil-works
 const CATALOG_BASE_URL = 'https://pi.dev'
 export const REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1000
 
+// A hung endpoint (connection accepted, headers never sent) must not wedge a
+// provider's refresh forever — pi-ai's Models.refresh() awaits every provider
+// with Promise.all, so one stuck fetch blocks the catalog rebuild for every
+// provider, and `inflight` never clears to let a later tick retry.
+export const FETCH_TIMEOUT_MS = 30_000
+
 type Fetcher = (url: string, init?: RequestInit) => Promise<Response>
 
 export type RemoteCatalogOpts = {
   now?: () => number
   fetcher?: Fetcher
   baseUrl?: string
+  timeoutMs?: number
 }
 
 export const mergeModels = (
@@ -61,9 +68,10 @@ export const withRemoteCatalog = (
             `/api/models/providers/${encodeURIComponent(upstreamId)}`,
             opts.baseUrl ?? CATALOG_BASE_URL
           )
+          const timeout = AbortSignal.timeout(opts.timeoutMs ?? FETCH_TIMEOUT_MS)
           const response = await fetcher(url.toString(), {
             headers: { accept: 'application/json' },
-            ...(context.signal ? { signal: context.signal } : {})
+            signal: context.signal ? AbortSignal.any([context.signal, timeout]) : timeout
           })
           if (!response.ok) throw new Error(`pi.dev catalog → ${response.status}`)
           dynamicModels = parseCatalog(provider.id, await response.json())

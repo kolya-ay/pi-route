@@ -114,6 +114,29 @@ describe('antigravityProvider discovery', () => {
     expect(seen[1]).toContain('sandbox')
     expect(provider.getModels().map((m) => m.id)).toEqual(['gemini-3.1-pro'])
   })
+
+  it('aborts an unresponsive endpoint instead of hanging', async () => {
+    const aborted: boolean[] = []
+    const fetchFn = (_url: string, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal
+        expect(signal).toBeDefined()
+        expect(signal?.aborted).toBe(false)
+        signal?.addEventListener('abort', () => {
+          aborted.push(true)
+          reject(signal.reason)
+        })
+      })
+    const provider = antigravityProvider('ag', fetchFn, 10)
+    await provider.refreshModels?.({
+      credential: oauthCredential,
+      store: stubStore,
+      allowNetwork: true
+    })
+
+    expect(aborted).toEqual([true, true])
+    expect(provider.getModels()).toEqual([])
+  })
 })
 
 // --- contextToContents (ported wire conversion) ---

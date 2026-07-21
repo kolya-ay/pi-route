@@ -27,6 +27,7 @@ import {
 } from '@earendil-works/pi-ai'
 
 import { antigravityOAuth, PROJECT_HEADER } from '../auth/antigravity-auth'
+import { FETCH_TIMEOUT_MS } from '../models/remote-catalog'
 
 // A narrower fetch than `typeof fetch` (mirrors remote-catalog.ts): Bun's mocks
 // and bare `async () => Response` are assignable without the `preconnect` prop.
@@ -505,7 +506,11 @@ export const streamAntigravity = (
 
 // --- Provider ---
 
-export const antigravityProvider = (id: string, fetchFn: FetchFn = fetch): Provider =>
+export const antigravityProvider = (
+  id: string,
+  fetchFn: FetchFn = fetch,
+  timeoutMs: number = FETCH_TIMEOUT_MS
+): Provider =>
   createProvider({
     id,
     name: id,
@@ -517,6 +522,7 @@ export const antigravityProvider = (id: string, fetchFn: FetchFn = fetch): Provi
       if (!token) return []
       for (const endpoint of ENDPOINTS) {
         try {
+          const timeout = AbortSignal.timeout(timeoutMs)
           const res = await fetchFn(`${endpoint}/v1internal:fetchAvailableModels`, {
             method: 'POST',
             headers: {
@@ -525,7 +531,7 @@ export const antigravityProvider = (id: string, fetchFn: FetchFn = fetch): Provi
               'User-Agent': ANTIGRAVITY_USER_AGENT
             },
             body: '{}',
-            ...(context.signal ? { signal: context.signal } : {})
+            signal: context.signal ? AbortSignal.any([context.signal, timeout]) : timeout
           })
           if (!res.ok) continue
           return parseDiscovery(id, endpoint, await res.json())

@@ -2,13 +2,7 @@ import type { Api, Model, Provider, RefreshModelsContext } from '@earendil-works
 
 import type { ModelMeta } from '../pipeline/catalog'
 import { parseOpenaiModelsList } from '../pipeline/metadata'
-import { mergeModels, REFRESH_INTERVAL_MS } from './remote-catalog'
-
-// A hung endpoint (connection accepted, headers never sent) must not wedge
-// this provider's refresh forever — pi-ai's Models.refresh() awaits every
-// provider with Promise.all, so one stuck fetch blocks the catalog rebuild
-// for every provider, and `inflight` never clears to let a later tick retry.
-const ENDPOINT_FETCH_TIMEOUT_MS = 30_000
+import { FETCH_TIMEOUT_MS, mergeModels, REFRESH_INTERVAL_MS } from './remote-catalog'
 
 type Fetcher = (url: string, init?: RequestInit) => Promise<Response>
 
@@ -90,7 +84,7 @@ export const withEndpointCatalog = (
           ) {
             return
           }
-          const timeout = AbortSignal.timeout(opts.timeoutMs ?? ENDPOINT_FETCH_TIMEOUT_MS)
+          const timeout = AbortSignal.timeout(opts.timeoutMs ?? FETCH_TIMEOUT_MS)
           const response = await fetcher(`${baseUrl}/models`, {
             headers: {
               accept: 'application/json',

@@ -1,4 +1,5 @@
 import type { Api, Model, Models } from '@earendil-works/pi-ai'
+import { FETCH_TIMEOUT_MS } from '../models/remote-catalog'
 import type { DiscoverStrategy, ModelMetaOverride, RouterOptions } from '../types'
 import type { Catalog, ModelMeta } from './catalog'
 
@@ -211,9 +212,14 @@ export const parseLitellmModelInfo = (payload: unknown): Map<string, ModelMeta> 
   return out
 }
 
-const httpGetJson = async (url: string, key: string | undefined): Promise<unknown> => {
+const httpGetJson = async (
+  url: string,
+  key: string | undefined,
+  timeoutMs: number
+): Promise<unknown> => {
   const res = await globalThis.fetch(url, {
-    headers: key ? { authorization: `Bearer ${key}` } : {}
+    headers: key ? { authorization: `Bearer ${key}` } : {},
+    signal: AbortSignal.timeout(timeoutMs)
   })
   if (!res.ok) throw new Error(`${url} → ${res.status}`)
   return res.json()
@@ -223,7 +229,8 @@ const httpGetJson = async (url: string, key: string | undefined): Promise<unknow
 // Returns modelId -> ModelMeta (unprefixed). Never throws; failure → empty map.
 export const fetchProviderMetadata = async (
   name: string,
-  provider: import('../types').ProviderConfig
+  provider: import('../types').ProviderConfig,
+  timeoutMs: number = FETCH_TIMEOUT_MS
 ): Promise<Map<string, ModelMeta>> => {
   const liveStrat = expandAuto(provider.discover || []).find(
     (s) => s === 'openai-models-list' || s === 'litellm'
@@ -232,8 +239,8 @@ export const fetchProviderMetadata = async (
   const key = provider.account.credential === 'key' ? provider.account.key : undefined
   try {
     return liveStrat === 'openai-models-list'
-      ? parseOpenaiModelsList(await httpGetJson(`${provider.baseUrl}/models`, key))
-      : parseLitellmModelInfo(await httpGetJson(`${provider.baseUrl}/model/info`, key))
+      ? parseOpenaiModelsList(await httpGetJson(`${provider.baseUrl}/models`, key, timeoutMs))
+      : parseLitellmModelInfo(await httpGetJson(`${provider.baseUrl}/model/info`, key, timeoutMs))
   } catch (err) {
     console.error(`[metadata] live fetch failed for provider "${name}": ${String(err)}`)
     return new Map()

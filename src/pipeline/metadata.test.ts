@@ -6,6 +6,7 @@ import { buildCatalog } from './catalog'
 import {
   applyOverride,
   fallbackMeta,
+  fetchProviderMetadata,
   guessFromCatalog,
   normalizeModelId,
   parseLitellmModelInfo,
@@ -315,4 +316,28 @@ test('a catalog entry with a known context window wins over the discover chain',
   const { options, catalog } = nvidiaGuessFixture()
   const meta = resolveMetadata(options, catalog, models, 'nvidia/moonshotai/kimi-k2.6')
   expect(meta?.contextWindow).toBe(111_111)
+})
+
+test('fetchProviderMetadata gives up on a hung endpoint instead of hanging', async () => {
+  const original = globalThis.fetch
+  globalThis.fetch = ((_url: string, init?: RequestInit) =>
+    new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new Error('aborted')))
+    })) as typeof fetch
+
+  try {
+    const result = await fetchProviderMetadata(
+      'nvidia',
+      {
+        type: 'openai-compatible',
+        baseUrl: 'https://example.test/v1',
+        discover: ['openai-models-list'],
+        account: { credential: 'key', key: 'k' }
+      } as never,
+      50
+    )
+    expect(result.size).toBe(0)
+  } finally {
+    globalThis.fetch = original
+  }
 })

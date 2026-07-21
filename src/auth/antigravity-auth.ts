@@ -7,6 +7,8 @@
 
 import type { AuthInteraction, ModelAuth, OAuthAuth, OAuthCredential } from '@earendil-works/pi-ai'
 
+import { FETCH_TIMEOUT_MS } from '../models/remote-catalog'
+
 // A narrower fetch than `typeof fetch` (mirrors remote-catalog.ts): Bun's mocks
 // and bare `async () => Response` are assignable without the `preconnect` prop.
 type FetchFn = (url: string, init?: RequestInit) => Promise<Response>
@@ -116,12 +118,14 @@ const callCloudCode = async (
   fetchFn: FetchFn,
   url: string,
   accessToken: string,
-  init: { method: 'POST' | 'GET'; body?: unknown }
+  init: { method: 'POST' | 'GET'; body?: unknown },
+  timeoutMs: number = FETCH_TIMEOUT_MS
 ): Promise<Record<string, unknown>> => {
   const response = await fetchFn(url, {
     method: init.method,
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-    ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {})
+    ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
+    signal: AbortSignal.timeout(timeoutMs)
   })
   if (!response.ok) {
     const text = await response.text()
@@ -130,30 +134,46 @@ const callCloudCode = async (
   return (await response.json()) as Record<string, unknown>
 }
 
-const loadCodeAssist = (accessToken: string, fetchFn: FetchFn): Promise<LoadCodeAssistResponse> =>
-  callCloudCode(fetchFn, `${CODE_ASSIST_ENDPOINT}/v1internal:loadCodeAssist`, accessToken, {
-    method: 'POST',
-    body: { metadata: DISCOVERY_METADATA }
-  }) as Promise<LoadCodeAssistResponse>
+const loadCodeAssist = (
+  accessToken: string,
+  fetchFn: FetchFn,
+  timeoutMs: number
+): Promise<LoadCodeAssistResponse> =>
+  callCloudCode(
+    fetchFn,
+    `${CODE_ASSIST_ENDPOINT}/v1internal:loadCodeAssist`,
+    accessToken,
+    { method: 'POST', body: { metadata: DISCOVERY_METADATA } },
+    timeoutMs
+  ) as Promise<LoadCodeAssistResponse>
 
 const onboardUser = (
   accessToken: string,
   tierId: string,
-  fetchFn: FetchFn
+  fetchFn: FetchFn,
+  timeoutMs: number
 ): Promise<LroOperation> =>
-  callCloudCode(fetchFn, `${CODE_ASSIST_ENDPOINT}/v1internal:onboardUser`, accessToken, {
-    method: 'POST',
-    body: { tierId, metadata: DISCOVERY_METADATA }
-  }) as Promise<LroOperation>
+  callCloudCode(
+    fetchFn,
+    `${CODE_ASSIST_ENDPOINT}/v1internal:onboardUser`,
+    accessToken,
+    { method: 'POST', body: { tierId, metadata: DISCOVERY_METADATA } },
+    timeoutMs
+  ) as Promise<LroOperation>
 
 const pollOperation = (
   accessToken: string,
   operationName: string,
-  fetchFn: FetchFn
+  fetchFn: FetchFn,
+  timeoutMs: number
 ): Promise<LroOperation> =>
-  callCloudCode(fetchFn, `${CODE_ASSIST_ENDPOINT}/v1internal/${operationName}`, accessToken, {
-    method: 'GET'
-  }) as Promise<LroOperation>
+  callCloudCode(
+    fetchFn,
+    `${CODE_ASSIST_ENDPOINT}/v1internal/${operationName}`,
+    accessToken,
+    { method: 'GET' },
+    timeoutMs
+  ) as Promise<LroOperation>
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -165,6 +185,7 @@ const pollUntilDone = async (
   op: LroOperation,
   fetchFn: FetchFn,
   attempt: number,
+  timeoutMs: number,
   onProgress?: (msg: string) => void
 ): Promise<LroOperation> => {
   if (op.done === true) return op
@@ -176,22 +197,23 @@ const pollUntilDone = async (
   if (!op.name) throw new Error('onboardUser response missing operation name')
   onProgress?.(`Waiting for onboarding (${attempt}/${ONBOARD_POLL_MAX_ATTEMPTS})...`)
   await sleep(ONBOARD_POLL_INTERVAL_MS)
-  const next = await pollOperation(accessToken, op.name, fetchFn)
-  return pollUntilDone(accessToken, next, fetchFn, attempt + 1, onProgress)
+  const next = await pollOperation(accessToken, op.name, fetchFn, timeoutMs)
+  return pollUntilDone(accessToken, next, fetchFn, attempt + 1, timeoutMs, onProgress)
 }
 
 export const discoverProject = async (
   accessToken: string,
   fetchFn: FetchFn,
-  onProgress?: (msg: string) => void
+  onProgress?: (msg: string) => void,
+  timeoutMs: number = FETCH_TIMEOUT_MS
 ): Promise<string> => {
-  const load = await loadCodeAssist(accessToken, fetchFn)
+  const load = await loadCodeAssist(accessToken, fetchFn, timeoutMs)
   const direct = extractProjectId(load.cloudaicompanionProject)
   if (direct) return direct
 
   onProgress?.('Onboarding account...')
-  const initial = await onboardUser(accessToken, pickTierId(load), fetchFn)
-  const final = await pollUntilDone(accessToken, initial, fetchFn, 1, onProgress)
+  const initial = await onboardUser(accessToken, pickTierId(load), fetchFn, timeoutMs)
+  const final = await pollUntilDone(accessToken, initial, fetchFn, 1, timeoutMs, onProgress)
 
   if (final.error?.message) throw new Error(`Onboarding failed: ${final.error.message}`)
 
@@ -199,7 +221,7 @@ export const discoverProject = async (
   if (fromLro) return fromLro
 
   onProgress?.('Fetching newly provisioned project...')
-  const reload = await loadCodeAssist(accessToken, fetchFn)
+  const reload = await loadCodeAssist(accessToken, fetchFn, timeoutMs)
   const reloaded = extractProjectId(reload.cloudaicompanionProject)
   if (reloaded) return reloaded
 
@@ -293,8 +315,8 @@ const login =
   }
 
 const refresh =
-  (fetchFn: FetchFn) =>
-  async (credential: OAuthCredential): Promise<OAuthCredential> => {
+  (fetchFn: FetchFn, timeoutMs: number = FETCH_TIMEOUT_MS) =>
+  async (credential: OAuthCredential, signal?: AbortSignal): Promise<OAuthCredential> => {
     const projectId = credential.projectId
     if (!projectId) {
       throw new Error('antigravity credential is missing projectId; rerun login to re-provision it')
@@ -307,10 +329,12 @@ const refresh =
       client_secret: CLIENT_SECRET
     })
 
+    const timeout = AbortSignal.timeout(timeoutMs)
     const response = await fetchFn(TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body.toString()
+      body: body.toString(),
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout
     })
 
     if (!response.ok) {
@@ -344,12 +368,12 @@ const toAuth = async (credential: OAuthCredential): Promise<ModelAuth> => ({
     : {})
 })
 
-export const antigravityOAuth = (opts: { fetchFn?: FetchFn }): OAuthAuth => {
+export const antigravityOAuth = (opts: { fetchFn?: FetchFn; timeoutMs?: number }): OAuthAuth => {
   const fetchFn = opts.fetchFn ?? globalThis.fetch
   return {
     name: 'Google Antigravity',
     login: login(fetchFn),
-    refresh: refresh(fetchFn),
+    refresh: refresh(fetchFn, opts.timeoutMs),
     toAuth
   }
 }

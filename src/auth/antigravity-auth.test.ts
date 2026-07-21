@@ -20,6 +20,36 @@ const takeResponse = (responses: Response[]): Response => {
   return response
 }
 
+// Never resolves on its own: settles only when the caller's signal aborts. If no
+// signal arrives the promise rejects immediately with a named error, so a
+// regression fails fast instead of hanging to the default test budget.
+const hangingFetch =
+  (seen: AbortSignal[], abortedOnArrival: boolean[] = []) =>
+  (_url: string, init?: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal
+      if (!signal) {
+        reject(new Error('fetch called without an abort signal'))
+        return
+      }
+      seen.push(signal)
+      abortedOnArrival.push(signal.aborted)
+      if (signal.aborted) {
+        reject(signal.reason)
+        return
+      }
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+    })
+
+const catchError = async (promise: Promise<unknown>): Promise<Error> => {
+  try {
+    await promise
+    throw new Error('expected rejection but promise resolved')
+  } catch (err) {
+    return err as Error
+  }
+}
+
 describe('buildAuthUrl', () => {
   it('produces a valid Google OAuth URL with required params', () => {
     const url = new URL(buildAuthUrl('test-state-123'))
@@ -174,6 +204,39 @@ describe('discoverProject', () => {
     await expect(discoverProject('token', mockFetch)).rejects.toThrow('ineligible')
   })
 
+  it('aborts an unresponsive Cloud Code endpoint instead of hanging', async () => {
+    const seen: AbortSignal[] = []
+
+    const err = await catchError(discoverProject('token', hangingFetch(seen), undefined, 10))
+
+    expect(err.name).toBe('TimeoutError')
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.aborted).toBe(true)
+  })
+
+  it('gives every Cloud Code attempt its own deadline', async () => {
+    const seen: AbortSignal[] = []
+    const abortedOnArrival: boolean[] = []
+    const responses = [Response.json({ allowedTiers: [{ id: 'free-tier', isDefault: true }] })]
+    // The first call (loadCodeAssist) outlives `timeoutMs` on the wall clock, so a
+    // single deadline hoisted across the whole of discoverProject would already
+    // have fired before the second call (onboardUser) is even issued.
+    const fetchFn = async (url: string, init?: RequestInit) => {
+      if (responses.length === 0) return hangingFetch(seen, abortedOnArrival)(url, init)
+      await Bun.sleep(25)
+      return takeResponse(responses)
+    }
+
+    const err = await catchError(discoverProject('token', fetchFn, undefined, 10))
+
+    expect(err.name).toBe('TimeoutError')
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.aborted).toBe(true)
+    // The discriminating assertion: onboardUser's signal must arrive fresh. Under a
+    // shared deadline it would arrive already aborted by loadCodeAssist's 25ms.
+    expect(abortedOnArrival[0]).toBe(false)
+  })
+
   it('throws on non-ok loadCodeAssist response', async () => {
     const mockFetch = mock(async () => Response.json({ error: 'forbidden' }, { status: 403 }))
     await expect(discoverProject('token', mockFetch)).rejects.toThrow('403')
@@ -282,6 +345,36 @@ describe('refresh', () => {
     await expect(
       auth.refresh({ type: 'oauth', refresh: 'r', access: 'a', expires: 0, projectId: 'p' })
     ).rejects.not.toThrow(/definitively/)
+  })
+
+  test('aborts an unresponsive token endpoint instead of hanging', async () => {
+    const seen: AbortSignal[] = []
+    const auth = antigravityOAuth({ fetchFn: hangingFetch(seen), timeoutMs: 10 })
+
+    const err = await catchError(
+      auth.refresh({ type: 'oauth', refresh: 'r', access: 'a', expires: 0, projectId: 'p' })
+    )
+
+    expect(err.name).toBe('TimeoutError')
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.aborted).toBe(true)
+  })
+
+  test('composes the caller-supplied signal with the deadline', async () => {
+    const seen: AbortSignal[] = []
+    const auth = antigravityOAuth({ fetchFn: hangingFetch(seen), timeoutMs: 60_000 })
+    const controller = new AbortController()
+
+    const promise = auth.refresh(
+      { type: 'oauth', refresh: 'r', access: 'a', expires: 0, projectId: 'p' },
+      controller.signal
+    )
+    controller.abort()
+    const err = await catchError(promise)
+
+    expect(err.name).toBe('AbortError')
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.aborted).toBe(true)
   })
 
   test('missing projectId is a config error', async () => {
