@@ -106,6 +106,54 @@ describe('createModelsDispatch', () => {
     )
     expect(captured?.maxTokens).toBe(16)
   })
+
+  it('fills a catalog model with unknown limits (0) with defaults before streaming', async () => {
+    let captured: { contextWindow: number; maxTokens: number } | undefined
+    const bareModel: Model<Api> = { ...mkModel(), contextWindow: 0, maxTokens: 0 }
+    const stream = ((model: Model<Api>) => {
+      captured = { contextWindow: model.contextWindow, maxTokens: model.maxTokens }
+      return cannedStream()
+    }) as unknown as Models['stream']
+    const provider = createModelsDispatch(mkModels({ getModel: () => bareModel, stream }), 'prov')
+    await provider.dispatch(mkRequest({ stream: false }), { credential: 'key', key: 'k' }, 'k')
+    expect(captured).toEqual({ contextWindow: 128_000, maxTokens: 4096 })
+  })
+
+  it('caps a body max_tokens against the defaulted limit, not against 0', async () => {
+    let captured: { maxTokens?: number } | undefined
+    const bareModel: Model<Api> = { ...mkModel(), contextWindow: 0, maxTokens: 0 }
+    const stream = ((_model: Model<Api>, _context: unknown, options?: { maxTokens?: number }) => {
+      captured = options
+      return cannedStream()
+    }) as unknown as Models['stream']
+    const provider = createModelsDispatch(mkModels({ getModel: () => bareModel, stream }), 'prov')
+    const rawRequest = new Request('http://x', {
+      method: 'POST',
+      body: JSON.stringify({
+        model: 'm',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: 'hi' }]
+      })
+    })
+    await provider.dispatch(
+      mkRequest({ stream: false, rawRequest }),
+      { credential: 'key', key: 'k' },
+      'k'
+    )
+    expect(captured?.maxTokens).toBe(1000)
+  })
+
+  it('leaves a catalog model with real limits untouched', async () => {
+    let captured: { contextWindow: number; maxTokens: number } | undefined
+    const stream = ((model: Model<Api>) => {
+      captured = { contextWindow: model.contextWindow, maxTokens: model.maxTokens }
+      return cannedStream()
+    }) as unknown as Models['stream']
+    const provider = createModelsDispatch(mkModels({ stream }), 'prov')
+    await provider.dispatch(mkRequest({ stream: false }), { credential: 'key', key: 'k' }, 'k')
+    // mkModel() carries real, non-zero limits (1000/500) — the fill-in must not touch them.
+    expect(captured).toEqual({ contextWindow: 1000, maxTokens: 500 })
+  })
 })
 
 describe('mapAuthError', () => {

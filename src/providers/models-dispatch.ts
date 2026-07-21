@@ -30,6 +30,10 @@ export const mapAuthError = (err: unknown, providerName: string): unknown =>
       )
     : err
 
+// What an openai-compatible endpoint gets when nobody knows better.
+const DEFAULT_CONTEXT_WINDOW = 128_000
+const DEFAULT_MAX_TOKENS = 4096
+
 // openai-compatible providers hold no static catalog (their addresses come from
 // pipeline literals), so a request model won't be in getModels(). Construct a
 // bare openai-completions Model pointing at the provider's baseUrl — Models still
@@ -44,9 +48,21 @@ const constructModel = (models: Models, providerName: string, id: string): Model
     reasoning: false,
     input: ['text'],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 128_000,
-    maxTokens: 4096
+    contextWindow: DEFAULT_CONTEXT_WINDOW,
+    maxTokens: DEFAULT_MAX_TOKENS
   }) as Model<Api>
+
+// A catalog entry can carry 0 for limits its endpoint never declared (see
+// endpoint-catalog.ts). 0 would cap every request to nothing, so fill it in
+// here — after the catalog lookup, before capMaxTokens sees it.
+const withKnownLimits = (model: Model<Api>): Model<Api> =>
+  model.contextWindow && model.maxTokens
+    ? model
+    : {
+        ...model,
+        contextWindow: model.contextWindow || DEFAULT_CONTEXT_WINDOW,
+        maxTokens: model.maxTokens || DEFAULT_MAX_TOKENS
+      }
 
 // One dispatch implementation for every Models-backed provider. Auth is resolved
 // inside models.stream() (OAuth refresh under the store lock); the `account`/`apiKey`
@@ -68,7 +84,7 @@ export const createModelsDispatch = (
       models.getModel(providerName, request.model) ??
       (construct ? constructModel(models, providerName, request.model) : undefined)
     if (!catalogModel) throw new Error(`model not found: ${providerName}/${request.model}`)
-    const model = capMaxTokens(catalogModel, body)
+    const model = capMaxTokens(withKnownLimits(catalogModel), body)
 
     // models.stream() resolves auth lazily, so an OAuth refresh failure surfaces
     // as an in-stream error event (mapped in pi-ai-runtime), NOT a sync throw.

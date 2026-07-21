@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import type { Models } from '@earendil-works/pi-ai'
 import { buildTestModels } from '../models/test-models'
 import type { RouterOptions } from '../types'
 import { buildCatalog } from './catalog'
@@ -29,6 +30,17 @@ describe('toModelMeta', () => {
     expect(meta.name).toBe(m.name)
     expect(meta.contextWindow).toBe(m.contextWindow)
     expect(meta.reasoning).toBe(Boolean(m.reasoning))
+  })
+
+  // `Model` requires non-optional numbers, so an endpoint that didn't describe a
+  // field surfaces as 0 (see endpoint-catalog.ts). toModelMeta is the one Model ->
+  // ModelMeta boundary, so it's the one place that can turn "0 = unknown" back into
+  // real absence, instead of every downstream reader having to know the sentinel.
+  test('a Model reporting contextWindow: 0 and maxTokens: 0 omits both, not publishes zero', () => {
+    const m = fakeModel('nvidia', 'some-model', 0)
+    const meta = toModelMeta(m as unknown as Parameters<typeof toModelMeta>[0])
+    expect(meta.contextWindow).toBeUndefined()
+    expect(meta.maxTokens).toBeUndefined()
   })
 })
 
@@ -125,6 +137,21 @@ describe('resolveMetadata', () => {
     cat.leafFor.set('big', 'nv/real-model')
     expect(resolveMetadata(opts, cat, models, 'big')?.contextWindow).toBe(40960)
   })
+
+  test('a live entry with no context window falls through to guess (default chain)', () => {
+    // Reproduces the DEFAULT discover chain (`auto` -> openai-models-list, guess),
+    // as every openai-compatible provider gets when unconfigured. NVIDIA-style
+    // endpoints emit a bare {name} liveMeta entry (no contextWindow) — that must
+    // not out-rank `guess`, which knows gpt-oss-120b's real limits.
+    const opts = base(['auto'])
+    const models = cerebrasModels()
+    const cat = buildCatalog(opts, models, '/tmp')
+    cat.addresses.add('nv/gpt-oss-120b')
+    cat.leafFor.set('nv/gpt-oss-120b', 'nv/gpt-oss-120b')
+    cat.liveMeta.set('nv/gpt-oss-120b', { name: 'gpt-oss-120b' })
+    const meta = resolveMetadata(opts, cat, models, 'nv/gpt-oss-120b')
+    expect(meta?.contextWindow).toBeGreaterThan(0)
+  })
 })
 
 describe('parseOpenaiModelsList', () => {
@@ -180,4 +207,112 @@ describe('parseLitellmModelInfo', () => {
     expect(m.cost).toEqual({ input: 0.5, output: 1.5 })
     expect(m.reasoning).toBe(true)
   })
+})
+
+// Bare openai-compatible model fixture, shared by the layer-0/guess tests below.
+// contextWindow 0 mirrors nvidia's catalog entries; a real value mirrors openrouter's.
+const fakeModel = (provider: string, id: string, contextWindow: number) => ({
+  id,
+  name: id,
+  api: 'openai-completions' as const,
+  provider,
+  baseUrl: 'https://example.test/v1',
+  reasoning: false,
+  input: ['text' as const],
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  contextWindow,
+  maxTokens: 0
+})
+
+// nvidia provider with a `guess` discover chain, and the leaf address wired
+// through the catalog — shared by the resolveMetadata layer-0 tests below.
+const nvidiaGuessFixture = () => ({
+  options: {
+    providers: {
+      nvidia: {
+        type: 'openai-compatible',
+        baseUrl: 'https://example.test/v1',
+        discover: ['guess'],
+        account: { credential: 'key', name: 'nvidia', key: 'k' }
+      }
+    },
+    pipeline: [],
+    expose: [],
+    server: {}
+  } as unknown as RouterOptions,
+  catalog: {
+    addresses: new Set(['nvidia/moonshotai/kimi-k2.6']),
+    leafFor: new Map([['nvidia/moonshotai/kimi-k2.6', 'nvidia/moonshotai/kimi-k2.6']]),
+    liveMeta: new Map(),
+    available: new Set(['nvidia'])
+  }
+})
+
+// Same shape as fakeModel, but with a real (non-zero) cost — mirrors a paid
+// vendor like openrouter, so it can stand in contrast to nvidia's free tier.
+const pricedModel = (
+  provider: string,
+  id: string,
+  contextWindow: number,
+  input: number,
+  output: number
+) => ({
+  ...fakeModel(provider, id, contextWindow),
+  cost: { input, output, cacheRead: 0, cacheWrite: 0 }
+})
+
+test('guess borrows limits from a same-named model but never its cost', () => {
+  // nvidia (free-tier, NIM) hasn't described this model; openrouter (paid) has.
+  // guess may borrow openrouter's contextWindow, but must not attribute
+  // openrouter's price to an address that is actually nvidia's.
+  const bare = fakeModel('nvidia', 'moonshotai/kimi-k2.6', 0)
+  const priced = pricedModel('openrouter', 'moonshotai/kimi-k2.6', 262_144, 2, 8)
+  const models = { getModels: () => [bare, priced] } as unknown as Models
+
+  const meta = guessFromCatalog(models, 'nvidia/moonshotai/kimi-k2.6')
+  expect(meta?.contextWindow).toBe(262_144)
+  expect(meta?.cost).toBeUndefined()
+})
+
+test('a model with no known context window cannot be a guess source', () => {
+  // The limit-less entry is registered FIRST, so first-write-wins would pick it.
+  const models = {
+    getModels: () => [
+      fakeModel('nvidia', 'moonshotai/kimi-k2.6', 0),
+      fakeModel('openrouter', 'moonshotai/kimi-k2.6', 262_144)
+    ]
+  } as unknown as Models
+
+  expect(guessFromCatalog(models, 'nvidia/moonshotai/kimi-k2.6')?.contextWindow).toBe(262_144)
+})
+
+test('a catalog entry with no limits still consults the discover chain', () => {
+  const bare = fakeModel('nvidia', 'moonshotai/kimi-k2.6', 0)
+  const rich = fakeModel('openrouter', 'moonshotai/kimi-k2.6', 262_144)
+  const models = {
+    getModels: () => [bare, rich],
+    getModel: (provider: string) => (provider === 'nvidia' ? bare : rich)
+  } as unknown as Models
+
+  const { options, catalog } = nvidiaGuessFixture()
+  const meta = resolveMetadata(options, catalog, models, 'nvidia/moonshotai/kimi-k2.6')
+  expect(meta?.contextWindow).toBe(262_144)
+})
+
+test('a catalog entry with a known context window wins over the discover chain', () => {
+  // Inverse of the test above: nvidia's own entry is authoritative here (real
+  // contextWindow), so layer 0 must short-circuit and never consult `guess`.
+  // openrouter is listed FIRST in getModels() so that, were layer 0 ever
+  // bypassed, first-write-wins would hand `guess` openrouter's 262_144 instead
+  // of nvidia's own 111_111 — making the two paths distinguishable.
+  const nvidia = fakeModel('nvidia', 'moonshotai/kimi-k2.6', 111_111)
+  const openrouter = fakeModel('openrouter', 'moonshotai/kimi-k2.6', 262_144)
+  const models = {
+    getModels: () => [openrouter, nvidia],
+    getModel: (provider: string) => (provider === 'nvidia' ? nvidia : openrouter)
+  } as unknown as Models
+
+  const { options, catalog } = nvidiaGuessFixture()
+  const meta = resolveMetadata(options, catalog, models, 'nvidia/moonshotai/kimi-k2.6')
+  expect(meta?.contextWindow).toBe(111_111)
 })

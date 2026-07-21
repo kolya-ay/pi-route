@@ -7,8 +7,12 @@ export const toModelMeta = (m: Model<Api>): ModelMeta => {
   const compat = m.compat as { supportsReasoningEffort?: boolean } | undefined
   return {
     name: m.name,
-    ...(m.contextWindow !== undefined ? { contextWindow: m.contextWindow } : {}),
-    ...(m.maxTokens !== undefined ? { maxTokens: m.maxTokens } : {}),
+    // 0 means the endpoint didn't say (Model requires non-optional numbers, so
+    // there is no `undefined` to fall back to) — normalize that sentinel to real
+    // absence here, the one Model -> ModelMeta boundary, instead of leaving every
+    // downstream reader to know the convention.
+    ...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
+    ...(m.maxTokens ? { maxTokens: m.maxTokens } : {}),
     ...(m.cost !== undefined
       ? {
           cost: {
@@ -55,7 +59,15 @@ const buildGuessIndex = (models: Models): Map<string, ModelMeta> => {
   if (cached) return cached
   const index = new Map<string, ModelMeta>()
   for (const m of models.getModels()) {
-    const meta = toModelMeta(m)
+    // contextWindow 0 means an endpoint listed the id without describing it —
+    // such an entry has nothing to lend, and would shadow one that does.
+    if (!m.contextWindow) continue
+    // guess lends limits/capabilities across DIFFERENT vendors that happen to
+    // share a model id (e.g. nvidia's free-tier NIM and paid openrouter both
+    // serving "moonshotai/kimi-k2.6"). Borrowing cost is a silent wrong answer
+    // about money, not a visible absence — drop it here, before it enters the
+    // index, so no guess hit can ever carry another vendor's price.
+    const { cost: _cost, ...meta } = toModelMeta(m)
     const exact = m.id.slice(m.id.lastIndexOf('/') + 1).toLowerCase()
     if (!index.has(exact)) index.set(exact, meta)
     const norm = normalizeModelId(m.id)
@@ -258,17 +270,22 @@ export const resolveMetadata = (
   const provider = opts.providers[providerName]
 
   // Layer 0: Models static/dynamic catalog (authoritative for known providers).
+  // A contextWindow of 0 means the provider's endpoint listed the id without
+  // describing it — not authoritative, so the discover chain still runs.
   let base: ModelMeta | null = null
   if (provider && modelId) {
     const m = models.getModel(providerName, modelId)
-    base = m ? toModelMeta(m) : null
+    base = m?.contextWindow ? toModelMeta(m) : null
   }
 
   // Layer 1: the provider's discover chain — first hit wins.
   if (!base && provider?.discover) {
     for (const strat of expandAuto(provider.discover)) {
       if (strat === 'openai-models-list' || strat === 'litellm') {
-        base = catalog.liveMeta.get(leaf) ?? null
+        // Same convention as layer 0: a live entry with no contextWindow means
+        // the endpoint listed the id without describing it, so it can't win here.
+        const live = catalog.liveMeta.get(leaf)
+        base = live?.contextWindow ? live : null
       } else if (strat === 'guess') {
         base = guessFromCatalog(models, leaf)
       } else if (strat === 'fallback') {

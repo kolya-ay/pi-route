@@ -6,7 +6,9 @@ import {
   capabilities,
   displayName,
   perTokenString,
+  type Resolved,
   resolveModel,
+  toLiteLLMInfo,
   toModelsDevModel,
   toOpenAIModel
 } from './model-projection'
@@ -104,5 +106,39 @@ describe('toOpenAIModel', () => {
     expect(e.architecture?.output_modalities).toEqual(['text'])
     expect(e.supported_parameters).toContain('tools')
     if (e.pricing?.prompt !== undefined) expect(e.pricing.input).toBe(e.pricing.prompt)
+  })
+})
+
+// A vLLM/chutes-style endpoint reports a real contextWindow but no output-token
+// limit. toModelMeta (the one Model -> ModelMeta boundary) normalizes that
+// endpoint's "0 = unknown" sentinel into real absence, so the ModelMeta the
+// projections see here simply has no `maxTokens` field — it must stay absent
+// in the output, not resurface as a published zero.
+const undescribedMaxTokens: Resolved = {
+  id: 'nvidia/some-model',
+  owned_by: 'nvidia',
+  provider: 'nvidia',
+  model: { name: 'some-model', contextWindow: 200000 }
+}
+
+describe('toOpenAIModel (maxTokens sentinel)', () => {
+  test('an absent maxTokens is omitted, not published as zero', () => {
+    const e = toOpenAIModel(undescribedMaxTokens)
+    expect(e.max_tokens).toBeUndefined()
+    expect(e.top_provider).toBeUndefined()
+  })
+})
+
+describe('toLiteLLMInfo (maxTokens sentinel)', () => {
+  test('an absent maxTokens is omitted, not published as zero', () => {
+    const info = toLiteLLMInfo(undescribedMaxTokens)
+    expect(info?.model_info.max_output_tokens).toBeUndefined()
+  })
+})
+
+describe('toModelsDevModel (maxTokens sentinel)', () => {
+  test('an absent maxTokens is omitted, not published as zero', () => {
+    const m = toModelsDevModel(undescribedMaxTokens)
+    expect(m?.limit.output).toBeUndefined()
   })
 })

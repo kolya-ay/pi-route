@@ -20,8 +20,15 @@ export type EndpointCatalogOpts = {
 }
 
 // `0` means "the endpoint did not say" — for the numeric limits (contextWindow,
-// maxTokens) and cost fields, which readers treat as unknown rather than fact
-// (see buildGuessIndex, resolveMetadata layer 0, and createModelsDispatch).
+// maxTokens) and cost fields, `Model` requires non-optional numbers so there is
+// no `undefined` to fall back to. Only `contextWindow` is currently checked to
+// decide whether a whole entry is authoritative (buildGuessIndex; resolveMetadata
+// layers 0 and 1); `maxTokens` is honored per-field by the HTTP projections
+// (model-projection.ts), which omit rather than publish a zero. Cost fields carry
+// the same "0 = unknown" convention but no reader honors it yet — a defaulted
+// zero cost is indistinguishable from a genuinely free model and is published as
+// such (see model-projection.ts for that trade-off). `createModelsDispatch` does
+// not check any of these fields yet (Task 5).
 // `reasoning` and `input` have no such sentinel: `Model` requires them, so
 // `reasoning: false` / `input: ['text']` are asserted as fact here, and
 // resolveMetadata's all-or-nothing discover chain will never revisit them
@@ -94,9 +101,25 @@ export const withEndpointCatalog = (
           if (!response.ok) throw new Error(`${baseUrl}/models → ${response.status}`)
           const payload = await response.json()
           if (context.signal?.aborted) return
-          fetched = [...parseOpenaiModelsList(payload)].map(([id, meta]) =>
+          const parsed = [...parseOpenaiModelsList(payload)].map(([id, meta]) =>
             toModel(provider.id, baseUrl, id, meta)
           )
+          // A 200 with the wrong shape (e.g. a rate-limit error body, or a
+          // differently-shaped model list) parses to zero entries same as an
+          // actually-empty catalog, and the two are indistinguishable here.
+          // Persisting either as {models: [], checkedAt: now} would pass the
+          // freshness check on every restart within REFRESH_INTERVAL_MS, hiding
+          // the provider for the whole window with no way back short of
+          // `pi-route models refresh` — worse than the one extra GET per boot
+          // (refreshModels runs at boot and on a 4 h interval, never per
+          // request) that skipping the write costs a genuinely-empty provider.
+          if (parsed.length === 0) {
+            console.error(
+              `[endpoint-catalog] "${provider.id}" returned a 200 with no parseable models; not persisting an empty catalog`
+            )
+            return
+          }
+          fetched = parsed
           await context.store.write({ models: fetched, checkedAt: now() })
         } catch (err) {
           console.error(`[endpoint-catalog] refresh failed for "${provider.id}": ${String(err)}`)

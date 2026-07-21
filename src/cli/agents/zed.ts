@@ -55,7 +55,7 @@ export const zed: Agent = {
             edit(['edit_predictions', 'open_ai_compatible_api'], {
               api_url: `${url}/v1`,
               model: fast.id,
-              max_output_tokens: fast.maxTokens ?? 64,
+              max_output_tokens: fast.maxTokens || 64,
               prompt_format: 'infer'
             })
           ]

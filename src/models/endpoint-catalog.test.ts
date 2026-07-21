@@ -146,6 +146,42 @@ describe('withEndpointCatalog', () => {
     expect(later.getModels().length).toBe(2)
   })
 
+  test('a wrong-shape 200 (e.g. a rate-limit error body) leaves previously known models and the stored entry intact', async () => {
+    const store = new InMemoryModelsStore()
+    const wrapped = withEndpointCatalog(fakeProvider(), {
+      now: () => 1000,
+      fetcher: async () => new Response(JSON.stringify(bareList))
+    })
+    await wrapped.refreshModels?.({ store: providerStore(store, 'nvidia'), allowNetwork: true })
+    expect(wrapped.getModels().length).toBe(2)
+
+    const later = withEndpointCatalog(fakeProvider(), {
+      now: () => 9_999_999_999,
+      // 200 OK, but not the { data: [...] } shape — dataArray() parses this to [].
+      fetcher: async () => new Response(JSON.stringify({ error: 'rate limited' }))
+    })
+    await later.refreshModels?.({ store: providerStore(store, 'nvidia'), allowNetwork: true })
+    expect(later.getModels().length).toBe(2)
+    expect((await store.read('nvidia'))?.models.length).toBe(2)
+  })
+
+  test('a wrong-shape 200 on a cold (empty) cache does not persist an empty catalog', async () => {
+    // Distinct from the warm-cache case above: nothing was ever fetched
+    // successfully before, so there is nothing to "protect" in memory — but
+    // writing {models: [], checkedAt: now} here would still be wrong, because
+    // it would pass the freshness check on the next boot and hide the
+    // provider for a full REFRESH_INTERVAL_MS window with no way to tell a
+    // genuine empty catalog from a mis-shaped 200.
+    const store = new InMemoryModelsStore()
+    const wrapped = withEndpointCatalog(fakeProvider(), {
+      now: () => 1000,
+      fetcher: async () => new Response(JSON.stringify({ error: 'rate limited' }))
+    })
+    await wrapped.refreshModels?.({ store: providerStore(store, 'nvidia'), allowNetwork: true })
+    expect(wrapped.getModels()).toEqual([])
+    expect(await store.read('nvidia')).toBeUndefined()
+  })
+
   test('a malformed cache entry degrades to no models rather than crashing', async () => {
     const store = new InMemoryModelsStore()
     await store.write('nvidia', { checkedAt: 1000 } as unknown as Parameters<
