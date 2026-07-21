@@ -14,7 +14,7 @@ export const toModelMeta = (m: Model<Api>): ModelMeta => {
     // downstream reader to know the convention.
     ...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
     ...(m.maxTokens ? { maxTokens: m.maxTokens } : {}),
-    ...(m.cost !== undefined
+    ...(m.cost !== undefined && m.cost !== null
       ? {
           cost: {
             ...(m.cost.input !== undefined ? { input: m.cost.input } : {}),
@@ -149,6 +149,33 @@ const dataArray = (payload: unknown): RawEntry[] => {
   return Array.isArray(data) ? (data as RawEntry[]) : []
 }
 
+// Two live endpoints put different units in the same field: chutes quotes
+// per-million USD (0.104) while OpenRouter quotes per-token (1e-7). Magnitude is
+// the only honest discriminator. Do not key off string-vs-number: that the
+// per-token endpoint happens to send strings is coincidence, not semantics.
+//
+// The real margins are narrower than they look, so measure before widening this:
+//   per-million floor  ~5e-3  (cheapest listings, ~$0.005/M) -> 5x above
+//   per-token ceiling  ~6e-4  (o1-pro output at $600/M)      -> 1.67x below
+// The high side is the tight one. A model above ~$1000/M quoted per token would
+// fall on the wrong side and be published as ~$0.001/M — silently near-free, so
+// the router would then prefer it. That failure is quiet; the low-side failure
+// (a sub-$0.001/M per-million price scaled up to hundreds) is loud and obvious.
+const PER_TOKEN_CEILING = 0.001
+
+// The unit the prices are quoted in, measured in per-million dollars: 1e-6 for a
+// per-token endpoint, 1 for a per-million one. Callers divide by it — dividing by
+// 1e-6 lands on 0.1 exactly where multiplying by 1e6 drifts to 0.0999…
+//
+// Decided once per model from its largest non-zero price, then applied to every
+// field. A per-field decision could mix units inside one cost block: a model with
+// a free input and a per-token output would scale one side and not the other.
+const priceUnit = (values: (number | undefined)[]): number => {
+  const known = values.filter((v): v is number => v !== undefined && v > 0)
+  if (known.length === 0) return 1
+  return Math.max(...known) < PER_TOKEN_CEILING ? 1e-6 : 1
+}
+
 // chutes/OpenRouter/vLLM style: GET /models with extra context/pricing fields.
 export const parseOpenaiModelsList = (payload: unknown): Map<string, ModelMeta> => {
   const out = new Map<string, ModelMeta>()
@@ -158,8 +185,11 @@ export const parseOpenaiModelsList = (payload: unknown): Map<string, ModelMeta> 
     const pricing = (e.pricing ?? {}) as RawEntry
     const contextWindow = num(e.context_length) ?? num(e.max_model_len)
     const maxTokens = num(e.max_output_length)
-    const input = num(pricing.prompt)
-    const output = num(pricing.completion)
+    const rawInput = num(pricing.prompt)
+    const rawOutput = num(pricing.completion)
+    const unit = priceUnit([rawInput, rawOutput])
+    const input = rawInput !== undefined ? rawInput / unit : undefined
+    const output = rawOutput !== undefined ? rawOutput / unit : undefined
     const mods = Array.isArray(e.input_modalities) ? (e.input_modalities as string[]) : undefined
     const meta: ModelMeta = {
       name: typeof e.name === 'string' ? e.name : id,

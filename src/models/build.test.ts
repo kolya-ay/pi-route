@@ -107,7 +107,7 @@ describe('buildModels', () => {
       }
     }) as unknown as RouterOptions
 
-  test('a disabled provider keeps its models but loses refreshModels', () => {
+  test('a disabled provider loses refreshModels', () => {
     const models = buildModels(withAg(true), { stateDir: dirs(), authDir: dirs() })
     const provider = models.getProviders().find((p) => p.id === 'ag')
     expect(provider).toBeDefined()

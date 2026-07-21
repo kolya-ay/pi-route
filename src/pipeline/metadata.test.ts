@@ -43,6 +43,20 @@ describe('toModelMeta', () => {
     expect(meta.contextWindow).toBeUndefined()
     expect(meta.maxTokens).toBeUndefined()
   })
+
+  // Model records reach here through an unchecked cast from on-disk JSON, so
+  // `undefined` is not the only absent-ish value that arrives.
+  test('toModelMeta treats a null cost as absent rather than throwing', () => {
+    const meta = toModelMeta({
+      id: 'x',
+      name: 'X',
+      cost: null,
+      contextWindow: 1000,
+      maxTokens: 100
+    } as never)
+    expect(meta.cost).toBeUndefined()
+    expect(meta.contextWindow).toBe(1000)
+  })
 })
 
 describe('normalizeModelId', () => {
@@ -178,12 +192,46 @@ describe('parseOpenaiModelsList', () => {
   test('malformed payload → empty map', () => {
     expect(parseOpenaiModelsList({ nope: 1 }).size).toBe(0)
   })
-  test('numeric string pricing fields (OpenRouter style) are coerced', () => {
+  // Deliberately per-million values sent as strings: string-ness and unit are
+  // independent, which is why the unit heuristic must not key off the type.
+  test('numeric string pricing fields are coerced', () => {
     const payload = {
       data: [{ id: 'some/model', pricing: { prompt: '0.1', completion: '0.4' } }]
     }
     const m = parseOpenaiModelsList(payload).get('some/model')!
     expect(m.cost).toEqual({ input: 0.1, output: 0.4 })
+  })
+})
+
+// chutes quotes per-million USD in `pricing.prompt`; OpenRouter quotes per-token
+// in the same field. Magnitude, not type, tells the two regimes apart.
+describe('parseOpenaiModelsList pricing units', () => {
+  const listPayload = (entry: Record<string, unknown>) => ({ data: [{ id: 'm', ...entry }] })
+
+  test('leaves per-million pricing alone', () => {
+    const out = parseOpenaiModelsList(
+      listPayload({ pricing: { prompt: 0.104, completion: 0.416 } })
+    )
+    expect(out.get('m')?.cost).toEqual({ input: 0.104, output: 0.416 })
+  })
+
+  test('scales per-token pricing to per-million', () => {
+    const out = parseOpenaiModelsList(
+      listPayload({ pricing: { prompt: '0.0000001', completion: '0.0000002' } })
+    )
+    expect(out.get('m')?.cost).toEqual({ input: 0.1, output: 0.2 })
+  })
+
+  test('decides the unit once per model, not per field', () => {
+    const out = parseOpenaiModelsList(
+      listPayload({ pricing: { prompt: 0, completion: '0.0000002' } })
+    )
+    expect(out.get('m')?.cost).toEqual({ input: 0, output: 0.2 })
+  })
+
+  test('a model with only zero pricing is left at zero', () => {
+    const out = parseOpenaiModelsList(listPayload({ pricing: { prompt: 0, completion: 0 } }))
+    expect(out.get('m')?.cost).toEqual({ input: 0, output: 0 })
   })
 })
 
