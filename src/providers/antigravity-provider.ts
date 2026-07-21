@@ -27,9 +27,9 @@ import {
 } from '@earendil-works/pi-ai'
 
 import { antigravityOAuth, PROJECT_HEADER } from '../auth/antigravity-auth'
-import { FETCH_TIMEOUT_MS } from '../models/remote-catalog'
+import { FETCH_TIMEOUT_MS } from '../models/fetch-timeout'
 
-// A narrower fetch than `typeof fetch` (mirrors remote-catalog.ts): Bun's mocks
+// A narrower fetch than `typeof fetch` (mirrors cached-catalog.ts): Bun's mocks
 // and bare `async () => Response` are assignable without the `preconnect` prop.
 type FetchFn = (url: string, init?: RequestInit) => Promise<Response>
 

@@ -92,6 +92,44 @@ describe('buildModels', () => {
     expect(models.getProvider('nvidia')?.refreshModels).toBeUndefined()
   })
 
+  const withAg = (disabled?: boolean) =>
+    ({
+      ...options,
+      providers: {
+        ag: {
+          type: 'antigravity',
+          account: {
+            credential: 'oauth',
+            name: 'antigravity',
+            ...(disabled === undefined ? {} : { disabled })
+          }
+        }
+      }
+    }) as unknown as RouterOptions
+
+  test('a disabled provider keeps its models but loses refreshModels', () => {
+    const models = buildModels(withAg(true), { stateDir: dirs(), authDir: dirs() })
+    const provider = models.getProviders().find((p) => p.id === 'ag')
+    expect(provider).toBeDefined()
+    expect(provider?.refreshModels).toBeUndefined()
+  })
+
+  test('an enabled provider keeps refreshModels', () => {
+    const models = buildModels(withAg(), { stateDir: dirs(), authDir: dirs() })
+    expect(models.getProviders().find((p) => p.id === 'ag')?.refreshModels).toBeDefined()
+  })
+
+  test('a disabled FACTORIES provider is still wrapped and can still restore', () => {
+    const withCc = {
+      ...options,
+      providers: {
+        cc: { type: 'anthropic', account: { credential: 'oauth', name: 'cc', disabled: true } }
+      }
+    } as unknown as RouterOptions
+    const models = buildModels(withCc, { stateDir: dirs(), authDir: dirs() })
+    expect(models.getProviders().find((p) => p.id === 'cc')?.refreshModels).toBeDefined()
+  })
+
   test('antigravity keeps its own discovery instead of the endpoint catalog when config sets a baseUrl', async () => {
     const originalFetch = globalThis.fetch
     let calls = 0

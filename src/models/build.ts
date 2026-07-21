@@ -9,8 +9,7 @@ import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter'
 import { fileCredentialStore } from '../auth/credential-store'
 import { antigravityProvider } from '../providers/antigravity-provider'
 import type { ProviderConfig, RouterOptions } from '../types'
-import { withEndpointCatalog } from './endpoint-catalog'
-import { withRemoteCatalog } from './remote-catalog'
+import { withEndpointCatalog, withRemoteCatalog } from './cached-catalog'
 import { fileModelsStore } from './store'
 
 export type BuildDirs = { stateDir: string; authDir: string }
@@ -49,16 +48,36 @@ const buildOne = (name: string, config: ProviderConfig): Provider | undefined =>
   return undefined // passthrough and unknown types stay outside Models
 }
 
+const withoutRefresh = (p: Provider): Provider => {
+  const { refreshModels: _refreshModels, ...rest } = p
+  return rest
+}
+
 // Overlay a dynamic catalog on top of a built provider: pi.dev's published
 // catalog for known upstream types, or the endpoint's own /models for
 // everything else with a baseUrl. `discover: false` opts out of both.
 //
-// `disabled` only gates the endpoint-catalog branch: it stops this task's new
-// wrapper from sending the account's own key to the account's own endpoint
-// while the account is meant to be off. It does not gate withRemoteCatalog —
-// that fetch carries no credential (it hits pi.dev keyed by upstream type),
-// so there is no leak to prevent, and a disabled account's static/pi.dev
-// catalog listing is pre-existing behavior this task should not change.
+// `disabled` must REMOVE `refreshModels`, not merely skip a wrapper.
+// `models.refresh()` calls whatever `refreshModels` a provider carries,
+// wrapped or not, so returning the built provider untouched stops nothing:
+// antigravity ships its own refresh that POSTs the account's OAuth token to
+// Google, and it would keep doing so every tick of an account the user turned
+// off. Dropping the method is the only gate the refresh loop respects.
+//
+// withRemoteCatalog is deliberately exempt. That fetch carries no credential
+// — it hits pi.dev keyed by upstream type — so there is no leak to prevent,
+// and its `refreshModels` is also what restores the persisted catalog from
+// the store: stripping it would leave a disabled provider listing nothing,
+// a listing regression dressed as a security fix.
+//
+// The `disabled` check on the endpoint branch still matters: an
+// openai-compatible provider brings no `refreshModels` of its own, so it
+// never reaches the guard above it.
+//
+// A disabled antigravity provider does lose its listing, which is correct:
+// its catalog only ever existed as a product of the credentialed fetch being
+// stopped. `config/availability.ts` already excludes disabled providers from
+// dispatch and `cli/provider-config.ts` hides them from `provider list`.
 //
 // A provider that already brings its own `refreshModels` (e.g. antigravity's
 // Cloud Code discovery) is left alone rather than matched on `config.baseUrl`
@@ -68,7 +87,9 @@ const buildOne = (name: string, config: ProviderConfig): Provider | undefined =>
 const wrapProvider = (built: Provider, config: ProviderConfig): Provider => {
   if (config.discover === false) return built
   if (FACTORIES[config.type]) return withRemoteCatalog(built, config.type)
-  if (built.refreshModels) return built
+  if (built.refreshModels) {
+    return config.account.disabled === true ? withoutRefresh(built) : built
+  }
   if (!config.baseUrl || config.account.disabled === true) return built
   return withEndpointCatalog(
     built,

@@ -1,5 +1,5 @@
 import type { Api, Model, Models } from '@earendil-works/pi-ai'
-import { FETCH_TIMEOUT_MS } from '../models/remote-catalog'
+import { FETCH_TIMEOUT_MS } from '../models/fetch-timeout'
 import type { DiscoverStrategy, ModelMetaOverride, RouterOptions } from '../types'
 import type { Catalog, ModelMeta } from './catalog'
 

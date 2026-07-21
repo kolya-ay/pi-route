@@ -34,7 +34,7 @@ describe('toModelMeta', () => {
   })
 
   // `Model` requires non-optional numbers, so an endpoint that didn't describe a
-  // field surfaces as 0 (see endpoint-catalog.ts). toModelMeta is the one Model ->
+  // field surfaces as 0 (see cached-catalog.ts). toModelMeta is the one Model ->
   // ModelMeta boundary, so it's the one place that can turn "0 = unknown" back into
   // real absence, instead of every downstream reader having to know the sentinel.
   test('a Model reporting contextWindow: 0 and maxTokens: 0 omits both, not publishes zero', () => {

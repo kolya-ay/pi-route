@@ -53,7 +53,7 @@ const constructModel = (models: Models, providerName: string, id: string): Model
   }) as Model<Api>
 
 // A catalog entry can carry 0 for limits its endpoint never declared (see
-// endpoint-catalog.ts). 0 would cap every request to nothing, so fill it in
+// cached-catalog.ts). 0 would cap every request to nothing, so fill it in
 // here — after the catalog lookup, before capMaxTokens sees it.
 const withKnownLimits = (model: Model<Api>): Model<Api> =>
   model.contextWindow && model.maxTokens
