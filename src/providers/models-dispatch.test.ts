@@ -4,6 +4,8 @@ import { describe, expect, it } from 'bun:test'
 import type { Api, AssistantMessage, Model, Models } from '@earendil-works/pi-ai'
 import { createAssistantMessageEventStream, ModelsError } from '@earendil-works/pi-ai'
 
+import { createTel } from '../telemetry/tel'
+import { useTestExporter } from '../telemetry/test-fixture'
 import type { IncomingRequest } from '../types'
 import { createModelsDispatch, DispatchAuthError, mapAuthError } from './models-dispatch'
 
@@ -32,18 +34,18 @@ const mkModel = (): Model<Api> => ({
   maxTokens: 500
 })
 
-const mkMessage = (): AssistantMessage => ({
+const mkMessage = (input = 1, output = 1): AssistantMessage => ({
   role: 'assistant',
   content: [{ type: 'text', text: 'hello' }],
   api: 'anthropic-messages',
   provider: 'prov',
   model: 'm',
   usage: {
-    input: 1,
-    output: 1,
+    input,
+    output,
     cacheRead: 0,
     cacheWrite: 0,
-    totalTokens: 2,
+    totalTokens: input + output,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
   },
   stopReason: 'stop',
@@ -54,9 +56,9 @@ const mkMessage = (): AssistantMessage => ({
 const mkModels = (over: Partial<Pick<Models, 'getModel' | 'stream'>>): Models =>
   ({ getModel: () => mkModel(), stream: () => cannedStream(), ...over }) as unknown as Models
 
-const cannedStream = () => {
+const cannedStream = (input = 1, output = 1) => {
   const stream = createAssistantMessageEventStream()
-  const message = mkMessage()
+  const message = mkMessage(input, output)
   stream.push({ type: 'done', reason: 'stop', message })
   stream.end(message)
   return stream
@@ -153,6 +155,41 @@ describe('createModelsDispatch', () => {
     await provider.dispatch(mkRequest({ stream: false }), { credential: 'key', key: 'k' }, 'k')
     // mkModel() carries real, non-zero limits (1000/500) — the fill-in must not touch them.
     expect(captured).toEqual({ contextWindow: 1000, maxTokens: 500 })
+  })
+})
+
+// The unit boundary this suite exists to guard: Model.cost is USD per MILLION
+// tokens (see model-projection.ts perTokenString, metadata.ts parseLitellmModelInfo),
+// but wrapStreamForMetrics multiplies raw token counts by its `costs`. Dispatch
+// owns the conversion; without it every priced provider reports 1e6x too much.
+describe('createModelsDispatch cost units', () => {
+  const exporter = useTestExporter()
+
+  it('records $0.001 for 10k input tokens at $0.10 per million, not $1000', async () => {
+    const priced: Model<Api> = {
+      ...mkModel(),
+      cost: { input: 0.1, output: 0.4, cacheRead: 0, cacheWrite: 0 }
+    }
+    const models = mkModels({
+      getModel: () => priced,
+      stream: () => cannedStream(10_000, 1_000)
+    })
+    const tel = createTel()
+    await tel.withSpan('outer', {}, async (span) => {
+      const provider = createModelsDispatch(models, 'prov')
+      await provider.dispatch(
+        mkRequest({
+          stream: false,
+          telHooks: { tel, span, capture: { capturePrompts: false, maxBytes: 0 } }
+        }),
+        { credential: 'key', key: 'k' },
+        'k'
+      )
+    })
+    const attrs = exporter.getFinishedSpans()[0]?.attributes
+    if (!attrs) throw new Error('missing finished span attributes')
+    // 10_000 * $0.10/1e6 + 1_000 * $0.40/1e6 = 0.001 + 0.0004
+    expect(attrs['gen_ai.usage.cost_usd']).toBeCloseTo(0.0014, 10)
   })
 })
 

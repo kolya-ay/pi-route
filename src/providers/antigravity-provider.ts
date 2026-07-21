@@ -27,12 +27,11 @@ import {
 } from '@earendil-works/pi-ai'
 
 import { antigravityOAuth, PROJECT_HEADER } from '../auth/antigravity-auth'
-import { FETCH_TIMEOUT_MS } from '../models/fetch-timeout'
+import type { FetchFn } from '../models/fetch-timeout'
+import { deadlined } from '../models/fetch-timeout'
 
 // A narrower fetch than `typeof fetch` (mirrors cached-catalog.ts): Bun's mocks
 // and bare `async () => Response` are assignable without the `preconnect` prop.
-type FetchFn = (url: string, init?: RequestInit) => Promise<Response>
-
 // Custom API tag: only this provider streams it, so `Models` routes every
 // discovered model back through `streamAntigravity`.
 const ANTIGRAVITY_API = 'google-antigravity' as Api
@@ -506,11 +505,7 @@ export const streamAntigravity = (
 
 // --- Provider ---
 
-export const antigravityProvider = (
-  id: string,
-  fetchFn: FetchFn = fetch,
-  timeoutMs: number = FETCH_TIMEOUT_MS
-): Provider =>
+export const antigravityProvider = (id: string, fetchFn: FetchFn = deadlined(fetch)): Provider =>
   createProvider({
     id,
     name: id,
@@ -522,7 +517,9 @@ export const antigravityProvider = (
       if (!token) return []
       for (const endpoint of ENDPOINTS) {
         try {
-          const timeout = AbortSignal.timeout(timeoutMs)
+          // `deadlined` mints the deadline per call, so each endpoint in this
+          // loop gets its own full budget — a shared one would let the first
+          // slow host starve the fallbacks.
           const res = await fetchFn(`${endpoint}/v1internal:fetchAvailableModels`, {
             method: 'POST',
             headers: {
@@ -531,7 +528,7 @@ export const antigravityProvider = (
               'User-Agent': ANTIGRAVITY_USER_AGENT
             },
             body: '{}',
-            signal: context.signal ? AbortSignal.any([context.signal, timeout]) : timeout
+            ...(context.signal ? { signal: context.signal } : {})
           })
           if (!res.ok) continue
           return parseDiscovery(id, endpoint, await res.json())

@@ -37,7 +37,8 @@ export const makeMetadata = (
   latencyMs: Date.now() - startMs
 })
 
-// Costs are per-token rates lifted from the pi-ai catalog Model.
+// Costs are per-TOKEN rates. The pi-ai catalog Model prices per million, so the
+// caller divides by 1e6 first (see models-dispatch.ts).
 export type StreamMetricsCtx = {
   costs: { inputCost: number; outputCost: number }
 }

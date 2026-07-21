@@ -11,6 +11,7 @@ import type {
 } from '@earendil-works/pi-ai'
 
 import { PROJECT_HEADER } from '../auth/antigravity-auth'
+import { deadlined } from '../models/fetch-timeout'
 import {
   antigravityProvider,
   buildEnvelope,
@@ -127,7 +128,7 @@ describe('antigravityProvider discovery', () => {
           reject(signal.reason)
         })
       })
-    const provider = antigravityProvider('ag', fetchFn, 10)
+    const provider = antigravityProvider('ag', deadlined(fetchFn, 10))
     await provider.refreshModels?.({
       credential: oauthCredential,
       store: stubStore,

@@ -3,7 +3,7 @@
 import { homedir } from 'node:os'
 import type { Models } from '@earendil-works/pi-ai'
 
-import { buildCatalog, type Catalog, type ModelMeta } from '../pipeline/catalog'
+import type { Catalog, ModelMeta } from '../pipeline/catalog'
 import { exposeIncludes } from '../pipeline/match'
 import {
   capabilities,
@@ -66,12 +66,10 @@ const inputMods = (m: ModelMeta): string[] =>
 // Resolve an exposed address to its model + backend leaf, or throw if it isn't exposed.
 const resolveExposed = (
   options: RouterOptions,
+  catalog: Catalog,
   models: Models,
-  authDir: string,
-  id: string,
-  liveMeta?: Map<string, ModelMeta>
+  id: string
 ): { resolved: Resolved; leaf: string } => {
-  const catalog: Catalog = buildCatalog(options, models, authDir, liveMeta)
   if (!exposeIncludes(options.expose, id) || !catalog.addresses.has(id)) {
     throw new Error(`Model not exposed: ${id}`)
   }
@@ -85,12 +83,11 @@ const resolveExposed = (
 // but renders instead of projecting to JSON.
 export const renderModelDetail = (
   options: RouterOptions,
+  catalog: Catalog,
   models: Models,
-  authDir: string,
-  id: string,
-  liveMeta?: Map<string, ModelMeta>
+  id: string
 ): string => {
-  const { resolved, leaf } = resolveExposed(options, models, authDir, id, liveMeta)
+  const { resolved, leaf } = resolveExposed(options, catalog, models, id)
   const m = resolved.model
   const tier = completeness(m)
   const name = m ? displayName(resolved.provider, m.name) : id
@@ -180,13 +177,7 @@ const rolesByAddress = (
 }
 
 // One display row per exposed address, with completeness tier + compact cells.
-export const modelRows = (
-  options: RouterOptions,
-  models: Models,
-  authDir: string,
-  liveMeta?: Map<string, ModelMeta>
-): ModelRow[] => {
-  const catalog = buildCatalog(options, models, authDir, liveMeta)
+export const modelRows = (options: RouterOptions, catalog: Catalog, models: Models): ModelRow[] => {
   const roles = rolesByAddress(options, catalog, models)
   return exposedAddresses(options, catalog).map((id) => {
     const { model } = resolveModel(options, catalog, models, id)
@@ -237,12 +228,11 @@ export const renderModelList = (rows: ModelRow[], tty: boolean): string => {
 
 export const showModel = (
   options: RouterOptions,
+  catalog: Catalog,
   models: Models,
-  authDir: string,
-  id: string,
-  liveMeta?: Map<string, ModelMeta>
+  id: string
 ): ModelView => {
-  const { resolved, leaf } = resolveExposed(options, models, authDir, id, liveMeta)
+  const { resolved, leaf } = resolveExposed(options, catalog, models, id)
   return {
     id,
     leaf,
@@ -264,16 +254,14 @@ export const renderPlannedWrites = (writes: PlannedWrite[]): string =>
 
 export const setupModels = async (
   options: RouterOptions,
+  catalog: Catalog,
   models: Models,
-  authDir: string,
   agentName: string,
-  opts: { homeDir?: string; dry?: boolean; url: string },
-  liveMeta?: Map<string, ModelMeta>
+  opts: { homeDir?: string; dry?: boolean; url: string }
 ): Promise<PlannedWrite[]> => {
   const agent = AGENTS.find((a) => a.name === agentName)
   if (!agent) throw new Error(`unknown agent: ${agentName}`)
   const home = opts.homeDir ?? homedir()
-  const catalog = buildCatalog(options, models, authDir, liveMeta)
   const defaults = roleModels(options, catalog, models, 'default')
   const main = defaults[0]
   if (!main) throw new Error('Missing pipeline.default exact-match role')

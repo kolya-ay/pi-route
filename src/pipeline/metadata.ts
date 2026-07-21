@@ -1,5 +1,6 @@
 import type { Api, Model, Models } from '@earendil-works/pi-ai'
-import { FETCH_TIMEOUT_MS } from '../models/fetch-timeout'
+import type { FetchFn } from '../models/fetch-timeout'
+import { deadlined } from '../models/fetch-timeout'
 import type { DiscoverStrategy, ModelMetaOverride, ProviderConfig, RouterOptions } from '../types'
 import type { Catalog, ModelMeta } from './catalog'
 
@@ -247,13 +248,12 @@ export const parseLitellmModelInfo = (payload: unknown): Map<string, ModelMeta> 
 }
 
 const httpGetJson = async (
+  fetchFn: FetchFn,
   url: string,
-  key: string | undefined,
-  timeoutMs: number
+  key: string | undefined
 ): Promise<unknown> => {
-  const res = await globalThis.fetch(url, {
-    headers: key ? { authorization: `Bearer ${key}` } : {},
-    signal: AbortSignal.timeout(timeoutMs)
+  const res = await fetchFn(url, {
+    headers: key ? { authorization: `Bearer ${key}` } : {}
   })
   if (!res.ok) throw new Error(`${url} → ${res.status}`)
   return res.json()
@@ -268,45 +268,61 @@ const liveStrategy = (provider: ProviderConfig): DiscoverStrategy | undefined =>
 export const fetchProviderMetadata = async (
   name: string,
   provider: ProviderConfig,
-  timeoutMs: number = FETCH_TIMEOUT_MS
+  timeoutMs?: number
 ): Promise<Map<string, ModelMeta>> => {
   const liveStrat = liveStrategy(provider)
   if (!liveStrat || !provider.baseUrl) return new Map()
   const key = provider.account.credential === 'key' ? provider.account.key : undefined
+  const fetchFn = deadlined(globalThis.fetch, timeoutMs)
   try {
     return liveStrat === 'openai-models-list'
-      ? parseOpenaiModelsList(await httpGetJson(`${provider.baseUrl}/models`, key, timeoutMs))
-      : parseLitellmModelInfo(await httpGetJson(`${provider.baseUrl}/model/info`, key, timeoutMs))
+      ? parseOpenaiModelsList(await httpGetJson(fetchFn, `${provider.baseUrl}/models`, key))
+      : parseLitellmModelInfo(await httpGetJson(fetchFn, `${provider.baseUrl}/model/info`, key))
   } catch (err) {
     console.error(`[metadata] live fetch failed for provider "${name}": ${String(err)}`)
     return new Map()
   }
 }
 
-// Does `build.ts` overlay the endpoint catalog on this provider? That wrapper is
-// the only other reader of {baseUrl}/models, and it is reached solely by the two
-// openai-shaped types: FACTORIES types take the pi.dev catalog, antigravity keeps
-// its own refreshModels, and any other type isn't backed by Models at all.
-// Mirrors `wrapProvider`'s endpoint branch — keep the two in step.
-const isEndpointCatalogWrapped = (provider: ProviderConfig): boolean =>
-  (provider.type === 'openai-compatible' || provider.type === 'openai') &&
-  provider.discover !== false &&
-  Boolean(provider.baseUrl) &&
-  provider.account.disabled !== true
+// Has the catalog wrapper already published for this provider? The wrapper writes
+// its lossless /models parse into this very map, address-keyed — so an entry under
+// `name/` IS the evidence that it covered this provider. Asking the map beats
+// mirroring `wrapProvider`'s branching here: a mirror can only be kept in step by
+// comment, and drifts silently into a permanent metadata hole.
+const alreadyCovered = (catalog: Catalog, name: string): boolean => {
+  const prefix = `${name}/`
+  for (const key of catalog.liveMeta.keys()) if (key.startsWith(prefix)) return true
+  return false
+}
 
 // Populate catalog.liveMeta (address-keyed) for the providers the catalog wrapper
 // does not cover. That wrapper fetches {baseUrl}/models on its own schedule,
 // persists the lossless parse, and publishes it into this same map — so fetching
 // the identical payload here would be a second request for data we already hold.
 // What is left is the `litellm` strategy (a different endpoint, /model/info, that
-// no wrapper touches) and any provider the wrapper never wraps.
+// no wrapper touches) and any provider nothing has published for.
+//
+// Two consequences of reading the map rather than predicting the wrapper, both wanted:
+//   - On a first-ever boot with an empty store nothing has been published yet, so
+//     one extra GET happens. That is this fallback doing its job; it stops once the
+//     store is warm.
+//   - A provider the wrapper wraps but never refreshes (an oauth-credential
+//     openai-compatible one: `buildOne` gives it an apiKey auth only, so pi-ai
+//     resolves no refresh credential and `refreshModels` never runs) is never
+//     published for, so it is never skipped — it keeps its live metadata by
+//     construction rather than by a special case.
 export const enrichLiveMeta = async (opts: RouterOptions, catalog: Catalog): Promise<void> => {
   const entries = Object.entries(opts.providers)
   await Promise.all(
     entries.map(async ([name, provider]) => {
+      // Security gate, before any other consideration: off means off. The account's
+      // own key must not reach the account's own endpoint while it is meant to be
+      // off — the same policy `wrapProvider` states and enforces in
+      // src/models/build.ts. Keep the two legible as one rule.
+      if (provider.account.disabled === true) return
       // Only the openai-models-list strategy duplicates the wrapper's GET;
       // litellm reads /model/info, which nothing else fetches.
-      if (liveStrategy(provider) !== 'litellm' && isEndpointCatalogWrapped(provider)) return
+      if (liveStrategy(provider) !== 'litellm' && alreadyCovered(catalog, name)) return
       const map = await fetchProviderMetadata(name, provider)
       for (const [modelId, meta] of map) catalog.liveMeta.set(`${name}/${modelId}`, meta)
     })

@@ -456,69 +456,119 @@ test('fetchProviderMetadata gives up on a hung endpoint instead of hanging', asy
 // for the providers it wraps and publishes the parse into the same map, so a
 // second GET there would be a request for data we already hold — while every
 // provider the wrapper does NOT wrap must keep its live metadata.
-const countingFetch = (): { calls: string[]; fetch: typeof fetch } => {
+// Headers are captured alongside the urls: for a disabled account the claim is
+// not merely "fewer requests" but "the key never left the process".
+const countingFetch = (): {
+  calls: string[]
+  headers: Record<string, string>[]
+  fetch: typeof fetch
+} => {
   const calls: string[] = []
+  const headers: Record<string, string>[] = []
   return {
     calls,
-    fetch: (async (url: string) => {
+    headers,
+    fetch: (async (url: string, init?: RequestInit) => {
       calls.push(String(url))
+      headers.push((init?.headers ?? {}) as Record<string, string>)
       return new Response(JSON.stringify({ data: [] }), { status: 200 })
     }) as unknown as typeof fetch
   }
 }
 
-const emptyCatalog = () =>
+const catalogWith = (liveMeta: string[] = []) =>
   ({
     addresses: new Set<string>(),
     leafFor: new Map<string, string>(),
-    liveMeta: new Map(),
+    liveMeta: new Map(liveMeta.map((address) => [address, { name: address }])),
     available: new Set<string>()
   }) as unknown as Parameters<typeof enrichLiveMeta>[1]
 
-const enrichWith = async (providers: Record<string, unknown>): Promise<string[]> => {
+const enrichWith = async (
+  providers: Record<string, unknown>,
+  liveMeta: string[] = []
+): Promise<{ calls: string[]; headers: Record<string, string>[] }> => {
   const original = globalThis.fetch
-  const { calls, fetch: stub } = countingFetch()
+  const { calls, headers, fetch: stub } = countingFetch()
   globalThis.fetch = stub
   try {
     await enrichLiveMeta(
       { providers, pipeline: [], expose: [] } as unknown as RouterOptions,
-      emptyCatalog()
+      catalogWith(liveMeta)
     )
-    return calls
+    return { calls, headers }
   } finally {
     globalThis.fetch = original
   }
 }
 
 describe('enrichLiveMeta', () => {
-  test('does not re-fetch /models for a provider the catalog wrapper already covers', async () => {
-    const calls = await enrichWith({
+  // Presence under `name/` in liveMeta is the wrapper's own evidence that it
+  // covered this provider — the only thing this function asks about.
+  test('does not re-fetch /models for a provider the catalog wrapper already published for', async () => {
+    const { calls } = await enrichWith(
+      {
+        chutes: {
+          type: 'openai-compatible',
+          baseUrl: 'https://example.test/v1',
+          discover: ['openai-models-list'],
+          account: { credential: 'key', key: 'k' }
+        }
+      },
+      ['chutes/some-model']
+    )
+    expect(calls).toEqual([])
+  })
+
+  // "Off means off": a disabled account's key must not reach its own endpoint,
+  // on boot or on any rebuild. See wrapProvider in src/models/build.ts.
+  test('sends nothing at all for a disabled provider — not even an unauthenticated GET', async () => {
+    const { calls, headers } = await enrichWith({
       chutes: {
         type: 'openai-compatible',
         baseUrl: 'https://example.test/v1',
         discover: ['openai-models-list'],
-        account: { credential: 'key', key: 'k' }
+        account: { credential: 'key', key: 'k', disabled: true }
       }
     })
     expect(calls).toEqual([])
+    expect(headers.flatMap((h) => Object.keys(h))).not.toContain('authorization')
+  })
+
+  // An oauth-credential openai-compatible provider is wrapped but never refreshed
+  // (buildOne gives it an apiKey auth only, so pi-ai resolves no refresh
+  // credential), so the wrapper never publishes for it — and this fallback must.
+  test('still fetches for an oauth-credential provider nothing has published for', async () => {
+    const { calls } = await enrichWith({
+      oa: {
+        type: 'openai-compatible',
+        baseUrl: 'https://example.test/v1',
+        discover: ['openai-models-list'],
+        account: { credential: 'oauth', name: 'openai-compatible-acct' }
+      }
+    })
+    expect(calls).toEqual(['https://example.test/v1/models'])
   })
 
   test('still fetches /model/info for a litellm provider (no wrapper reads that endpoint)', async () => {
-    const calls = await enrichWith({
-      proxy: {
-        type: 'openai-compatible',
-        baseUrl: 'https://example.test/v1',
-        discover: ['litellm'],
-        account: { credential: 'key', key: 'k' }
-      }
-    })
+    const { calls } = await enrichWith(
+      {
+        proxy: {
+          type: 'openai-compatible',
+          baseUrl: 'https://example.test/v1',
+          discover: ['litellm'],
+          account: { credential: 'key', key: 'k' }
+        }
+      },
+      ['proxy/some-model']
+    )
     expect(calls).toEqual(['https://example.test/v1/model/info'])
   })
 
   // A type the Models collection doesn't back is never wrapped (buildOne returns
   // undefined, so it dispatches passthrough) — its live metadata has no other source.
   test('still fetches /models for a passthrough-typed provider the wrapper never wraps', async () => {
-    const calls = await enrichWith({
+    const { calls } = await enrichWith({
       weird: {
         type: 'some-proxy',
         baseUrl: 'https://example.test/v1',

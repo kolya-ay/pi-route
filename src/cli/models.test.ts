@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { Api, Model, Models } from '@earendil-works/pi-ai'
-import type { ModelMeta } from '../pipeline/catalog'
+import { buildCatalog, type ModelMeta } from '../pipeline/catalog'
 import { toModelMeta } from '../pipeline/metadata'
 import type { RouterOptions } from '../types'
 import type { PlannedWrite } from './agent'
@@ -155,7 +155,12 @@ describe('renderModelDetail', () => {
       pipeline: [],
       expose: ['nvidia/**']
     } as unknown as RouterOptions
-    const detail = renderModelDetail(options, models, '/tmp', 'nvidia/some-model')
+    const detail = renderModelDetail(
+      options,
+      buildCatalog(options, models, '/tmp'),
+      models,
+      'nvidia/some-model'
+    )
     expect(detail).toContain('partial')
     expect(detail).not.toMatch(/max out\s+0 tokens/)
     expect(detail).toMatch(/max out\s+—/)

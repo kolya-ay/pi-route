@@ -101,7 +101,13 @@ export const createModelsDispatch = (
     }
 
     const metadata = makeMetadata(request, providerName, start)
-    const ctx = { costs: { inputCost: model.cost.input, outputCost: model.cost.output } }
+    // Unit boundary: Model.cost is USD per MILLION tokens (the catalog convention —
+    // metadata.ts normalizes into it, model-projection.ts:75 divides out of it),
+    // while wrapStreamForMetrics multiplies raw token counts by these rates. Keep
+    // the /1e6 — without it every priced provider reports cost 1e6x too high.
+    const ctx = {
+      costs: { inputCost: model.cost.input / 1e6, outputCost: model.cost.output / 1e6 }
+    }
     return request.stream
       ? streamingResponse(eventStream, request, metadata, ctx)
       : jsonResponse(eventStream, request, metadata, ctx)

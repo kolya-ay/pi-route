@@ -2,6 +2,8 @@
 
 import { describe, expect, it, mock, test } from 'bun:test'
 
+import { deadlined } from '../models/fetch-timeout'
+
 import {
   antigravityOAuth,
   buildAuthUrl,
@@ -207,7 +209,7 @@ describe('discoverProject', () => {
   it('aborts an unresponsive Cloud Code endpoint instead of hanging', async () => {
     const seen: AbortSignal[] = []
 
-    const err = await catchError(discoverProject('token', hangingFetch(seen), undefined, 10))
+    const err = await catchError(discoverProject('token', deadlined(hangingFetch(seen), 10)))
 
     expect(err.name).toBe('TimeoutError')
     expect(seen).toHaveLength(1)
@@ -227,7 +229,7 @@ describe('discoverProject', () => {
       return takeResponse(responses)
     }
 
-    const err = await catchError(discoverProject('token', fetchFn, undefined, 10))
+    const err = await catchError(discoverProject('token', deadlined(fetchFn, 10)))
 
     expect(err.name).toBe('TimeoutError')
     expect(seen).toHaveLength(1)

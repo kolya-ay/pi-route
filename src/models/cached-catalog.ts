@@ -2,16 +2,15 @@ import type { Api, Model, Provider, RefreshModelsContext } from '@earendil-works
 
 import type { ModelMeta } from '../pipeline/catalog'
 import { parseOpenaiModelsList } from '../pipeline/metadata'
-import { FETCH_TIMEOUT_MS } from './fetch-timeout'
+import type { FetchFn } from './fetch-timeout'
+import { deadlined } from './fetch-timeout'
 
 const CATALOG_BASE_URL = 'https://pi.dev'
 export const REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1000
 
-type Fetcher = (url: string, init?: RequestInit) => Promise<Response>
-
 export type CachedCatalogOpts = {
   now?: () => number
-  fetcher?: Fetcher
+  fetcher?: FetchFn
   timeoutMs?: number
   // Address-keyed sink for the lossless parse. Injected rather than held in
   // module state so the wrapper stays a pure function of its inputs and tests
@@ -117,7 +116,7 @@ export const withCachedCatalog = (
   opts: CachedCatalogOpts = {}
 ): Provider => {
   const now = opts.now ?? Date.now
-  const fetcher = opts.fetcher ?? fetch
+  const fetcher = deadlined(opts.fetcher ?? fetch, opts.timeoutMs)
   let dynamicModels: readonly Model<Api>[] = []
   let inflight: Promise<void> | undefined
 
@@ -145,10 +144,9 @@ export const withCachedCatalog = (
           ) {
             return
           }
-          const timeout = AbortSignal.timeout(opts.timeoutMs ?? FETCH_TIMEOUT_MS)
           const response = await fetcher(source.url, {
             headers: source.headers,
-            signal: context.signal ? AbortSignal.any([context.signal, timeout]) : timeout
+            ...(context.signal ? { signal: context.signal } : {})
           })
           if (!response.ok) throw new Error(`${source.url} → ${response.status}`)
           const payload = await response.json()

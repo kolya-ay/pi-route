@@ -307,8 +307,9 @@ type ModelsOpts = {
 // Defaults to an offline restore of the persisted overlays, which every
 // listing/install path needs for accurate metadata. `liveMeta` is the same
 // caller-owned sink app.ts uses: the catalog wrapper writes each provider's
-// lossless parse into it during the restore, and every catalog built from these
+// lossless parse into it during the restore, and the catalog built from these
 // models must read it — otherwise a price the endpoint never stated shows as $0.
+// The catalog is built here, once, so no downstream helper can forget the map.
 const modelsAndOptions = async (
   env: EnvConfig,
   refresh: ModelsRefreshOptions = { allowNetwork: false }
@@ -321,23 +322,25 @@ const modelsAndOptions = async (
     liveMeta
   })
   await models.refresh(refresh)
-  return { routerOptions, models, liveMeta }
+  return {
+    routerOptions,
+    models,
+    catalog: buildCatalog(routerOptions, models, env.stateDir, liveMeta)
+  }
 }
 
 const printModelsList = async (env: EnvConfig): Promise<void> => {
-  const { routerOptions, models, liveMeta } = await modelsAndOptions(env)
-  const rows = modelRows(routerOptions, models, env.stateDir, liveMeta)
+  const { routerOptions, models, catalog } = await modelsAndOptions(env)
+  const rows = modelRows(routerOptions, catalog, models)
   if (rows.length > 0) console.log(renderModelList(rows, isTTY()))
 }
 
 const printModelShow = async (env: EnvConfig, id: string, json: boolean): Promise<void> => {
-  const { routerOptions, models, liveMeta } = await modelsAndOptions(env)
+  const { routerOptions, models, catalog } = await modelsAndOptions(env)
   if (json) {
-    console.log(
-      JSON.stringify(showModel(routerOptions, models, env.stateDir, id, liveMeta), null, 2)
-    )
+    console.log(JSON.stringify(showModel(routerOptions, catalog, models, id), null, 2))
   } else {
-    console.log(renderModelDetail(routerOptions, models, env.stateDir, id, liveMeta))
+    console.log(renderModelDetail(routerOptions, catalog, models, id))
   }
 }
 
@@ -346,7 +349,7 @@ const installModels = async (
   agentName: string | undefined,
   opts: { homeDir?: string; dry?: boolean }
 ): Promise<void> => {
-  const { routerOptions, models, liveMeta } = await modelsAndOptions(env)
+  const { routerOptions, models, catalog } = await modelsAndOptions(env)
   if (!agentName) {
     console.log(
       ['Available agents:', ...AGENTS.map((a) => `  ${a.name.padEnd(10)} ${a.description}`)].join(
@@ -366,14 +369,7 @@ const installModels = async (
     url: `http://${host}:${env.port}`
   }
   if (opts.homeDir) setupOpts.homeDir = opts.homeDir
-  const writes = await setupModels(
-    routerOptions,
-    models,
-    env.stateDir,
-    agentName,
-    setupOpts,
-    liveMeta
-  )
+  const writes = await setupModels(routerOptions, catalog, models, agentName, setupOpts)
   if (opts.dry) console.log(renderPlannedWrites(writes))
 }
 
