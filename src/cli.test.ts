@@ -84,6 +84,29 @@ test('provider limits with a valid empty config exits 0 and prints JSON with --j
   expect(() => JSON.parse(stdout)).not.toThrow()
 })
 
+test('provider limits <name> --json keeps the { providers: [...] } envelope', async () => {
+  const dir = tmp()
+  const cfg = join(dir, 'router.yaml')
+  writeFileSync(
+    cfg,
+    'providers:\n  codex:\n    type: openai-codex\n    account: codex\npipeline: {}\nexpose: []\n'
+  )
+  const { stdout, exitCode } = await run([
+    'provider',
+    'limits',
+    'codex',
+    '-c',
+    cfg,
+    '--state-dir',
+    join(dir, 'auth'),
+    '--json'
+  ])
+  expect(exitCode).toBe(0)
+  const parsed = JSON.parse(stdout)
+  // Same shape as `/v1/limits`, just filtered to one provider — never unwrapped.
+  expect(parsed).toEqual({ providers: [expect.objectContaining({ name: 'codex' })] })
+})
+
 test('provider limits with a valid empty config exits 0 and prints the empty-table message', async () => {
   const dir = tmp()
   const cfg = join(dir, 'router.yaml')

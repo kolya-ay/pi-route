@@ -11,7 +11,7 @@ import { generateCompletion } from './cli/completion'
 import { usageError } from './cli/errors'
 import { isTTY } from './cli/format'
 import { stdinInteraction } from './cli/interaction'
-import { formatLimits } from './cli/limits'
+import { findProviderSnapshot, formatLimits, formatLimitsDetail } from './cli/limits'
 import {
   modelRows,
   renderModelDetail,
@@ -178,13 +178,30 @@ const printProviderList = async (env: EnvConfig, all = false): Promise<void> => 
   console.log(formatProviderList(options, { invalid, loggedOut, all }))
 }
 
-const printLimits = async (env: EnvConfig, json = false): Promise<void> => {
+// A `name` filters `--json` down to that one provider, but keeps the
+// `{ providers: [...] }` envelope — this snapshot shape is also served verbatim at
+// `/v1/limits`, so the CLI and the HTTP endpoint must agree on what "the JSON" looks
+// like regardless of how many providers are in it. Same lookup as the human view, so
+// an unknown name fails the same way in both.
+const printLimits = async (
+  env: EnvConfig,
+  name: string | undefined,
+  json = false
+): Promise<void> => {
   const { options, state: runtime } = await loadConfig(env.configPath, env.stateDir)
   const models = buildModels(options, { stateDir: env.stateDir, authDir: env.stateDir })
   const catalog = buildCatalog(options, models, env.stateDir)
   const state = createState(options, catalog, models, runtime, env.stateDir)
   const snapshot = await collectLimitsSnapshot(state)
-  if (json) console.log(JSON.stringify(snapshot, null, 2))
+  if (json)
+    console.log(
+      JSON.stringify(
+        name ? { providers: [findProviderSnapshot(snapshot, name)] } : snapshot,
+        null,
+        2
+      )
+    )
+  else if (name) console.log(formatLimitsDetail(snapshot, name))
   else console.log(formatLimits(snapshot))
 }
 
@@ -197,9 +214,10 @@ const PROVIDER_VERBS: Verb<ProviderOpts, EnvConfig>[] = [
   },
   {
     name: 'limits',
-    description: 'Show usage limits',
+    arg: '[name]',
+    description: 'Show usage limits (one provider in detail)',
     flags: ['--json'],
-    run: async (env, _arg, opts) => printLimits(env, opts.json)
+    run: async (env, arg, opts) => printLimits(env, arg, opts.json)
   },
   {
     name: 'login',
