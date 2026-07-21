@@ -12,7 +12,7 @@ import { decompressRequest } from './compression'
 import { type EnvPathOverrides, readEnvConfig } from './config/env'
 import { loadConfig } from './config/loader'
 import { buildModels } from './models/build'
-import { buildCatalog } from './pipeline/catalog'
+import { buildCatalog, type ModelMeta } from './pipeline/catalog'
 import { enrichLiveMeta } from './pipeline/metadata'
 import { createModelsDispatch } from './providers/models-dispatch'
 import { createPassthroughProvider } from './providers/passthrough'
@@ -71,10 +71,18 @@ export const createApp = async (
 
   // Credential + model stores live under the state dir (the old registry passed
   // env.stateDir as the authDir too).
-  const models = buildModels(options, { stateDir: env.stateDir, authDir: env.stateDir })
+  // One map, shared: the catalog wrapper writes each provider's lossless parse
+  // into it (on the offline restore and on every refresh) and buildCatalog reads
+  // it as `liveMeta`, so the payload is fetched and parsed exactly once.
+  const liveMeta = new Map<string, ModelMeta>()
+  const models = buildModels(options, {
+    stateDir: env.stateDir,
+    authDir: env.stateDir,
+    liveMeta
+  })
   await models.refresh({ allowNetwork: false }) // offline restore of persisted overlays
 
-  const catalog = buildCatalog(options, models, env.stateDir)
+  const catalog = buildCatalog(options, models, env.stateDir, liveMeta)
   await enrichLiveMeta(options, catalog)
 
   initOtel({ otlpUrl: env.otlpUrl, serviceName: env.serviceName })
@@ -87,7 +95,7 @@ export const createApp = async (
     models
       .refresh()
       .then(async () => {
-        const next = buildCatalog(options, models, env.stateDir)
+        const next = buildCatalog(options, models, env.stateDir, liveMeta)
         await enrichLiveMeta(options, next)
         state.catalog = next
       })

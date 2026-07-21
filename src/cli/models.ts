@@ -68,9 +68,10 @@ const resolveExposed = (
   options: RouterOptions,
   models: Models,
   authDir: string,
-  id: string
+  id: string,
+  liveMeta?: Map<string, ModelMeta>
 ): { resolved: Resolved; leaf: string } => {
-  const catalog: Catalog = buildCatalog(options, models, authDir)
+  const catalog: Catalog = buildCatalog(options, models, authDir, liveMeta)
   if (!exposeIncludes(options.expose, id) || !catalog.addresses.has(id)) {
     throw new Error(`Model not exposed: ${id}`)
   }
@@ -86,9 +87,10 @@ export const renderModelDetail = (
   options: RouterOptions,
   models: Models,
   authDir: string,
-  id: string
+  id: string,
+  liveMeta?: Map<string, ModelMeta>
 ): string => {
-  const { resolved, leaf } = resolveExposed(options, models, authDir, id)
+  const { resolved, leaf } = resolveExposed(options, models, authDir, id, liveMeta)
   const m = resolved.model
   const tier = completeness(m)
   const name = m ? displayName(resolved.provider, m.name) : id
@@ -178,8 +180,13 @@ const rolesByAddress = (
 }
 
 // One display row per exposed address, with completeness tier + compact cells.
-export const modelRows = (options: RouterOptions, models: Models, authDir: string): ModelRow[] => {
-  const catalog = buildCatalog(options, models, authDir)
+export const modelRows = (
+  options: RouterOptions,
+  models: Models,
+  authDir: string,
+  liveMeta?: Map<string, ModelMeta>
+): ModelRow[] => {
+  const catalog = buildCatalog(options, models, authDir, liveMeta)
   const roles = rolesByAddress(options, catalog, models)
   return exposedAddresses(options, catalog).map((id) => {
     const { model } = resolveModel(options, catalog, models, id)
@@ -232,9 +239,10 @@ export const showModel = (
   options: RouterOptions,
   models: Models,
   authDir: string,
-  id: string
+  id: string,
+  liveMeta?: Map<string, ModelMeta>
 ): ModelView => {
-  const { resolved, leaf } = resolveExposed(options, models, authDir, id)
+  const { resolved, leaf } = resolveExposed(options, models, authDir, id, liveMeta)
   return {
     id,
     leaf,
@@ -259,12 +267,13 @@ export const setupModels = async (
   models: Models,
   authDir: string,
   agentName: string,
-  opts: { homeDir?: string; dry?: boolean; url: string }
+  opts: { homeDir?: string; dry?: boolean; url: string },
+  liveMeta?: Map<string, ModelMeta>
 ): Promise<PlannedWrite[]> => {
   const agent = AGENTS.find((a) => a.name === agentName)
   if (!agent) throw new Error(`unknown agent: ${agentName}`)
   const home = opts.homeDir ?? homedir()
-  const catalog = buildCatalog(options, models, authDir)
+  const catalog = buildCatalog(options, models, authDir, liveMeta)
   const defaults = roleModels(options, catalog, models, 'default')
   const main = defaults[0]
   if (!main) throw new Error('Missing pipeline.default exact-match role')

@@ -5,6 +5,7 @@ import type { RouterOptions } from '../types'
 import { buildCatalog } from './catalog'
 import {
   applyOverride,
+  enrichLiveMeta,
   fallbackMeta,
   fetchProviderMetadata,
   guessFromCatalog,
@@ -81,10 +82,13 @@ describe('guessFromCatalog', () => {
 
 describe('applyOverride', () => {
   test('patches fields over a base and keeps the rest', () => {
-    const base = fallbackMeta('x')
+    // The base needs a real cost: fallbackMeta leaves it unset, which would make
+    // the "kept the rest" assertion compare undefined to undefined and test nothing.
+    const base = { ...fallbackMeta('x'), cost: { input: 1.5, output: 3 } }
     const out = applyOverride(base, { contextWindow: 999 })
     expect(out?.contextWindow).toBe(999)
     expect(out?.cost).toEqual(base.cost)
+    expect(out?.name).toBe('x')
   })
   test('override alone makes a null base visible', () => {
     expect(applyOverride(null, { contextWindow: 5 })?.contextWindow).toBe(5)
@@ -120,6 +124,17 @@ describe('resolveMetadata', () => {
     cat.leafFor.set('nv/foo/bar', 'nv/foo/bar')
     const meta = resolveMetadata(opts, cat, models, 'nv/foo/bar')
     expect(meta?.contextWindow).toBe(200000)
+  })
+
+  test('fallback reports an unknown price rather than inventing a free one', () => {
+    const opts = base(['fallback'])
+    const models = cerebrasModels()
+    const cat = buildCatalog(opts, models, '/tmp')
+    cat.addresses.add('nv/foo/bar')
+    cat.leafFor.set('nv/foo/bar', 'nv/foo/bar')
+    const meta = resolveMetadata(opts, cat, models, 'nv/foo/bar')
+    expect(meta?.contextWindow).toBe(200000)
+    expect(meta?.cost).toBeUndefined()
   })
 
   test('guess beats fallback when listed first', () => {
@@ -366,6 +381,52 @@ test('a catalog entry with a known context window wins over the discover chain',
   expect(meta?.contextWindow).toBe(111_111)
 })
 
+// `Model` cannot express "no price", so the catalog wrapper defaults an unstated
+// cost to 0 — which reads as free. The live map holds the un-defaulted parse.
+describe('resolveMetadata cost presence', () => {
+  test('a live entry without a cost key strips the defaulted zero price', () => {
+    const nvidia = fakeModel('nvidia', 'moonshotai/kimi-k2.6', 111_111)
+    const models = { getModels: () => [nvidia], getModel: () => nvidia } as unknown as Models
+
+    const { options, catalog } = nvidiaGuessFixture()
+    catalog.liveMeta.set('nvidia/moonshotai/kimi-k2.6', {
+      name: 'kimi',
+      contextWindow: 111_111
+    })
+    const meta = resolveMetadata(options, catalog, models, 'nvidia/moonshotai/kimi-k2.6')
+    expect(nvidia.cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })
+    expect(meta?.contextWindow).toBe(111_111)
+    expect(meta?.cost).toBeUndefined()
+  })
+
+  test('a live entry stating a zero cost still reads as free', () => {
+    const nvidia = fakeModel('nvidia', 'moonshotai/kimi-k2.6', 111_111)
+    const models = { getModels: () => [nvidia], getModel: () => nvidia } as unknown as Models
+
+    const { options, catalog } = nvidiaGuessFixture()
+    catalog.liveMeta.set('nvidia/moonshotai/kimi-k2.6', {
+      name: 'kimi',
+      contextWindow: 111_111,
+      cost: { input: 0, output: 0 }
+    })
+    const meta = resolveMetadata(options, catalog, models, 'nvidia/moonshotai/kimi-k2.6')
+    expect(meta?.cost?.input).toBe(0)
+    expect(meta?.cost?.output).toBe(0)
+  })
+
+  test('an address absent from the live map keeps layer 0s cost', () => {
+    // The "no catalog was ever stored" case: nothing contradicts layer 0, so the
+    // rule must not fire.
+    const nvidia = pricedModel('nvidia', 'moonshotai/kimi-k2.6', 111_111, 2, 8)
+    const models = { getModels: () => [nvidia], getModel: () => nvidia } as unknown as Models
+
+    const { options, catalog } = nvidiaGuessFixture()
+    const meta = resolveMetadata(options, catalog, models, 'nvidia/moonshotai/kimi-k2.6')
+    expect(meta?.cost?.input).toBe(2)
+    expect(meta?.cost?.output).toBe(8)
+  })
+})
+
 test('fetchProviderMetadata gives up on a hung endpoint instead of hanging', async () => {
   const original = globalThis.fetch
   globalThis.fetch = ((_url: string, init?: RequestInit) =>
@@ -388,4 +449,83 @@ test('fetchProviderMetadata gives up on a hung endpoint instead of hanging', asy
   } finally {
     globalThis.fetch = original
   }
+})
+
+// enrichLiveMeta covers only what the catalog wrapper does not. Counting fetches
+// is the whole point of these three: the wrapper already fetches {baseUrl}/models
+// for the providers it wraps and publishes the parse into the same map, so a
+// second GET there would be a request for data we already hold — while every
+// provider the wrapper does NOT wrap must keep its live metadata.
+const countingFetch = (): { calls: string[]; fetch: typeof fetch } => {
+  const calls: string[] = []
+  return {
+    calls,
+    fetch: (async (url: string) => {
+      calls.push(String(url))
+      return new Response(JSON.stringify({ data: [] }), { status: 200 })
+    }) as unknown as typeof fetch
+  }
+}
+
+const emptyCatalog = () =>
+  ({
+    addresses: new Set<string>(),
+    leafFor: new Map<string, string>(),
+    liveMeta: new Map(),
+    available: new Set<string>()
+  }) as unknown as Parameters<typeof enrichLiveMeta>[1]
+
+const enrichWith = async (providers: Record<string, unknown>): Promise<string[]> => {
+  const original = globalThis.fetch
+  const { calls, fetch: stub } = countingFetch()
+  globalThis.fetch = stub
+  try {
+    await enrichLiveMeta(
+      { providers, pipeline: [], expose: [] } as unknown as RouterOptions,
+      emptyCatalog()
+    )
+    return calls
+  } finally {
+    globalThis.fetch = original
+  }
+}
+
+describe('enrichLiveMeta', () => {
+  test('does not re-fetch /models for a provider the catalog wrapper already covers', async () => {
+    const calls = await enrichWith({
+      chutes: {
+        type: 'openai-compatible',
+        baseUrl: 'https://example.test/v1',
+        discover: ['openai-models-list'],
+        account: { credential: 'key', key: 'k' }
+      }
+    })
+    expect(calls).toEqual([])
+  })
+
+  test('still fetches /model/info for a litellm provider (no wrapper reads that endpoint)', async () => {
+    const calls = await enrichWith({
+      proxy: {
+        type: 'openai-compatible',
+        baseUrl: 'https://example.test/v1',
+        discover: ['litellm'],
+        account: { credential: 'key', key: 'k' }
+      }
+    })
+    expect(calls).toEqual(['https://example.test/v1/model/info'])
+  })
+
+  // A type the Models collection doesn't back is never wrapped (buildOne returns
+  // undefined, so it dispatches passthrough) — its live metadata has no other source.
+  test('still fetches /models for a passthrough-typed provider the wrapper never wraps', async () => {
+    const calls = await enrichWith({
+      weird: {
+        type: 'some-proxy',
+        baseUrl: 'https://example.test/v1',
+        discover: ['openai-models-list'],
+        account: { credential: 'key', key: 'k' }
+      }
+    })
+    expect(calls).toEqual(['https://example.test/v1/models'])
+  })
 })

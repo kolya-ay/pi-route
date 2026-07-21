@@ -7,12 +7,19 @@ import { cerebrasProvider } from '@earendil-works/pi-ai/providers/cerebras'
 import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex'
 import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter'
 import { fileCredentialStore } from '../auth/credential-store'
+import type { ModelMeta } from '../pipeline/catalog'
 import { antigravityProvider } from '../providers/antigravity-provider'
 import type { ProviderConfig, RouterOptions } from '../types'
 import { withEndpointCatalog, withRemoteCatalog } from './cached-catalog'
 import { fileModelsStore } from './store'
 
-export type BuildDirs = { stateDir: string; authDir: string }
+// `liveMeta`, when supplied, is the caller's sink for each wrapped provider's
+// lossless /models parse — the same map the catalog reads as its live metadata.
+export type BuildDirs = {
+  stateDir: string
+  authDir: string
+  liveMeta?: Map<string, ModelMeta>
+}
 
 const FACTORIES: Partial<Record<string, () => Provider>> = {
   anthropic: anthropicProvider as () => Provider,
@@ -84,17 +91,21 @@ const withoutRefresh = (p: Provider): Provider => {
 // — `ProviderSchema` permits `baseUrl` on any type, but antigravity ignores it
 // and ships its own dynamic catalog, so keying off "config has a baseUrl"
 // would silently replace working discovery with a GET to the wrong endpoint.
-const wrapProvider = (built: Provider, config: ProviderConfig): Provider => {
+const wrapProvider = (
+  built: Provider,
+  config: ProviderConfig,
+  liveMeta?: Map<string, ModelMeta>
+): Provider => {
   if (config.discover === false) return built
   if (FACTORIES[config.type]) return withRemoteCatalog(built, config.type)
   if (built.refreshModels) {
     return config.account.disabled === true ? withoutRefresh(built) : built
   }
   if (!config.baseUrl || config.account.disabled === true) return built
-  return withEndpointCatalog(
-    built,
-    config.account.credential === 'key' ? { apiKey: config.account.key } : {}
-  )
+  return withEndpointCatalog(built, {
+    ...(config.account.credential === 'key' ? { apiKey: config.account.key } : {}),
+    ...(liveMeta ? { liveMeta } : {})
+  })
 }
 
 export const buildModels = (options: RouterOptions, dirs: BuildDirs): MutableModels => {
@@ -105,7 +116,7 @@ export const buildModels = (options: RouterOptions, dirs: BuildDirs): MutableMod
   for (const [name, config] of Object.entries(options.providers)) {
     const built = buildOne(name, config)
     if (!built) continue
-    models.setProvider(wrapProvider(built, config))
+    models.setProvider(wrapProvider(built, config, dirs.liveMeta))
   }
   return models
 }

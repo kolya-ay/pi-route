@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { Provider } from '@earendil-works/pi-ai'
 import { InMemoryModelsStore } from '@earendil-works/pi-ai'
+import type { ModelMeta } from '../pipeline/catalog'
 import { withEndpointCatalog, withRemoteCatalog } from './cached-catalog'
 
 const providerStore = (store: InMemoryModelsStore, id: string) => ({
@@ -451,4 +452,128 @@ describe('withEndpointCatalog', () => {
     expect(await store.read('nvidia')).toBeUndefined()
     expect(wrapped.getModels()).toEqual([])
   }, 2000)
+})
+
+// What the store holds beyond `models`: the lossless parse, kept so a later
+// reader can tell "the endpoint said 0" from "the endpoint said nothing".
+const storedMeta = async (store: InMemoryModelsStore, id: string) =>
+  (await store.read(id)) as unknown as { meta?: unknown } | undefined
+
+describe('lossless meta', () => {
+  test('a successful fetch persists meta and publishes it, with unstated fields undefined', async () => {
+    const store = new InMemoryModelsStore()
+    const liveMeta = new Map<string, ModelMeta>()
+    const wrapped = withEndpointCatalog(fakeProvider(), {
+      now: () => 1000,
+      liveMeta,
+      fetcher: async () => new Response(JSON.stringify(bareList))
+    })
+    await wrapped.refreshModels?.({ store: providerStore(store, 'nvidia'), allowNetwork: true })
+
+    const entry = liveMeta.get('nvidia/qwen/qwen3.5-122b-a10b')
+    expect(entry?.name).toBe('qwen/qwen3.5-122b-a10b')
+    // The whole point: the model says 0, the meta says "not stated".
+    expect(entry?.cost).toBeUndefined()
+    expect(entry?.contextWindow).toBeUndefined()
+    expect(wrapped.getModels().find((m) => m.id === 'qwen/qwen3.5-122b-a10b')?.contextWindow).toBe(
+      0
+    )
+
+    const persisted = (await storedMeta(store, 'nvidia'))?.meta as Record<string, ModelMeta>
+    expect(Object.keys(persisted).sort()).toEqual([
+      'moonshotai/kimi-k2.6',
+      'qwen/qwen3.5-122b-a10b'
+    ])
+    expect((await store.read('nvidia'))?.models.length).toBe(2)
+  })
+
+  test('stated pricing survives into the sink', async () => {
+    const store = new InMemoryModelsStore()
+    const liveMeta = new Map<string, ModelMeta>()
+    const wrapped = withEndpointCatalog(fakeProvider('chutes'), {
+      now: () => 1000,
+      liveMeta,
+      fetcher: async () => new Response(JSON.stringify(richList))
+    })
+    await wrapped.refreshModels?.({ store: providerStore(store, 'chutes'), allowNetwork: true })
+    expect(liveMeta.get('chutes/zai-org/GLM-5.2-TEE')?.cost).toEqual({ input: 0.91, output: 2.86 })
+  })
+
+  test('an offline restore populates the sink from the store without fetching', async () => {
+    const store = new InMemoryModelsStore()
+    const seeded = withEndpointCatalog(fakeProvider('chutes'), {
+      now: () => 1000,
+      fetcher: async () => new Response(JSON.stringify(richList))
+    })
+    await seeded.refreshModels?.({ store: providerStore(store, 'chutes'), allowNetwork: true })
+
+    const liveMeta = new Map<string, ModelMeta>()
+    const offline = withEndpointCatalog(fakeProvider('chutes'), {
+      now: () => 9_999_999_999,
+      liveMeta,
+      fetcher: async () => {
+        throw new Error('offline restore must not fetch')
+      }
+    })
+    await offline.refreshModels?.({ store: providerStore(store, 'chutes'), allowNetwork: false })
+    expect(liveMeta.get('chutes/zai-org/GLM-5.2-TEE')?.cost).toEqual({ input: 0.91, output: 2.86 })
+    expect(offline.getModels().length).toBe(1)
+  })
+
+  test('a stored entry written before meta existed restores models with an empty sink', async () => {
+    const store = new InMemoryModelsStore()
+    await store.write('nvidia', { models: [baseModel('stored-model', 'nvidia')], checkedAt: 1000 })
+    const liveMeta = new Map<string, ModelMeta>()
+    const wrapped = withEndpointCatalog(fakeProvider(), {
+      now: () => 1000 + 60_000,
+      liveMeta,
+      fetcher: async () => {
+        throw new Error('fresh cache must not fetch')
+      }
+    })
+    await wrapped.refreshModels?.({ store: providerStore(store, 'nvidia'), allowNetwork: true })
+    expect(wrapped.getModels().map((m) => m.id)).toEqual(['stored-model'])
+    expect(liveMeta.size).toBe(0)
+  })
+
+  test('a malformed persisted meta is normalized away rather than spread', async () => {
+    for (const meta of ['not-an-object', { 'a/b': 'nope', 'c/d': null, 'e/f': [1, 2] }]) {
+      const store = new InMemoryModelsStore()
+      await store.write('nvidia', {
+        models: [baseModel('stored-model', 'nvidia')],
+        meta,
+        checkedAt: 1000
+      } as unknown as Parameters<InMemoryModelsStore['write']>[1])
+      const liveMeta = new Map<string, ModelMeta>()
+      const wrapped = withEndpointCatalog(fakeProvider(), {
+        now: () => 1000 + 60_000,
+        liveMeta,
+        fetcher: async () => {
+          throw new Error('fresh cache must not fetch')
+        }
+      })
+      await wrapped.refreshModels?.({ store: providerStore(store, 'nvidia'), allowNetwork: true })
+      expect(wrapped.getModels().map((m) => m.id)).toEqual(['stored-model'])
+      expect(liveMeta.size).toBe(0)
+    }
+  })
+
+  test('the pi.dev path still works and writes no meta', async () => {
+    const store = storeFor()
+    const liveMeta = new Map<string, ModelMeta>()
+    const wrapped = withRemoteCatalog(staticProvider(), 'anthropic', {
+      now: () => 1000,
+      liveMeta,
+      fetcher: async () => new Response(JSON.stringify({ models: [baseModel('new-model')] }))
+    })
+    await wrapped.refreshModels?.({ store: providerStore(store, 'cc'), allowNetwork: true })
+    expect(
+      wrapped
+        .getModels()
+        .map((m) => m.id)
+        .sort()
+    ).toEqual(['new-model', 'old-model'])
+    expect((await storedMeta(store, 'cc'))?.meta).toBeUndefined()
+    expect(liveMeta.size).toBe(0)
+  })
 })

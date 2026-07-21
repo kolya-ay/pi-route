@@ -1,6 +1,6 @@
 import type { Api, Model, Models } from '@earendil-works/pi-ai'
 import { FETCH_TIMEOUT_MS } from '../models/fetch-timeout'
-import type { DiscoverStrategy, ModelMetaOverride, RouterOptions } from '../types'
+import type { DiscoverStrategy, ModelMetaOverride, ProviderConfig, RouterOptions } from '../types'
 import type { Catalog, ModelMeta } from './catalog'
 
 // pi-ai `Model` → our `ModelMeta`. Copies only the fields the projections use.
@@ -85,11 +85,15 @@ export const guessFromCatalog = (models: Models, address: string): ModelMeta | n
   return index.get(leaf) ?? index.get(normalizeModelId(address)) ?? null
 }
 
-// Last-resort placeholder metadata (mirrors the codex writer's `?? 200000`).
+// Last-resort placeholder for a model nothing else could describe. It supplies a
+// context window (dispatch needs some budget; mirrors the codex writer's `?? 200000`)
+// but NOT a price: `guess` already strips cost on the grounds that a borrowed price
+// is a silent wrong answer about money rather than a visible absence, and an invented
+// $0.00 is the same error in a worse direction — "free" actively attracts routing.
+// Unknown must read unknown.
 export const fallbackMeta = (name: string): ModelMeta => ({
   name,
   contextWindow: 200000,
-  cost: { input: 0, output: 0 },
   reasoning: false
 })
 
@@ -255,16 +259,18 @@ const httpGetJson = async (
   return res.json()
 }
 
+// The live-fetch strategy a provider's discover chain names first, if any.
+const liveStrategy = (provider: ProviderConfig): DiscoverStrategy | undefined =>
+  expandAuto(provider.discover || []).find((s) => s === 'openai-models-list' || s === 'litellm')
+
 // Fetch one provider's live metadata via whichever live method its discover chain names.
 // Returns modelId -> ModelMeta (unprefixed). Never throws; failure → empty map.
 export const fetchProviderMetadata = async (
   name: string,
-  provider: import('../types').ProviderConfig,
+  provider: ProviderConfig,
   timeoutMs: number = FETCH_TIMEOUT_MS
 ): Promise<Map<string, ModelMeta>> => {
-  const liveStrat = expandAuto(provider.discover || []).find(
-    (s) => s === 'openai-models-list' || s === 'litellm'
-  )
+  const liveStrat = liveStrategy(provider)
   if (!liveStrat || !provider.baseUrl) return new Map()
   const key = provider.account.credential === 'key' ? provider.account.key : undefined
   try {
@@ -277,11 +283,30 @@ export const fetchProviderMetadata = async (
   }
 }
 
-// Populate catalog.liveMeta (address-keyed) for every discover-enabled provider.
+// Does `build.ts` overlay the endpoint catalog on this provider? That wrapper is
+// the only other reader of {baseUrl}/models, and it is reached solely by the two
+// openai-shaped types: FACTORIES types take the pi.dev catalog, antigravity keeps
+// its own refreshModels, and any other type isn't backed by Models at all.
+// Mirrors `wrapProvider`'s endpoint branch — keep the two in step.
+const isEndpointCatalogWrapped = (provider: ProviderConfig): boolean =>
+  (provider.type === 'openai-compatible' || provider.type === 'openai') &&
+  provider.discover !== false &&
+  Boolean(provider.baseUrl) &&
+  provider.account.disabled !== true
+
+// Populate catalog.liveMeta (address-keyed) for the providers the catalog wrapper
+// does not cover. That wrapper fetches {baseUrl}/models on its own schedule,
+// persists the lossless parse, and publishes it into this same map — so fetching
+// the identical payload here would be a second request for data we already hold.
+// What is left is the `litellm` strategy (a different endpoint, /model/info, that
+// no wrapper touches) and any provider the wrapper never wraps.
 export const enrichLiveMeta = async (opts: RouterOptions, catalog: Catalog): Promise<void> => {
   const entries = Object.entries(opts.providers)
   await Promise.all(
     entries.map(async ([name, provider]) => {
+      // Only the openai-models-list strategy duplicates the wrapper's GET;
+      // litellm reads /model/info, which nothing else fetches.
+      if (liveStrategy(provider) !== 'litellm' && isEndpointCatalogWrapped(provider)) return
       const map = await fetchProviderMetadata(name, provider)
       for (const [modelId, meta] of map) catalog.liveMeta.set(`${name}/${modelId}`, meta)
     })
@@ -313,6 +338,19 @@ export const resolveMetadata = (
   if (provider && modelId) {
     const m = models.getModel(providerName, modelId)
     base = m?.contextWindow ? toModelMeta(m) : null
+  }
+
+  // `Model` cannot express "no price": the catalog wrapper defaults unknown cost
+  // to 0, which reads as free. The live map holds the un-defaulted parse and is
+  // now populated from a persisted successful fetch, so an entry present without
+  // a `cost` key is the endpoint stating no price — not a failed request. Let it
+  // overrule the defaulted zero.
+  if (base) {
+    const live = catalog.liveMeta.get(leaf)
+    if (live && live.cost === undefined) {
+      const { cost: _cost, ...rest } = base
+      base = rest
+    }
   }
 
   // Layer 1: the provider's discover chain — first hit wins.

@@ -13,6 +13,11 @@ export type CachedCatalogOpts = {
   now?: () => number
   fetcher?: Fetcher
   timeoutMs?: number
+  // Address-keyed sink for the lossless parse. Injected rather than held in
+  // module state so the wrapper stays a pure function of its inputs and tests
+  // can observe it directly. Written on both the offline cache restore and each
+  // successful fetch.
+  liveMeta?: Map<string, ModelMeta>
 }
 
 export type RemoteCatalogOpts = CachedCatalogOpts & { baseUrl?: string }
@@ -21,10 +26,12 @@ export type EndpointCatalogOpts = CachedCatalogOpts & { apiKey?: string }
 
 // Where a catalog comes from and how to read it. Everything else — the cache,
 // the freshness window, the single-flight latch, the deadline — is shared.
+// `meta` is the lossless parse the models were derived from, kept alongside them
+// where the source has one; pi.dev does not.
 type CatalogSource = {
   url: string
   headers: Record<string, string>
-  parse: (payload: unknown) => Model<Api>[]
+  parse: (payload: unknown) => { models: Model<Api>[]; meta?: Map<string, ModelMeta> }
 }
 
 export const mergeModels = (
@@ -48,6 +55,18 @@ const toModels = (providerId: string, entries: unknown): Model<Api>[] =>
     )
     .map((m) => ({ ...m, provider: providerId }))
 
+// The store is read through an unchecked cast (store.ts:14), so a persisted
+// `meta` field is untrusted JSON: guard the container and every entry.
+const parseMeta = (value: unknown): Map<string, ModelMeta> => {
+  const out = new Map<string, ModelMeta>()
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return out
+  for (const [id, meta] of Object.entries(value)) {
+    if (typeof meta === 'object' && meta !== null && !Array.isArray(meta))
+      out.set(id, meta as ModelMeta)
+  }
+  return out
+}
+
 // pi.dev serves either a bare array or `{ models: [...] }`.
 const parseCatalog = (providerId: string, value: unknown): Model<Api>[] =>
   toModels(providerId, Array.isArray(value) ? value : (value as { models?: unknown })?.models)
@@ -58,10 +77,12 @@ const parseCatalog = (providerId: string, value: unknown): Model<Api>[] =>
 // decide whether a whole entry is authoritative (buildGuessIndex; resolveMetadata
 // layers 0 and 1); `maxTokens` is honored per-field by the HTTP projections
 // (model-projection.ts), which omit rather than publish a zero. Cost fields carry
-// the same "0 = unknown" convention but no reader honors it yet — a defaulted
-// zero cost is indistinguishable from a genuinely free model and is published as
-// such (see model-projection.ts for that trade-off). `createModelsDispatch` does
-// not check any of these fields yet (Task 5).
+// the same "0 = unknown" convention, and a defaulted zero is indistinguishable
+// from a genuinely free model *here* — so the distinction is kept elsewhere:
+// `meta` (the lossless parse, persisted alongside the models and republished into
+// `liveMeta`) still has no `cost` key where the endpoint stated no price, and
+// resolveMetadata honors that by dropping the defaulted zero it finds in layer 0.
+// `createModelsDispatch` does not check any of these fields yet (Task 5).
 // `reasoning` and `input` have no such sentinel: `Model` requires them, so
 // `reasoning: false` / `input: ['text']` are asserted as fact here, and
 // resolveMetadata's all-or-nothing discover chain will never revisit them
@@ -100,6 +121,11 @@ export const withCachedCatalog = (
   let dynamicModels: readonly Model<Api>[] = []
   let inflight: Promise<void> | undefined
 
+  const publish = (meta: Map<string, ModelMeta>): void => {
+    if (!opts.liveMeta) return
+    for (const [id, m] of meta) opts.liveMeta.set(`${provider.id}/${id}`, m)
+  }
+
   return {
     ...provider,
     getModels: () => mergeModels(provider.getModels(), dynamicModels),
@@ -107,7 +133,10 @@ export const withCachedCatalog = (
       inflight ??= (async () => {
         try {
           const stored = await context.store.read()
-          if (stored) dynamicModels = toModels(provider.id, stored.models)
+          if (stored) {
+            dynamicModels = toModels(provider.id, stored.models)
+            publish(parseMeta((stored as { meta?: unknown }).meta))
+          }
           if (!context.allowNetwork || context.signal?.aborted) return
           if (
             !context.force &&
@@ -134,14 +163,20 @@ export const withCachedCatalog = (
           // `pi-route models refresh` — worse than the one extra GET per boot
           // (refreshModels runs at boot and on a 4 h interval, never per
           // request) that skipping the write costs a genuinely-empty provider.
-          if (parsed.length === 0) {
+          if (parsed.models.length === 0) {
             console.error(
               `[cached-catalog] "${provider.id}" returned a 200 with no parseable models; not persisting an empty catalog`
             )
             return
           }
-          dynamicModels = parsed
-          await context.store.write({ models: dynamicModels, checkedAt: now() })
+          dynamicModels = parsed.models
+          if (parsed.meta) publish(parsed.meta)
+          const entry = {
+            models: dynamicModels,
+            ...(parsed.meta ? { meta: Object.fromEntries(parsed.meta) } : {}),
+            checkedAt: now()
+          }
+          await context.store.write(entry)
         } catch (err) {
           console.error(`[cached-catalog] refresh failed for "${provider.id}": ${String(err)}`)
         } finally {
@@ -169,7 +204,7 @@ export const withRemoteCatalog = (
         opts.baseUrl ?? CATALOG_BASE_URL
       ).toString(),
       headers: { accept: 'application/json' },
-      parse: (payload) => parseCatalog(provider.id, payload)
+      parse: (payload) => ({ models: parseCatalog(provider.id, payload) })
     },
     opts
   )
@@ -188,10 +223,13 @@ export const withEndpointCatalog = (
         accept: 'application/json',
         ...(opts.apiKey ? { authorization: `Bearer ${opts.apiKey}` } : {})
       },
-      parse: (payload) =>
-        [...parseOpenaiModelsList(payload)].map(([id, meta]) =>
-          toModel(provider.id, baseUrl, id, meta)
-        )
+      parse: (payload) => {
+        const meta = parseOpenaiModelsList(payload)
+        return {
+          models: [...meta].map(([id, m]) => toModel(provider.id, baseUrl, id, m)),
+          meta
+        }
+      }
     },
     opts
   )

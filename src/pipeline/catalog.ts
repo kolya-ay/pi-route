@@ -28,10 +28,18 @@ export type Catalog = {
   available: Set<string>
 }
 
-export const buildCatalog = (opts: RouterOptions, models: Models, authDir: string): Catalog => {
+// `liveMeta` is optional so existing three-argument callers are unaffected. When
+// the caller owns the map, the catalog wrapper has already been writing each
+// provider's lossless parse into it, and this catalog reads that work rather
+// than starting empty.
+export const buildCatalog = (
+  opts: RouterOptions,
+  models: Models,
+  authDir: string,
+  liveMeta: Map<string, ModelMeta> = new Map()
+): Catalog => {
   const addresses = new Set<string>()
   const leafFor = new Map<string, string>()
-  const liveMeta = new Map<string, ModelMeta>()
 
   const available = availableProviders(opts, authDir)
   const entryByName = new Map(opts.pipeline.map((e) => [e.name, e]))
