@@ -1,6 +1,8 @@
 import type { AssistantMessageEvent, AssistantMessageEventStream } from '@earendil-works/pi-ai'
 import type { Span } from '@opentelemetry/api'
 
+import type { PerTokenUsd } from '../pipeline/money'
+
 import { buildResponseCaptureAttr, type CaptureOpts } from './capture'
 import type { Tel } from './tel'
 
@@ -12,7 +14,7 @@ export const wrapStreamForMetrics = async function* (
   upstream: AssistantMessageEventStream,
   span: Span,
   tel: Tel,
-  costs: { inputCost: number; outputCost: number },
+  costs: { inputCost: PerTokenUsd; outputCost: PerTokenUsd },
   capture?: CaptureOpts
 ): AsyncIterable<AssistantMessageEvent> {
   const start = Date.now()

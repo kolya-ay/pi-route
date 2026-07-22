@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai'
+import type { PerTokenUsd } from '../pipeline/money'
 import type { IncomingRequest } from '../types'
 import { capMaxTokens, jsonResponse, makeMetadata, streamingResponse } from './pi-ai-runtime'
 
@@ -128,7 +129,7 @@ const makeReq = (format: 'anthropic' | 'openai' | 'responses'): IncomingRequest 
   stream: true
 })
 
-const ctx = { costs: { inputCost: 0, outputCost: 0 } }
+const ctx = { costs: { inputCost: 0 as PerTokenUsd, outputCost: 0 as PerTokenUsd } }
 
 describe('streamingResponse', () => {
   it('returns SSE headers + ReadableStream body for both formats', () => {

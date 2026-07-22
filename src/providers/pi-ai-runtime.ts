@@ -6,6 +6,7 @@ import type {
   AssistantMessageEventStream
 } from '@earendil-works/pi-ai'
 
+import type { PerTokenUsd } from '../pipeline/money'
 import { wrapStreamForMetrics } from '../telemetry/stream-metrics'
 import type { IncomingRequest, ProviderResponse } from '../types'
 
@@ -37,10 +38,11 @@ export const makeMetadata = (
   latencyMs: Date.now() - startMs
 })
 
-// Costs are per-TOKEN rates. The pi-ai catalog Model prices per million, so the
-// caller divides by 1e6 first (see models-dispatch.ts).
+// Costs are per-TOKEN rates (PerTokenUsd). The pi-ai catalog Model prices per
+// million, so the dispatch site converts via perTokenUsd(perMillionUsd(...)) —
+// the brand makes a dropped conversion a compile error.
 export type StreamMetricsCtx = {
-  costs: { inputCost: number; outputCost: number }
+  costs: { inputCost: PerTokenUsd; outputCost: PerTokenUsd }
 }
 
 const wrapIfTelHooks = (

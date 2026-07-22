@@ -2,6 +2,8 @@ import { describe, expect, it } from 'bun:test'
 
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai'
 
+import type { PerTokenUsd } from '../pipeline/money'
+
 import { wrapStreamForMetrics } from './stream-metrics'
 import { createTel } from './tel'
 import { useTestExporter } from './test-fixture'
@@ -42,8 +44,8 @@ describe('wrapStreamForMetrics', () => {
     await tel.withSpan('outer', {}, async (span) => {
       const upstream = createAssistantMessageEventStream()
       const wrapped = wrapStreamForMetrics(upstream, span, tel, {
-        inputCost: 0.000001,
-        outputCost: 0.000002
+        inputCost: 0.000001 as PerTokenUsd,
+        outputCost: 0.000002 as PerTokenUsd
       })
       queueMicrotask(() => {
         upstream.push({ type: 'text_delta', delta: 'h' } as never)
@@ -64,7 +66,10 @@ describe('wrapStreamForMetrics', () => {
     const tel = createTel()
     await tel.withSpan('outer', {}, async (span) => {
       const upstream = createAssistantMessageEventStream()
-      const wrapped = wrapStreamForMetrics(upstream, span, tel, { inputCost: 0, outputCost: 0 })
+      const wrapped = wrapStreamForMetrics(upstream, span, tel, {
+        inputCost: 0 as PerTokenUsd,
+        outputCost: 0 as PerTokenUsd
+      })
       queueMicrotask(() => {
         upstream.push({ type: 'text_delta', delta: 'a' } as never)
         upstream.push({ type: 'text_delta', delta: 'b' } as never)
@@ -81,7 +86,10 @@ describe('wrapStreamForMetrics', () => {
     const tel = createTel()
     await tel.withSpan('outer', {}, async (span) => {
       const upstream = createAssistantMessageEventStream()
-      const wrapped = wrapStreamForMetrics(upstream, span, tel, { inputCost: 0, outputCost: 0 })
+      const wrapped = wrapStreamForMetrics(upstream, span, tel, {
+        inputCost: 0 as PerTokenUsd,
+        outputCost: 0 as PerTokenUsd
+      })
       queueMicrotask(() => {
         upstream.push({ type: 'text_start' } as never)
         upstream.push({ type: 'text_delta', delta: 'x' } as never)
@@ -97,7 +105,10 @@ describe('wrapStreamForMetrics', () => {
     const tel = createTel()
     await tel.withSpan('outer', {}, async (span) => {
       const upstream = createAssistantMessageEventStream()
-      const wrapped = wrapStreamForMetrics(upstream, span, tel, { inputCost: 0, outputCost: 0 })
+      const wrapped = wrapStreamForMetrics(upstream, span, tel, {
+        inputCost: 0 as PerTokenUsd,
+        outputCost: 0 as PerTokenUsd
+      })
       queueMicrotask(() => {
         upstream.push(makeDoneEvent(10, 0) as never)
       })
@@ -114,7 +125,10 @@ describe('wrapStreamForMetrics', () => {
     const tel = createTel()
     await tel.withSpan('outer', {}, async (span) => {
       const upstream = createAssistantMessageEventStream()
-      const wrapped = wrapStreamForMetrics(upstream, span, tel, { inputCost: 0, outputCost: 0 })
+      const wrapped = wrapStreamForMetrics(upstream, span, tel, {
+        inputCost: 0 as PerTokenUsd,
+        outputCost: 0 as PerTokenUsd
+      })
       queueMicrotask(async () => {
         upstream.push({ type: 'thinking_delta', delta: 'one' } as never)
         // Sleep so the elapsed window between firstChunk and lastChunk is non-trivial.

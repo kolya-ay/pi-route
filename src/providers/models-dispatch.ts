@@ -3,6 +3,7 @@
 import type { Api, Model, Models } from '@earendil-works/pi-ai'
 import { ModelsError } from '@earendil-works/pi-ai'
 
+import { perTokenUsd } from '../pipeline/money'
 import type { IncomingRequest, Provider, ProviderResponse } from '../types'
 
 import {
@@ -101,12 +102,14 @@ export const createModelsDispatch = (
     }
 
     const metadata = makeMetadata(request, providerName, start)
-    // Unit boundary: Model.cost is USD per MILLION tokens (the catalog convention —
-    // metadata.ts normalizes into it, model-projection.ts:75 divides out of it),
-    // while wrapStreamForMetrics multiplies raw token counts by these rates. Keep
-    // the /1e6 — without it every priced provider reports cost 1e6x too high.
+    // Model.cost is USD per MILLION; perTokenUsd scales it (×1e-6) to the per-token
+    // rate the metrics consumer (PerTokenUsd) requires — a dropped conversion is a
+    // compile error.
     const ctx = {
-      costs: { inputCost: model.cost.input / 1e6, outputCost: model.cost.output / 1e6 }
+      costs: {
+        inputCost: perTokenUsd(model.cost.input),
+        outputCost: perTokenUsd(model.cost.output)
+      }
     }
     return request.stream
       ? streamingResponse(eventStream, request, metadata, ctx)
