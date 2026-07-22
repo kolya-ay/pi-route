@@ -87,4 +87,20 @@ describe('fileCredentialStore', () => {
     const infos = await store.list()
     expect(infos.map((i) => i.providerId).sort()).toEqual(['cc', 'chutes'])
   })
+
+  test('a disabled account reads undefined', async () => {
+    const store = fileCredentialStore('/nonexistent', {
+      providers: {
+        cc: { type: 'cerebras', account: { credential: 'key', key: 'sk', disabled: true } }
+      }
+    } as unknown as RouterOptions)
+    expect(await store.read('cc')).toBeUndefined()
+  })
+
+  test('an enabled account still reads its key', async () => {
+    const store = fileCredentialStore('/nonexistent', {
+      providers: { cc: { type: 'cerebras', account: { credential: 'key', key: 'sk' } } }
+    } as unknown as RouterOptions)
+    expect(await store.read('cc')).toEqual({ type: 'api_key', key: 'sk' })
+  })
 })

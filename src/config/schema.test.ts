@@ -52,6 +52,26 @@ describe('parseConfig — providers', () => {
   test('rejects a provider with neither apiKey nor account', () => {
     expect(() => parseConfig({ providers: { x: { type: 'openai-compatible' } } })).toThrow()
   })
+
+  test('rejects oauth on an openai-compatible provider', () => {
+    expect(() =>
+      parseConfig({
+        providers: { x: { type: 'openai-compatible', baseUrl: 'https://e/v1', account: 'main' } }
+      })
+    ).toThrow(/oauth/i)
+  })
+
+  test('still accepts an apiKey openai-compatible provider', () => {
+    const opts = parseConfig({
+      providers: { x: { type: 'openai-compatible', baseUrl: 'https://e/v1', apiKey: 'sk' } }
+    })
+    expect(opts.providers.x?.account).toEqual({ credential: 'key', key: 'sk' })
+  })
+
+  test('still accepts oauth on a non-openai type (antigravity)', () => {
+    const opts = parseConfig({ providers: { ag: { type: 'antigravity', account: 'u@e.com' } } })
+    expect(opts.providers.ag?.account.credential).toBe('oauth')
+  })
 })
 
 describe('parseConfig — pipeline value shapes', () => {

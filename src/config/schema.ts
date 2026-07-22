@@ -34,6 +34,10 @@ const ModelMetaOverrideSchema = z.strictObject({
   input: z.array(z.string()).optional()
 })
 
+// openai-compatible endpoints universally serve GET /models with context and
+// pricing fields, so discovery is on unless the config opts out.
+const OPENAI_LIKE = new Set(['openai-compatible', 'openai'])
+
 const ProviderSchema = z
   .strictObject({
     type: z.string(),
@@ -46,6 +50,10 @@ const ProviderSchema = z
   })
   .refine((p) => (p.apiKey === undefined) !== (p.account === undefined), {
     message: 'provider requires exactly one of `apiKey` or `account`'
+  })
+  .refine((p) => !(OPENAI_LIKE.has(p.type) && p.apiKey === undefined), {
+    message:
+      'openai-compatible/openai providers require an `apiKey`; oauth credentials are not supported for this type (the endpoint catalog can never refresh without a resolvable key)'
   })
 
 type RawProvider = z.infer<typeof ProviderSchema>
@@ -76,10 +84,6 @@ const normalizeAccount = (raw: RawProvider): Account => {
     ...disabled
   }
 }
-
-// openai-compatible endpoints universally serve GET /models with context and
-// pricing fields, so discovery is on unless the config opts out.
-const OPENAI_LIKE = new Set(['openai-compatible', 'openai'])
 
 const normalizeDiscover = (raw: RawProvider): ProviderConfig['discover'] =>
   raw.discover !== undefined ? raw.discover : OPENAI_LIKE.has(raw.type) ? ['auto'] : undefined

@@ -62,6 +62,10 @@ export const fileCredentialStore = (authDir: string, options: RouterOptions): Cr
   const read = async (providerId: string): Promise<Credential | undefined> => {
     const account = options.providers[providerId]?.account
     if (!account) return undefined
+    // A disabled account's secret must not leave the store, even to a caller that
+    // bypasses the dispatch gate. Login writes a fresh credential and does not rely
+    // on reading the old one, so re-enabling is unaffected.
+    if (account.disabled === true) return undefined
     if (account.credential === 'key') return { type: 'api_key', key: account.key }
     const raw = await readFile(authDir, account.name)
     if (!raw) return undefined
