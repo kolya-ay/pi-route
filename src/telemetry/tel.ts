@@ -65,18 +65,16 @@ export const initOtel = (opts: InitOtelOpts): void => {
 
 export const shutdownOtel = async (): Promise<void> => {
   enabled = false
-  if (testProvider) {
-    // Don't call testProvider.shutdown() — that propagates to the exporter and
-    // sets _stopped=true on InMemorySpanExporter, permanently silencing it for
-    // subsequent tests that reuse the same instance. We only need the global
-    // tracer provider reset so the next _setTestExporter call can re-register.
-    testProvider = undefined
-    trace.disable()
-  }
+  // Drop the test provider without shutdown() — that would set _stopped=true on a
+  // reused InMemorySpanExporter and permanently silence it for later tests.
+  testProvider = undefined
   if (sdk) {
     await sdk.shutdown()
     sdk = undefined
   }
+  // Always clear the global, on both the production (sdk) and test paths — otherwise
+  // the next registration (initOtel or _setTestExporter) is silently ignored.
+  trace.disable()
 }
 
 // Test hook — registers a NodeTracerProvider with a SimpleSpanProcessor so

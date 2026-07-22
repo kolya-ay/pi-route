@@ -32,6 +32,20 @@ describe('initOtel', () => {
     expect(exporter.getFinishedSpans().map((s) => s.name)).toContain('after-init')
     await shutdownOtel()
   })
+
+  it('a production shutdown clears the global so a later test exporter registers', async () => {
+    // Production path: real NodeSDK, registers a global provider. A bogus URL is
+    // fine — BatchSpanProcessor never connects unless flushed.
+    initOtel({ otlpUrl: 'http://localhost:9', serviceName: 't' })
+    await shutdownOtel()
+
+    const exporter = new InMemorySpanExporter()
+    _setTestExporter(exporter)
+    await createTel().withSpan('after-prod-shutdown', {}, async () => undefined)
+    await shutdownOtel()
+
+    expect(exporter.getFinishedSpans().map((s) => s.name)).toContain('after-prod-shutdown')
+  })
 })
 
 describe('Tel facade — disabled (no exporters)', () => {

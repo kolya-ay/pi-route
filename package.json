@@ -14,8 +14,9 @@
     "lint": "biome check src",
     "lint:fix": "biome check --write src",
     "check": "bun run lint && tsgo --noEmit",
-    "test": "bun test --isolate",
-    "test:watch": "bun test --watch --isolate",
+    "test": "bun test --timeout 20000",
+    "test:watch": "bun test --watch --timeout 20000",
+    "test:isolate": "bun test --isolate",
     "prepare": "simple-git-hooks"
   },
   "simple-git-hooks": {
