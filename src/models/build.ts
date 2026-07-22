@@ -19,6 +19,11 @@ export type BuildDirs = {
   stateDir: string
   authDir: string
   liveMeta?: Map<string, ModelMeta>
+  // Output sink (like liveMeta): the ids of providers given an endpoint catalog —
+  // the wrapper that fetches /models and publishes into liveMeta on its own 4h
+  // schedule. enrichLiveMeta reads this to know which providers it must NOT also
+  // fetch, decided at build time rather than inferred from liveMeta's contents.
+  wrapped?: Set<string>
 }
 
 const FACTORIES: Partial<Record<string, () => Provider>> = {
@@ -94,7 +99,8 @@ const withoutRefresh = (p: Provider): Provider => {
 const wrapProvider = (
   built: Provider,
   config: ProviderConfig,
-  liveMeta?: Map<string, ModelMeta>
+  liveMeta?: Map<string, ModelMeta>,
+  wrapped?: Set<string>
 ): Provider => {
   if (config.discover === false) return built
   if (FACTORIES[config.type]) return withRemoteCatalog(built, config.type)
@@ -102,6 +108,7 @@ const wrapProvider = (
     return config.account.disabled === true ? withoutRefresh(built) : built
   }
   if (!config.baseUrl || config.account.disabled === true) return built
+  wrapped?.add(built.id)
   return withEndpointCatalog(built, {
     ...(config.account.credential === 'key' ? { apiKey: config.account.key } : {}),
     ...(liveMeta ? { liveMeta } : {})
@@ -116,7 +123,7 @@ export const buildModels = (options: RouterOptions, dirs: BuildDirs): MutableMod
   for (const [name, config] of Object.entries(options.providers)) {
     const built = buildOne(name, config)
     if (!built) continue
-    models.setProvider(wrapProvider(built, config, dirs.liveMeta))
+    models.setProvider(wrapProvider(built, config, dirs.liveMeta, dirs.wrapped))
   }
   return models
 }

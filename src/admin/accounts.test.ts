@@ -24,7 +24,13 @@ beforeEach(async () => {
 
 const mkState = (options: RouterOptions = baseOpts): RouterState => {
   const models = buildTestModels(options)
-  return createState(options, buildCatalog(options, models, dir), models, { accounts: {} }, dir)
+  return createState(
+    options,
+    buildCatalog(options, models, dir, new Map()),
+    models,
+    { accounts: {} },
+    dir
+  )
 }
 
 describe('admin/accounts', () => {

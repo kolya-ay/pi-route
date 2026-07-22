@@ -13,7 +13,7 @@ const opts = (over: Partial<RouterOptions> = {}): RouterOptions => ({
 
 const infoFor = (o: RouterOptions) => {
   const models = buildTestModels(o)
-  return buildModelInfoBody(o, buildCatalog(o, models, '/tmp'), models)
+  return buildModelInfoBody(o, buildCatalog(o, models, '/tmp', new Map()), models)
 }
 
 describe('/model/info (LiteLLM)', () => {
@@ -60,7 +60,7 @@ describe('/model/info (LiteLLM)', () => {
       expose: ['nv/**']
     } as unknown as RouterOptions
     const models = buildTestModels(o)
-    const catalog = buildCatalog(o, models, '/tmp')
+    const catalog = buildCatalog(o, models, '/tmp', new Map())
     catalog.addresses.add('nv/deepseek-ai/deepseek-v4-pro')
     catalog.leafFor.set('nv/deepseek-ai/deepseek-v4-pro', 'nv/deepseek-ai/deepseek-v4-pro')
     const body = buildModelInfoBody(o, catalog, models)

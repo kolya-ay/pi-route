@@ -28,15 +28,15 @@ export type Catalog = {
   available: Set<string>
 }
 
-// `liveMeta` is optional so existing three-argument callers are unaffected. When
-// the caller owns the map, the catalog wrapper has already been writing each
-// provider's lossless parse into it, and this catalog reads that work rather
-// than starting empty.
+// `liveMeta` is required: the catalog wrapper has been writing each provider's
+// lossless parse into the caller's map, and this catalog reads that work. A
+// forgotten map would show every unstated price as $0.00 rather than unknown —
+// so the caller must pass one explicitly, even if empty.
 export const buildCatalog = (
   opts: RouterOptions,
   models: Models,
   authDir: string,
-  liveMeta: Map<string, ModelMeta> = new Map()
+  liveMeta: Map<string, ModelMeta>
 ): Catalog => {
   const addresses = new Set<string>()
   const leafFor = new Map<string, string>()

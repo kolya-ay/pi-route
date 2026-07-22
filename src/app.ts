@@ -75,15 +75,17 @@ export const createApp = async (
   // into it (on the offline restore and on every refresh) and buildCatalog reads
   // it as `liveMeta`, so the payload is fetched and parsed exactly once.
   const liveMeta = new Map<string, ModelMeta>()
+  const wrapped = new Set<string>()
   const models = buildModels(options, {
     stateDir: env.stateDir,
     authDir: env.stateDir,
-    liveMeta
+    liveMeta,
+    wrapped
   })
   await models.refresh({ allowNetwork: false }) // offline restore of persisted overlays
 
   const catalog = buildCatalog(options, models, env.stateDir, liveMeta)
-  await enrichLiveMeta(options, catalog)
+  await enrichLiveMeta(options, catalog, wrapped)
 
   initOtel({ otlpUrl: env.otlpUrl, serviceName: env.serviceName })
   const tel = createTel()
@@ -96,7 +98,7 @@ export const createApp = async (
       .refresh()
       .then(async () => {
         const next = buildCatalog(options, models, env.stateDir, liveMeta)
-        await enrichLiveMeta(options, next)
+        await enrichLiveMeta(options, next, wrapped)
         state.catalog = next
       })
       .catch((err) => console.error(`[models] refresh failed: ${String(err)}`))

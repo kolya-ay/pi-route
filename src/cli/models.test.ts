@@ -157,7 +157,7 @@ describe('renderModelDetail', () => {
     } as unknown as RouterOptions
     const detail = renderModelDetail(
       options,
-      buildCatalog(options, models, '/tmp'),
+      buildCatalog(options, models, '/tmp', new Map()),
       models,
       'nvidia/some-model'
     )

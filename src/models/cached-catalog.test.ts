@@ -139,6 +139,41 @@ describe('withRemoteCatalog', () => {
     expect((seenSignal?.reason as Error | undefined)?.name).toBe('TimeoutError')
     expect(await store.read('cc')).toBeUndefined()
   }, 2000)
+
+  test('does not warn when pi.dev returns no models (unpublished provider is benign)', async () => {
+    const store = storeFor()
+    const errors: string[] = []
+    const originalError = console.error
+    console.error = (...args: unknown[]) => {
+      errors.push(args.join(' '))
+    }
+    try {
+      const wrapped = withRemoteCatalog(staticProvider(), 'cc', {
+        now: () => 1e9,
+        fetcher: async () => new Response(JSON.stringify({ models: [] }))
+      })
+      await wrapped.refreshModels?.({ store: providerStore(store, 'cc'), allowNetwork: true })
+    } finally {
+      console.error = originalError
+    }
+    expect(errors.some((e) => e.includes('no parseable models'))).toBe(false)
+  })
+
+  test('concurrent refreshes share one in-flight fetch', async () => {
+    const store = storeFor()
+    let calls = 0
+    const wrapped = withRemoteCatalog(staticProvider(), 'cc', {
+      now: () => 1e9, // past any freshness window; empty store forces a fetch
+      fetcher: async () => {
+        calls++
+        await new Promise((r) => setTimeout(r, 10))
+        return new Response(JSON.stringify([{ id: 'm1' }]))
+      }
+    })
+    const ctx = { store: providerStore(store, 'cc'), allowNetwork: true }
+    await Promise.all([wrapped.refreshModels?.(ctx), wrapped.refreshModels?.(ctx)])
+    expect(calls).toBe(1)
+  })
 })
 
 const fakeProvider = (id = 'nvidia'): Provider =>
@@ -556,6 +591,21 @@ describe('lossless meta', () => {
       expect(wrapped.getModels().map((m) => m.id)).toEqual(['stored-model'])
       expect(liveMeta.size).toBe(0)
     }
+  })
+
+  test('persists and restores per-model meta alongside the catalog', async () => {
+    const store = storeFor()
+    const payload = {
+      data: [{ id: 'm1', context_length: 4096, pricing: { prompt: '0.5', completion: '1.5' } }]
+    }
+    const wrapped = withEndpointCatalog(staticProvider(), {
+      now: () => 1000,
+      fetcher: async () => new Response(JSON.stringify(payload))
+    })
+    await wrapped.refreshModels?.({ store: providerStore(store, 'cc'), allowNetwork: true })
+
+    const raw = (await store.read('cc')) as { meta?: Record<string, unknown> }
+    expect(raw.meta?.m1).toBeDefined()
   })
 
   test('the pi.dev path still works and writes no meta', async () => {

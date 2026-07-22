@@ -1,8 +1,8 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
 import type { Models } from '@earendil-works/pi-ai'
 import { buildTestModels } from '../models/test-models'
 import type { RouterOptions } from '../types'
-import { buildCatalog } from './catalog'
+import { buildCatalog, type Catalog } from './catalog'
 import {
   applyOverride,
   enrichLiveMeta,
@@ -119,7 +119,7 @@ describe('resolveMetadata', () => {
   test('fallback fills an otherwise-unknown model', () => {
     const opts = base(['fallback'])
     const models = cerebrasModels()
-    const cat = buildCatalog(opts, models, '/tmp')
+    const cat = buildCatalog(opts, models, '/tmp', new Map())
     cat.addresses.add('nv/foo/bar')
     cat.leafFor.set('nv/foo/bar', 'nv/foo/bar')
     const meta = resolveMetadata(opts, cat, models, 'nv/foo/bar')
@@ -129,7 +129,7 @@ describe('resolveMetadata', () => {
   test('fallback reports an unknown price rather than inventing a free one', () => {
     const opts = base(['fallback'])
     const models = cerebrasModels()
-    const cat = buildCatalog(opts, models, '/tmp')
+    const cat = buildCatalog(opts, models, '/tmp', new Map())
     cat.addresses.add('nv/foo/bar')
     cat.leafFor.set('nv/foo/bar', 'nv/foo/bar')
     const meta = resolveMetadata(opts, cat, models, 'nv/foo/bar')
@@ -140,7 +140,7 @@ describe('resolveMetadata', () => {
   test('guess beats fallback when listed first', () => {
     const opts = base(['guess', 'fallback'])
     const models = cerebrasModels()
-    const cat = buildCatalog(opts, models, '/tmp')
+    const cat = buildCatalog(opts, models, '/tmp', new Map())
     cat.addresses.add('nv/gpt-oss-120b')
     cat.leafFor.set('nv/gpt-oss-120b', 'nv/gpt-oss-120b')
     const meta = resolveMetadata(opts, cat, models, 'nv/gpt-oss-120b')
@@ -150,7 +150,7 @@ describe('resolveMetadata', () => {
   test('override patches the chain result', () => {
     const opts = base(['fallback'], { 'foo/bar': { contextWindow: 42 } })
     const models = cerebrasModels()
-    const cat = buildCatalog(opts, models, '/tmp')
+    const cat = buildCatalog(opts, models, '/tmp', new Map())
     cat.addresses.add('nv/foo/bar')
     cat.leafFor.set('nv/foo/bar', 'nv/foo/bar')
     expect(resolveMetadata(opts, cat, models, 'nv/foo/bar')?.contextWindow).toBe(42)
@@ -161,7 +161,7 @@ describe('resolveMetadata', () => {
     // An alias whose leaf points at a live entry must resolve correctly.
     const opts = base(['openai-models-list'])
     const models = cerebrasModels()
-    const cat = buildCatalog(opts, models, '/tmp')
+    const cat = buildCatalog(opts, models, '/tmp', new Map())
     cat.liveMeta.set('nv/real-model', { name: 'Real', contextWindow: 40960, reasoning: false })
     cat.addresses.add('big')
     cat.leafFor.set('big', 'nv/real-model')
@@ -175,7 +175,7 @@ describe('resolveMetadata', () => {
     // not out-rank `guess`, which knows gpt-oss-120b's real limits.
     const opts = base(['auto'])
     const models = cerebrasModels()
-    const cat = buildCatalog(opts, models, '/tmp')
+    const cat = buildCatalog(opts, models, '/tmp', new Map())
     cat.addresses.add('nv/gpt-oss-120b')
     cat.leafFor.set('nv/gpt-oss-120b', 'nv/gpt-oss-120b')
     cat.liveMeta.set('nv/gpt-oss-120b', { name: 'gpt-oss-120b' })
@@ -452,12 +452,11 @@ test('fetchProviderMetadata gives up on a hung endpoint instead of hanging', asy
 })
 
 // enrichLiveMeta covers only what the catalog wrapper does not. Counting fetches
-// is the whole point of these three: the wrapper already fetches {baseUrl}/models
-// for the providers it wraps and publishes the parse into the same map, so a
-// second GET there would be a request for data we already hold — while every
-// provider the wrapper does NOT wrap must keep its live metadata.
-// Headers are captured alongside the urls: for a disabled account the claim is
-// not merely "fewer requests" but "the key never left the process".
+// is the whole point here: a provider recorded in the build-time `wrapped` set is
+// already fetched and published by that wrapper, so a second GET would be a request
+// for data we already hold — while every provider NOT in `wrapped` must keep its
+// live metadata. Headers are captured alongside the urls: for a disabled account
+// the claim is not merely "fewer requests" but "the key never left the process".
 const countingFetch = (): {
   calls: string[]
   headers: Record<string, string>[]
@@ -476,17 +475,17 @@ const countingFetch = (): {
   }
 }
 
-const catalogWith = (liveMeta: string[] = []) =>
+const emptyCatalog = () =>
   ({
     addresses: new Set<string>(),
     leafFor: new Map<string, string>(),
-    liveMeta: new Map(liveMeta.map((address) => [address, { name: address }])),
+    liveMeta: new Map(),
     available: new Set<string>()
   }) as unknown as Parameters<typeof enrichLiveMeta>[1]
 
 const enrichWith = async (
   providers: Record<string, unknown>,
-  liveMeta: string[] = []
+  wrapped: string[] = []
 ): Promise<{ calls: string[]; headers: Record<string, string>[] }> => {
   const original = globalThis.fetch
   const { calls, headers, fetch: stub } = countingFetch()
@@ -494,7 +493,8 @@ const enrichWith = async (
   try {
     await enrichLiveMeta(
       { providers, pipeline: [], expose: [] } as unknown as RouterOptions,
-      catalogWith(liveMeta)
+      emptyCatalog(),
+      new Set(wrapped)
     )
     return { calls, headers }
   } finally {
@@ -503,23 +503,6 @@ const enrichWith = async (
 }
 
 describe('enrichLiveMeta', () => {
-  // Presence under `name/` in liveMeta is the wrapper's own evidence that it
-  // covered this provider — the only thing this function asks about.
-  test('does not re-fetch /models for a provider the catalog wrapper already published for', async () => {
-    const { calls } = await enrichWith(
-      {
-        chutes: {
-          type: 'openai-compatible',
-          baseUrl: 'https://example.test/v1',
-          discover: ['openai-models-list'],
-          account: { credential: 'key', key: 'k' }
-        }
-      },
-      ['chutes/some-model']
-    )
-    expect(calls).toEqual([])
-  })
-
   // "Off means off": a disabled account's key must not reach its own endpoint,
   // on boot or on any rebuild. See wrapProvider in src/models/build.ts.
   test('sends nothing at all for a disabled provider — not even an unauthenticated GET', async () => {
@@ -550,7 +533,7 @@ describe('enrichLiveMeta', () => {
     expect(calls).toEqual(['https://example.test/v1/models'])
   })
 
-  test('still fetches /model/info for a litellm provider (no wrapper reads that endpoint)', async () => {
+  test('still fetches /model/info for a litellm provider even when wrapped (no wrapper reads that endpoint)', async () => {
     const { calls } = await enrichWith(
       {
         proxy: {
@@ -560,7 +543,7 @@ describe('enrichLiveMeta', () => {
           account: { credential: 'key', key: 'k' }
         }
       },
-      ['proxy/some-model']
+      ['proxy']
     )
     expect(calls).toEqual(['https://example.test/v1/model/info'])
   })
@@ -577,5 +560,55 @@ describe('enrichLiveMeta', () => {
       }
     })
     expect(calls).toEqual(['https://example.test/v1/models'])
+  })
+})
+
+describe('enrichLiveMeta', () => {
+  const realFetch = globalThis.fetch
+  afterEach(() => {
+    globalThis.fetch = realFetch
+  })
+
+  const opts = {
+    providers: {
+      covered: {
+        type: 'openai-compatible',
+        baseUrl: 'https://cov/v1',
+        account: { credential: 'key', key: 'k' },
+        discover: ['openai-models-list']
+      },
+      bare: {
+        type: 'openai-compatible',
+        baseUrl: 'https://bare/v1',
+        account: { credential: 'key', key: 'k' },
+        discover: ['openai-models-list']
+      }
+    },
+    pipeline: [],
+    expose: []
+  } as unknown as RouterOptions
+
+  test('skips a wrapped provider and re-fetches an uncovered one every call', async () => {
+    const calls: Record<string, number> = {}
+    globalThis.fetch = (async (url: string) => {
+      const host = new URL(url).host
+      calls[host] = (calls[host] ?? 0) + 1
+      return Response.json({ data: [{ id: 'm', context_length: 8000 }] })
+    }) as typeof fetch
+
+    const catalog: Catalog = {
+      addresses: new Set<string>(),
+      leafFor: new Map(),
+      liveMeta: new Map(),
+      available: new Set<string>()
+    }
+    const wrapped = new Set(['covered'])
+
+    await enrichLiveMeta(opts, catalog, wrapped)
+    await enrichLiveMeta(opts, catalog, wrapped)
+
+    expect(calls.cov).toBeUndefined() // wrapped → never fetched
+    expect(calls.bare).toBe(2) // uncovered → fetched both times (no staleness)
+    expect(catalog.liveMeta.get('bare/m')?.contextWindow).toBe(8000)
   })
 })

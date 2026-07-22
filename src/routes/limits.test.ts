@@ -24,7 +24,7 @@ const makeState = (options: RouterOptions, authDir: string) => {
   const models = buildModels(options, { stateDir: authDir, authDir })
   return createState(
     options,
-    buildCatalog(options, models, authDir),
+    buildCatalog(options, models, authDir, new Map()),
     models,
     { accounts: {} },
     authDir

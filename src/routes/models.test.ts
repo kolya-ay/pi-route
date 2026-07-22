@@ -17,7 +17,13 @@ const opts = (over: Partial<RouterOptions> = {}): RouterOptions => ({
 // createModelsRoute reads options/catalog/models from state at request time.
 const routeFor = (o: RouterOptions) => {
   const models = buildTestModels(o)
-  const state = createState(o, buildCatalog(o, models, '/tmp'), models, { accounts: {} }, '/tmp')
+  const state = createState(
+    o,
+    buildCatalog(o, models, '/tmp', new Map()),
+    models,
+    { accounts: {} },
+    '/tmp'
+  )
   return createModelsRoute(state)
 }
 

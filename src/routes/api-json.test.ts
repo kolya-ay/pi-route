@@ -13,7 +13,7 @@ const opts = (over: Partial<RouterOptions> = {}): RouterOptions => ({
 
 const opencodeFor = (o: RouterOptions) => {
   const models = buildTestModels(o)
-  return buildOpencodeModels(o, buildCatalog(o, models, '/tmp'), models)
+  return buildOpencodeModels(o, buildCatalog(o, models, '/tmp', new Map()), models)
 }
 
 describe('buildOpencodeModels', () => {
@@ -50,7 +50,7 @@ describe('buildOpencodeModels', () => {
       expose: ['nv/**']
     } as unknown as RouterOptions
     const tm = buildTestModels(o)
-    const catalog = buildCatalog(o, tm, '/tmp')
+    const catalog = buildCatalog(o, tm, '/tmp', new Map())
     catalog.addresses.add('nv/foo/bar-model')
     catalog.leafFor.set('nv/foo/bar-model', 'nv/foo/bar-model')
     const models = buildOpencodeModels(o, catalog, tm)

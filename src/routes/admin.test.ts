@@ -31,7 +31,7 @@ const mkApp = (
   const models = buildTestModels(options)
   const state = createState(
     options,
-    buildCatalog(options, models, dir),
+    buildCatalog(options, models, dir, new Map()),
     models,
     { accounts: {} },
     dir

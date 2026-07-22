@@ -284,45 +284,28 @@ export const fetchProviderMetadata = async (
   }
 }
 
-// Has the catalog wrapper already published for this provider? The wrapper writes
-// its lossless /models parse into this very map, address-keyed — so an entry under
-// `name/` IS the evidence that it covered this provider. Asking the map beats
-// mirroring `wrapProvider`'s branching here: a mirror can only be kept in step by
-// comment, and drifts silently into a permanent metadata hole.
-const alreadyCovered = (catalog: Catalog, name: string): boolean => {
-  const prefix = `${name}/`
-  for (const key of catalog.liveMeta.keys()) if (key.startsWith(prefix)) return true
-  return false
-}
-
 // Populate catalog.liveMeta (address-keyed) for the providers the catalog wrapper
-// does not cover. That wrapper fetches {baseUrl}/models on its own schedule,
-// persists the lossless parse, and publishes it into this same map — so fetching
-// the identical payload here would be a second request for data we already hold.
-// What is left is the `litellm` strategy (a different endpoint, /model/info, that
-// no wrapper touches) and any provider nothing has published for.
+// does not cover. `wrapped` is the build-time set of endpoint-catalog providers —
+// each fetches {baseUrl}/models on its own schedule, persists the lossless parse,
+// and publishes it into this same map, so fetching again here would be a second
+// request for data we already hold. The litellm strategy reads a different endpoint
+// (/model/info) that no wrapper touches, so it is always fetched even when wrapped.
 //
-// Two consequences of reading the map rather than predicting the wrapper, both wanted:
-//   - On a first-ever boot with an empty store nothing has been published yet, so
-//     one extra GET happens. That is this fallback doing its job; it stops once the
-//     store is warm.
-//   - A provider the wrapper wraps but never refreshes (an oauth-credential
-//     openai-compatible one: `buildOne` gives it an apiKey auth only, so pi-ai
-//     resolves no refresh credential and `refreshModels` never runs) is never
-//     published for, so it is never skipped — it keeps its live metadata by
-//     construction rather than by a special case.
-export const enrichLiveMeta = async (opts: RouterOptions, catalog: Catalog): Promise<void> => {
+// Deciding coverage from `wrapped` (fixed at build) rather than from liveMeta's
+// contents (which enrich itself mutates) is what keeps an uncovered provider from
+// looking covered after its first fetch and going stale until restart.
+export const enrichLiveMeta = async (
+  opts: RouterOptions,
+  catalog: Catalog,
+  wrapped: ReadonlySet<string>
+): Promise<void> => {
   const entries = Object.entries(opts.providers)
   await Promise.all(
     entries.map(async ([name, provider]) => {
-      // Security gate, before any other consideration: off means off. The account's
-      // own key must not reach the account's own endpoint while it is meant to be
-      // off — the same policy `wrapProvider` states and enforces in
-      // src/models/build.ts. Keep the two legible as one rule.
+      // Security gate, before anything else: a disabled account's own key must not
+      // reach its own endpoint. Same rule wrapProvider enforces in build.ts.
       if (provider.account.disabled === true) return
-      // Only the openai-models-list strategy duplicates the wrapper's GET;
-      // litellm reads /model/info, which nothing else fetches.
-      if (liveStrategy(provider) !== 'litellm' && alreadyCovered(catalog, name)) return
+      if (liveStrategy(provider) !== 'litellm' && wrapped.has(name)) return
       const map = await fetchProviderMetadata(name, provider)
       for (const [modelId, meta] of map) catalog.liveMeta.set(`${name}/${modelId}`, meta)
     })

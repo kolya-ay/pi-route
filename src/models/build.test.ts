@@ -92,6 +92,34 @@ describe('buildModels', () => {
     expect(models.getProvider('nvidia')?.refreshModels).toBeUndefined()
   })
 
+  test('records endpoint-catalog providers into the wrapped sink', () => {
+    const wrapped = new Set<string>()
+    const dir = dirs()
+    buildModels(
+      {
+        providers: {
+          ep: {
+            type: 'openai-compatible',
+            baseUrl: 'https://e/v1',
+            account: { credential: 'key', key: 'k' },
+            discover: ['auto']
+          },
+          off: {
+            type: 'openai-compatible',
+            baseUrl: 'https://e/v1',
+            account: { credential: 'key', key: 'k', disabled: true },
+            discover: ['auto']
+          }
+        },
+        pipeline: [],
+        expose: []
+      } as unknown as RouterOptions,
+      { stateDir: dir, authDir: dir, wrapped }
+    )
+    expect(wrapped.has('ep')).toBe(true)
+    expect(wrapped.has('off')).toBe(false) // disabled → no endpoint catalog → not covered
+  })
+
   const withAg = (disabled?: boolean) =>
     ({
       ...options,

@@ -1,9 +1,20 @@
-import type { Api, Model, Provider, RefreshModelsContext } from '@earendil-works/pi-ai'
+import type {
+  Api,
+  Model,
+  ModelsStoreEntry,
+  Provider,
+  RefreshModelsContext
+} from '@earendil-works/pi-ai'
 
 import type { ModelMeta } from '../pipeline/catalog'
 import { parseOpenaiModelsList } from '../pipeline/metadata'
 import type { FetchFn } from './fetch-timeout'
 import { deadlined } from './fetch-timeout'
+
+// ModelsStoreEntry does not declare `meta`; we persist it alongside the models
+// (the lossless parse, so an unstated price stays absent instead of defaulting to
+// 0). Make the widening explicit rather than relying on excess-property slack.
+type StoredEntry = ModelsStoreEntry & { meta?: Record<string, ModelMeta> }
 
 const CATALOG_BASE_URL = 'https://pi.dev'
 export const REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1000
@@ -17,6 +28,10 @@ export type CachedCatalogOpts = {
   // can observe it directly. Written on both the offline cache restore and each
   // successful fetch.
   liveMeta?: Map<string, ModelMeta>
+  // Whether a 200-with-no-models should log. Endpoint catalogs (own /models) → yes:
+  // an empty parse is suspicious. pi.dev catalogs → no: a provider simply may not be
+  // published there, which is benign and would otherwise be recurring boot noise.
+  warnOnEmpty?: boolean
 }
 
 export type RemoteCatalogOpts = CachedCatalogOpts & { baseUrl?: string }
@@ -131,10 +146,10 @@ export const withCachedCatalog = (
     refreshModels: (context: RefreshModelsContext) => {
       inflight ??= (async () => {
         try {
-          const stored = await context.store.read()
+          const stored = (await context.store.read()) as StoredEntry | undefined
           if (stored) {
             dynamicModels = toModels(provider.id, stored.models)
-            publish(parseMeta((stored as { meta?: unknown }).meta))
+            publish(parseMeta(stored.meta))
           }
           if (!context.allowNetwork || context.signal?.aborted) return
           if (
@@ -162,14 +177,16 @@ export const withCachedCatalog = (
           // (refreshModels runs at boot and on a 4 h interval, never per
           // request) that skipping the write costs a genuinely-empty provider.
           if (parsed.models.length === 0) {
-            console.error(
-              `[cached-catalog] "${provider.id}" returned a 200 with no parseable models; not persisting an empty catalog`
-            )
+            if (opts.warnOnEmpty !== false) {
+              console.error(
+                `[cached-catalog] "${provider.id}" returned a 200 with no parseable models; not persisting an empty catalog`
+              )
+            }
             return
           }
           dynamicModels = parsed.models
           if (parsed.meta) publish(parsed.meta)
-          const entry = {
+          const entry: StoredEntry = {
             models: dynamicModels,
             ...(parsed.meta ? { meta: Object.fromEntries(parsed.meta) } : {}),
             checkedAt: now()
@@ -204,7 +221,7 @@ export const withRemoteCatalog = (
       headers: { accept: 'application/json' },
       parse: (payload) => ({ models: parseCatalog(provider.id, payload) })
     },
-    opts
+    { warnOnEmpty: false, ...opts }
   )
 
 // Populate an openai-compatible provider's catalog from its own GET /models.

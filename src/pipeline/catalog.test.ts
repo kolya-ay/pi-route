@@ -24,7 +24,7 @@ const loggedInDir = (o: RouterOptions): string => {
 }
 
 // Build the catalog against a real Models over the same options.
-const build = (o: RouterOptions) => buildCatalog(o, buildTestModels(o), loggedInDir(o))
+const build = (o: RouterOptions) => buildCatalog(o, buildTestModels(o), loggedInDir(o), new Map())
 
 describe('buildCatalog', () => {
   test('adds catalog addresses for known provider types', () => {
@@ -157,9 +157,9 @@ describe('availability filtering', () => {
       expose: []
     }
     const models = buildTestModels(o)
-    expect([...buildCatalog(o, models, dir).addresses]).toEqual([])
+    expect([...buildCatalog(o, models, dir, new Map()).addresses]).toEqual([])
     writeFileSync(join(dir, 'anthropic-cc.json'), '{}')
-    expect([...buildCatalog(o, models, dir).addresses].length).toBeGreaterThan(0)
+    expect([...buildCatalog(o, models, dir, new Map()).addresses].length).toBeGreaterThan(0)
   })
 
   test('drops literal pipeline targets of unavailable providers', () => {
@@ -171,7 +171,7 @@ describe('availability filtering', () => {
       pipeline: [{ kind: 'alias', name: 'slow', target: 'cc/claude-opus-4-8' }],
       expose: []
     }
-    const catalog = buildCatalog(o, buildTestModels(o), dir)
+    const catalog = buildCatalog(o, buildTestModels(o), dir, new Map())
     expect(catalog.addresses.has('cc/claude-opus-4-8')).toBe(false)
     expect(catalog.addresses.has('slow')).toBe(false)
   })
@@ -183,7 +183,7 @@ describe('availability filtering', () => {
       pipeline: [{ kind: 'alias', name: 'slow', target: 'ag/gemini-3.1-pro' }],
       expose: []
     }
-    const catalog = buildCatalog(o, buildTestModels(o), dir)
+    const catalog = buildCatalog(o, buildTestModels(o), dir, new Map())
     expect(catalog.addresses.has('ag/gemini-3.1-pro')).toBe(false)
     expect(catalog.addresses.has('slow')).toBe(false)
   })
@@ -207,7 +207,7 @@ describe('availability filtering', () => {
       ],
       expose: []
     }
-    const catalog = buildCatalog(o, buildTestModels(o), dir)
+    const catalog = buildCatalog(o, buildTestModels(o), dir, new Map())
     expect(catalog.addresses.has('default')).toBe(true)
     expect(catalog.leafFor.get('default')).toBe('cc/claude-opus-4-8')
     expect(catalog.addresses.has('gone/claude-opus-4-8')).toBe(false)
@@ -231,10 +231,10 @@ describe('availability filtering', () => {
       ],
       expose: []
     }
-    expect([...buildCatalog(o, buildTestModels(o), dir).addresses]).toEqual([])
+    expect([...buildCatalog(o, buildTestModels(o), dir, new Map()).addresses]).toEqual([])
     // Control: the same chain is fully addressable once cc has a credential.
     writeFileSync(join(dir, 'anthropic-cc.json'), '{}')
-    const live = buildCatalog(o, buildTestModels(o), dir)
+    const live = buildCatalog(o, buildTestModels(o), dir, new Map())
     expect(live.addresses.has('workhorse')).toBe(true)
     expect(live.addresses.has('big')).toBe(true)
   })
@@ -249,7 +249,7 @@ describe('availability filtering', () => {
       ],
       expose: []
     }
-    const catalog = buildCatalog(o, buildTestModels(o), dir)
+    const catalog = buildCatalog(o, buildTestModels(o), dir, new Map())
     expect([...catalog.addresses]).toEqual([])
   })
 
@@ -271,7 +271,7 @@ describe('availability filtering', () => {
       ],
       expose: []
     }
-    const catalog = buildCatalog(o, buildTestModels(o), dir)
+    const catalog = buildCatalog(o, buildTestModels(o), dir, new Map())
     expect(catalog.addresses.has('default')).toBe(false)
   })
 })

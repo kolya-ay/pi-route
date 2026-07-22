@@ -304,13 +304,7 @@ type ModelsOpts = {
   json?: boolean
 }
 
-// Defaults to an offline restore of the persisted overlays, which every
-// listing/install path needs for accurate metadata. `liveMeta` is the same
-// caller-owned sink app.ts uses: the catalog wrapper writes each provider's
-// lossless parse into it during the restore, and the catalog built from these
-// models must read it — otherwise a price the endpoint never stated shows as $0.
-// The catalog is built here, once, so no downstream helper can forget the map.
-const modelsAndOptions = async (
+const loadModels = async (
   env: EnvConfig,
   refresh: ModelsRefreshOptions = { allowNetwork: false }
 ) => {
@@ -322,6 +316,20 @@ const modelsAndOptions = async (
     liveMeta
   })
   await models.refresh(refresh)
+  return { routerOptions, models, liveMeta }
+}
+
+// Defaults to an offline restore of the persisted overlays, which every
+// listing/install path needs for accurate metadata. `liveMeta` is the same
+// caller-owned sink app.ts uses: the catalog wrapper writes each provider's
+// lossless parse into it during the restore, and the catalog built from these
+// models must read it — otherwise a price the endpoint never stated shows as $0.
+// The catalog is built here, once, so no downstream helper can forget the map.
+const modelsAndOptions = async (
+  env: EnvConfig,
+  refresh: ModelsRefreshOptions = { allowNetwork: false }
+) => {
+  const { routerOptions, models, liveMeta } = await loadModels(env, refresh)
   return {
     routerOptions,
     models,
@@ -374,9 +382,9 @@ const installModels = async (
 }
 
 const refreshModels = async (env: EnvConfig): Promise<void> => {
-  // Force a network fetch and persist; a running server picks the stores up
-  // at its next 4h cycle or on restart.
-  const { routerOptions, models } = await modelsAndOptions(env, { force: true })
+  // Force a network fetch and persist; a running server picks the stores up at its
+  // next 4h cycle or on restart. No catalog is built — this verb only counts models.
+  const { routerOptions, models } = await loadModels(env, { force: true })
   for (const name of Object.keys(routerOptions.providers)) {
     console.log(`${name}: ${models.getModels(name).length}`)
   }

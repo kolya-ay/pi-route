@@ -29,7 +29,7 @@ const mkApp = (
   registry: Map<string, ProviderEntry>,
   authDir = '/tmp'
 ): Hono<Env> => {
-  const catalog = buildCatalog(options, stubModels, authDir)
+  const catalog = buildCatalog(options, stubModels, authDir, new Map())
   const state = createState(options, catalog, stubModels, { accounts: {} }, authDir)
   const tel = createTel()
   const app = new Hono<Env>()

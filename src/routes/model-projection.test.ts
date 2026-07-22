@@ -22,7 +22,7 @@ const opts = (over: Partial<RouterOptions> = {}): RouterOptions => ({
 
 const firstKnown = (o: RouterOptions) => {
   const models = buildTestModels(o)
-  const cat = buildCatalog(o, models, '/tmp')
+  const cat = buildCatalog(o, models, '/tmp', new Map())
   for (const a of [...cat.addresses].sort()) {
     const r = resolveModel(o, cat, models, a)
     if (r.model) return r
@@ -42,7 +42,7 @@ describe('resolveModel', () => {
   test('unknown provider → null model, keeps id/owned_by', () => {
     const o = opts({ providers: {} })
     const models = buildTestModels(o)
-    const r = resolveModel(o, buildCatalog(o, models, '/tmp'), models, 'ghost/model-x')
+    const r = resolveModel(o, buildCatalog(o, models, '/tmp', new Map()), models, 'ghost/model-x')
     expect(r).toEqual({ id: 'ghost/model-x', owned_by: 'ghost', provider: 'ghost', model: null })
   })
   test('known cerebras leaf resolves a Model', () => {
@@ -68,7 +68,7 @@ describe('displayName (provider-prefixed)', () => {
       expose: ['solo']
     })
     const models = buildTestModels(o)
-    const r = resolveModel(o, buildCatalog(o, models, '/tmp'), models, 'solo')
+    const r = resolveModel(o, buildCatalog(o, models, '/tmp', new Map()), models, 'solo')
     expect(r.owned_by).toBe('solo') // address-based
     expect(r.provider).toBe('cerebras') // leaf/backend-based
     if (r.model) expect(toOpenAIModel(r).name?.startsWith('Cerebras/')).toBe(true)
