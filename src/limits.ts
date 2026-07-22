@@ -1,4 +1,6 @@
 import { decodeJwt } from './auth/jwt'
+import type { FetchFn } from './models/fetch-timeout'
+import { deadlined } from './models/fetch-timeout'
 import type { RouterState } from './state'
 import type { Account, ProviderConfig } from './types'
 
@@ -234,9 +236,12 @@ const anthropicHeaders = (token: string): Record<string, string> => ({
   'User-Agent': 'claude-code/2.1.69'
 })
 
-const anthropicProfile = async (token: string): Promise<Record<string, unknown> | null> => {
+const anthropicProfile = async (
+  token: string,
+  fetchFn: FetchFn
+): Promise<Record<string, unknown> | null> => {
   try {
-    const response = await fetch('https://api.anthropic.com/api/oauth/profile', {
+    const response = await fetchFn('https://api.anthropic.com/api/oauth/profile', {
       headers: anthropicHeaders(token)
     })
     return response.ok ? await parseJson(response) : null
@@ -248,7 +253,8 @@ const anthropicProfile = async (token: string): Promise<Record<string, unknown> 
 const collectAnthropicLimits = async (
   name: string,
   account: Account,
-  state: RouterState
+  state: RouterState,
+  fetchFn: FetchFn
 ): Promise<ProviderLimitSnapshot> => {
   if (account.credential !== 'oauth') {
     return stub(name, 'anthropic', 'unauthenticated', 'OAuth login required for Claude Code usage.')
@@ -261,8 +267,8 @@ const collectAnthropicLimits = async (
   }
 
   const [response, profile] = await Promise.all([
-    fetch('https://api.anthropic.com/api/oauth/usage', { headers: anthropicHeaders(token) }),
-    anthropicProfile(token)
+    fetchFn('https://api.anthropic.com/api/oauth/usage', { headers: anthropicHeaders(token) }),
+    anthropicProfile(token, fetchFn)
   ])
 
   if (response.status === 401 || response.status === 403) {
@@ -303,7 +309,8 @@ const collectAnthropicLimits = async (
 const collectCodexLimits = async (
   name: string,
   account: Account,
-  state: RouterState
+  state: RouterState,
+  fetchFn: FetchFn
 ): Promise<ProviderLimitSnapshot> => {
   if (account.credential !== 'oauth') {
     return stub(name, 'openai-codex', 'unauthenticated', 'OAuth login required for Codex usage.')
@@ -323,7 +330,7 @@ const collectCodexLimits = async (
   const accountId = codexAccountId(token)
   if (accountId) headers['ChatGPT-Account-Id'] = accountId
 
-  const response = await fetch('https://chatgpt.com/backend-api/wham/usage', { headers })
+  const response = await fetchFn('https://chatgpt.com/backend-api/wham/usage', { headers })
   if (response.status === 401 || response.status === 403) {
     return stub(name, 'openai-codex', 'error', 'Re-authenticate in the Codex CLI.')
   }
@@ -387,23 +394,27 @@ const isLimitsProvider = (type: ProviderConfig['type']): type is 'anthropic' | '
 const collectProviderLimits = async (
   name: string,
   config: ProviderConfig,
-  state: RouterState
+  state: RouterState,
+  fetchFn: FetchFn
 ): Promise<ProviderLimitSnapshot | null> => {
   if (!isLimitsProvider(config.type)) return null
 
   try {
     return config.type === 'anthropic'
-      ? await collectAnthropicLimits(name, config.account, state)
-      : await collectCodexLimits(name, config.account, state)
+      ? await collectAnthropicLimits(name, config.account, state, fetchFn)
+      : await collectCodexLimits(name, config.account, state, fetchFn)
   } catch {
     return stub(name, config.type, 'error', 'Usage request failed.')
   }
 }
 
-export const collectLimitsSnapshot = async (state: RouterState): Promise<LimitsSnapshot> => {
+export const collectLimitsSnapshot = async (
+  state: RouterState,
+  fetchFn: FetchFn = deadlined(globalThis.fetch)
+): Promise<LimitsSnapshot> => {
   const providers = await Promise.all(
     Object.entries(state.options.providers).map(([name, config]) =>
-      collectProviderLimits(name, config, state)
+      collectProviderLimits(name, config, state, fetchFn)
     )
   )
 

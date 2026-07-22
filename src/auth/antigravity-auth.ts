@@ -277,9 +277,13 @@ const login =
     try {
       const code = await codePromise
       interaction.notify({ type: 'progress', message: 'Exchanging auth code for tokens...' })
-      const credentials = await exchangeCode(code, fetchFn)
+      // Bind the caller's cancellation once, at the seam — deadlined() already
+      // composes this with its timeout, so every fetch below is bounded by both.
+      const signalled: FetchFn = (url, init) =>
+        fetchFn(url, { ...init, ...(interaction.signal ? { signal: interaction.signal } : {}) })
+      const credentials = await exchangeCode(code, signalled)
       interaction.notify({ type: 'progress', message: 'Discovering Cloud Code project...' })
-      const projectId = await discoverProject(credentials.access, fetchFn, (message) =>
+      const projectId = await discoverProject(credentials.access, signalled, (message) =>
         interaction.notify({ type: 'progress', message })
       )
       return { type: 'oauth', ...credentials, projectId }

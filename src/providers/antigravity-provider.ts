@@ -505,12 +505,16 @@ export const streamAntigravity = (
 
 // --- Provider ---
 
-export const antigravityProvider = (id: string, fetchFn: FetchFn = deadlined(fetch)): Provider =>
-  createProvider({
+export const antigravityProvider = (id: string, rawFetch: FetchFn = fetch): Provider => {
+  // One deadline seam for the provider's own fetches (discovery + streaming). The
+  // oauth surface applies its own single deadline, so it receives the RAW fetch —
+  // passing the already-wrapped one would nest two deadlines.
+  const fetchFn = deadlined(rawFetch)
+  return createProvider({
     id,
     name: id,
     baseUrl: PRIMARY_ENDPOINT,
-    auth: { oauth: antigravityOAuth({ fetchFn }) },
+    auth: { oauth: antigravityOAuth({ fetchFn: rawFetch }) },
     models: [],
     fetchModels: async (context: RefreshModelsContext) => {
       const token = context.credential?.type === 'oauth' ? context.credential.access : undefined
@@ -543,3 +547,4 @@ export const antigravityProvider = (id: string, fetchFn: FetchFn = deadlined(fet
       streamSimple: (model, context, options) => streamAntigravity(fetchFn, model, context, options)
     }
   })
+}

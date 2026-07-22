@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test'
 import type { MutableModels } from '@earendil-works/pi-ai'
 import { collectLimitsSnapshot, planFromTier } from './limits'
+import { deadlined } from './models/fetch-timeout'
 import { createState } from './state'
 import type { RouterOptions } from './types'
 
@@ -835,5 +836,49 @@ describe('collectLimitsSnapshot', () => {
 
     const snapshot = await collectLimitsSnapshot(state)
     expect(snapshot.providers[0]?.account).toBe(null)
+  })
+
+  it('bounds the usage fetches with an abort signal', async () => {
+    const seen: (AbortSignal | undefined)[] = []
+    const spyFetch = (async (_url: string, init?: RequestInit) => {
+      seen.push(init?.signal ?? undefined)
+      return Response.json({ five_hour: { utilization: 1, resets_at: null } })
+    }) as typeof fetch
+
+    const state = mkState(
+      {
+        providers: {
+          claude: { type: 'anthropic', account: { credential: 'oauth', name: 'anthropic-main' } }
+        },
+        pipeline: [],
+        expose: []
+      } as unknown as RouterOptions,
+      { claude: 'tok' }
+    )
+    await collectLimitsSnapshot(state, deadlined(spyFetch))
+    expect(seen.length).toBeGreaterThan(0)
+    expect(seen.every((s) => s instanceof AbortSignal)).toBe(true)
+  })
+
+  it('bounds via the DEFAULT fetchFn too (guards the default seam, not just injection)', async () => {
+    const seen: (AbortSignal | undefined)[] = []
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      seen.push(init?.signal ?? undefined)
+      return Response.json({ five_hour: { utilization: 1, resets_at: null } })
+    }) as typeof fetch
+
+    const state = mkState(
+      {
+        providers: {
+          claude: { type: 'anthropic', account: { credential: 'oauth', name: 'anthropic-main' } }
+        },
+        pipeline: [],
+        expose: []
+      } as unknown as RouterOptions,
+      { claude: 'tok' }
+    )
+    await collectLimitsSnapshot(state) // DEFAULT fetchFn — no injection; must still be deadlined
+    expect(seen.length).toBeGreaterThan(0)
+    expect(seen.every((s) => s instanceof AbortSignal)).toBe(true)
   })
 })

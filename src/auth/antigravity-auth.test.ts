@@ -2,6 +2,9 @@
 
 import { describe, expect, it, mock, test } from 'bun:test'
 
+import type { AuthInteraction } from '@earendil-works/pi-ai'
+
+import type { FetchFn } from '../models/fetch-timeout'
 import { deadlined } from '../models/fetch-timeout'
 
 import {
@@ -106,6 +109,31 @@ describe('exchangeCode', () => {
   it('throws on error response', async () => {
     const mockFetch = mock(async () => Response.json({ error: 'invalid_grant' }, { status: 400 }))
     await expect(exchangeCode('bad', mockFetch)).rejects.toThrow('invalid_grant')
+  })
+
+  it('login forwards the interaction signal to its fetches (bound at the seam)', async () => {
+    const seen: (AbortSignal | undefined)[] = []
+    const fetchFn = (async (_url: string, init?: RequestInit) => {
+      seen.push(init?.signal ?? undefined)
+      return Response.json({
+        access_token: 'a',
+        refresh_token: 'r',
+        expires_in: 3600,
+        cloudaicompanionProject: 'proj-1'
+      })
+    }) as unknown as FetchFn
+    const controller = new AbortController()
+    const interaction = {
+      signal: controller.signal,
+      notify: () => {},
+      prompt: async () => 'the-code'
+    } as unknown as AuthInteraction
+    const cred = await antigravityOAuth({ fetchFn }).login(interaction)
+    expect(cred.projectId).toBe('proj-1')
+    // deadlined() composes interaction.signal with its timeout, so the actual fetch
+    // receives a (derived) AbortSignal — proof the seam forwarded cancellation.
+    expect(seen.length).toBeGreaterThan(0)
+    expect(seen.every((s) => s instanceof AbortSignal)).toBe(true)
   })
 })
 
@@ -252,6 +280,16 @@ describe('antigravityOAuth', () => {
     expect(typeof auth.login).toBe('function')
     expect(typeof auth.refresh).toBe('function')
     expect(typeof auth.toAuth).toBe('function')
+  })
+
+  it('deadlines the oauth surface (refresh aborts a hung fetch)', async () => {
+    const seen: AbortSignal[] = []
+    const oauth = antigravityOAuth({ fetchFn: hangingFetch(seen), timeoutMs: 20 })
+    const err = await catchError(
+      oauth.refresh({ type: 'oauth', access: 'a', refresh: 'r', expires: 0, projectId: 'p' })
+    )
+    expect(err).toBeInstanceOf(Error)
+    expect(seen[0]).toBeInstanceOf(AbortSignal)
   })
 })
 
