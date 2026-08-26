@@ -19,7 +19,6 @@ type StoredEntry = ModelsStoreEntry & { meta?: Record<string, ModelMeta> }
 const CATALOG_BASE_URL = 'https://pi.dev'
 
 export type CachedCatalogOpts = {
-  now?: () => number
   fetcher?: FetchFn
   timeoutMs?: number
   // Address-keyed sink for the lossless parse. Injected rather than held in
@@ -37,8 +36,8 @@ export type RemoteCatalogOpts = CachedCatalogOpts & { baseUrl?: string }
 
 export type EndpointCatalogOpts = CachedCatalogOpts & { apiKey?: string }
 
-// Where a catalog comes from and how to read it. Everything else — the cache,
-// the freshness window, the single-flight latch, the deadline — is shared.
+// Where a catalog comes from and how to read it. Everything else — the cache and
+// the deadline — is shared; single-flight and freshness gating are pi-ai's.
 // `meta` is the lossless parse the models were derived from, kept alongside them
 // where the source has one; pi.dev does not.
 type CatalogSource = {
@@ -178,6 +177,8 @@ export const withCachedCatalog = (
         const entry: StoredEntry = {
           models: parsed.models,
           ...(parsed.meta ? { meta: Object.fromEntries(parsed.meta) } : {}),
+          // Diagnostic only: pi-ai owns freshness/gating now, so nothing reads
+          // this back — it just records when the last good fetch landed.
           checkedAt: Date.now()
         }
         await context.publish({

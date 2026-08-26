@@ -11,7 +11,7 @@ import { withEndpointCatalog, withRemoteCatalog } from './cached-catalog'
 const makeCtx = async (
   store: InMemoryModelsStore,
   id: string,
-  over: { allowNetwork?: boolean; force?: boolean; signal?: AbortSignal } = {}
+  over: { allowNetwork?: boolean; signal?: AbortSignal } = {}
 ): Promise<RefreshModelsContext> => {
   const stored = await store.read(id)
   return {
@@ -23,7 +23,6 @@ const makeCtx = async (
       return true
     },
     allowNetwork: over.allowNetwork ?? true,
-    ...(over.force !== undefined ? { force: over.force } : {}),
     signal: over.signal ?? new AbortController().signal
   }
 }

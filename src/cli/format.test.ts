@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import {
   colorizeDiff,
   costPair,
@@ -8,6 +8,21 @@ import {
   renderTable,
   untilShort
 } from './format'
+
+// These tests assert color-free output. The color gate honors FORCE_COLOR, which
+// is commonly exported in an interactive shell, so neutralize the ambient color
+// env for the whole file rather than depending on the runner's terminal.
+const { FORCE_COLOR, NO_COLOR } = process.env
+beforeAll(() => {
+  delete process.env.FORCE_COLOR
+  process.env.NO_COLOR = '1'
+})
+afterAll(() => {
+  if (FORCE_COLOR === undefined) delete process.env.FORCE_COLOR
+  else process.env.FORCE_COLOR = FORCE_COLOR
+  if (NO_COLOR === undefined) delete process.env.NO_COLOR
+  else process.env.NO_COLOR = NO_COLOR
+})
 
 describe('humanCount', () => {
   test('humanizes thousands and millions, dash for missing', () => {

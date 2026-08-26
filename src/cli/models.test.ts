@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import type { Api, Model, Models } from '@earendil-works/pi-ai'
 import { buildCatalog, type ModelMeta } from '../pipeline/catalog'
 import { toModelMeta } from '../pipeline/metadata'
@@ -11,6 +11,22 @@ import {
   renderModelList,
   renderPlannedWrites
 } from './models'
+
+// Most assertions here match plain (uncolored) substrings and layout. The color
+// gate honors FORCE_COLOR, which is commonly exported in an interactive shell, so
+// neutralize the ambient color env for the whole file. The one test that needs
+// color still toggles FORCE_COLOR itself within its own try/finally.
+const AMBIENT_COLOR = { FORCE_COLOR: process.env.FORCE_COLOR, NO_COLOR: process.env.NO_COLOR }
+beforeAll(() => {
+  delete process.env.FORCE_COLOR
+  process.env.NO_COLOR = '1'
+})
+afterAll(() => {
+  if (AMBIENT_COLOR.FORCE_COLOR === undefined) delete process.env.FORCE_COLOR
+  else process.env.FORCE_COLOR = AMBIENT_COLOR.FORCE_COLOR
+  if (AMBIENT_COLOR.NO_COLOR === undefined) delete process.env.NO_COLOR
+  else process.env.NO_COLOR = AMBIENT_COLOR.NO_COLOR
+})
 
 describe('completeness', () => {
   const full: ModelMeta = { name: 'X', contextWindow: 1000, maxTokens: 100, cost: { input: 1 } }

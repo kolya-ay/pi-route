@@ -11,7 +11,14 @@ const CLI = join(import.meta.dir, 'cli.ts')
 const run = async (
   args: string[]
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
-  const proc = Bun.spawn(['bun', CLI, ...args], { stdout: 'pipe', stderr: 'pipe' })
+  // The color gate honors an inherited FORCE_COLOR; force color OFF for the
+  // spawned CLI so --dry diff/table output is plain regardless of the caller's
+  // shell (an interactive shell commonly exports FORCE_COLOR).
+  const proc = Bun.spawn(['bun', CLI, ...args], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: { ...process.env, FORCE_COLOR: undefined, NO_COLOR: '1' }
+  })
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text()
