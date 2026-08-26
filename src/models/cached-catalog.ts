@@ -17,7 +17,6 @@ import { deadlined } from './fetch-timeout'
 type StoredEntry = ModelsStoreEntry & { meta?: Record<string, ModelMeta> }
 
 const CATALOG_BASE_URL = 'https://pi.dev'
-export const REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1000
 
 export type CachedCatalogOpts = {
   now?: () => number
@@ -130,12 +129,10 @@ export const withCachedCatalog = (
   source: CatalogSource,
   opts: CachedCatalogOpts = {}
 ): Provider => {
-  const now = opts.now ?? Date.now
   const fetcher = deadlined(opts.fetcher ?? fetch, opts.timeoutMs)
   let dynamicModels: readonly Model<Api>[] = []
-  let inflight: Promise<void> | undefined
 
-  const publish = (meta: Map<string, ModelMeta>): void => {
+  const publishMeta = (meta: Map<string, ModelMeta>): void => {
     if (!opts.liveMeta) return
     for (const [id, m] of meta) opts.liveMeta.set(`${provider.id}/${id}`, m)
   }
@@ -143,62 +140,56 @@ export const withCachedCatalog = (
   return {
     ...provider,
     getModels: () => mergeModels(provider.getModels(), dynamicModels),
-    refreshModels: (context: RefreshModelsContext) => {
-      inflight ??= (async () => {
-        try {
-          const stored = (await context.store.read()) as StoredEntry | undefined
-          if (stored) {
-            dynamicModels = toModels(provider.id, stored.models)
-            publish(parseMeta(stored.meta))
-          }
-          if (!context.allowNetwork || context.signal?.aborted) return
-          if (
-            !context.force &&
-            stored?.checkedAt !== undefined &&
-            now() - stored.checkedAt < REFRESH_INTERVAL_MS
-          ) {
-            return
-          }
-          const response = await fetcher(source.url, {
-            headers: source.headers,
-            ...(context.signal ? { signal: context.signal } : {})
-          })
-          if (!response.ok) throw new Error(`${source.url} → ${response.status}`)
-          const payload = await response.json()
-          if (context.signal?.aborted) return
-          const parsed = source.parse(payload)
-          // A 200 with the wrong shape (e.g. a rate-limit error body, or a
-          // differently-shaped model list) parses to zero entries same as an
-          // actually-empty catalog, and the two are indistinguishable here.
-          // Persisting either as {models: [], checkedAt: now} would pass the
-          // freshness check on every restart within REFRESH_INTERVAL_MS, hiding
-          // the provider for the whole window with no way back short of
-          // `pi-route models refresh` — worse than the one extra GET per boot
-          // (refreshModels runs at boot and on a 4 h interval, never per
-          // request) that skipping the write costs a genuinely-empty provider.
-          if (parsed.models.length === 0) {
-            if (opts.warnOnEmpty !== false) {
-              console.error(
-                `[cached-catalog] "${provider.id}" returned a 200 with no parseable models; not persisting an empty catalog`
-              )
-            }
-            return
-          }
-          dynamicModels = parsed.models
-          if (parsed.meta) publish(parsed.meta)
-          const entry: StoredEntry = {
-            models: dynamicModels,
-            ...(parsed.meta ? { meta: Object.fromEntries(parsed.meta) } : {}),
-            checkedAt: now()
-          }
-          await context.store.write(entry)
-        } catch (err) {
-          console.error(`[cached-catalog] refresh failed for "${provider.id}": ${String(err)}`)
-        } finally {
-          inflight = undefined
+    // Single-flight, generation gating, and store I/O are pi-ai's: it reads the
+    // snapshot into `context.stored`, runs a `publish({persist,update})` that
+    // writes the store then applies `update()` only if the refresh is still
+    // current, and drives the offline-restore then online phases. This wrapper
+    // owns only the merge, the lossless-meta sink, and the empty-parse guard.
+    refreshModels: async (context: RefreshModelsContext) => {
+      try {
+        const stored = context.stored as StoredEntry | undefined
+        if (stored) {
+          dynamicModels = toModels(provider.id, stored.models)
+          publishMeta(parseMeta(stored.meta))
         }
-      })()
-      return inflight
+        if (!context.allowNetwork || context.signal.aborted) return
+        const response = await fetcher(source.url, {
+          headers: source.headers,
+          signal: context.signal
+        })
+        if (!response.ok) throw new Error(`${source.url} → ${response.status}`)
+        const payload = await response.json()
+        if (context.signal.aborted) return
+        const parsed = source.parse(payload)
+        // A 200 with the wrong shape (e.g. a rate-limit error body, or a
+        // differently-shaped model list) parses to zero entries same as an
+        // actually-empty catalog, and the two are indistinguishable here.
+        // Persisting {models: []} would hide the provider until the next
+        // successful fetch, so skip the publish rather than overwrite a good
+        // catalog (or seed an empty one) from a mis-shaped response.
+        if (parsed.models.length === 0) {
+          if (opts.warnOnEmpty !== false) {
+            console.error(
+              `[cached-catalog] "${provider.id}" returned a 200 with no parseable models; not persisting an empty catalog`
+            )
+          }
+          return
+        }
+        const entry: StoredEntry = {
+          models: parsed.models,
+          ...(parsed.meta ? { meta: Object.fromEntries(parsed.meta) } : {}),
+          checkedAt: Date.now()
+        }
+        await context.publish({
+          persist: entry,
+          update: () => {
+            dynamicModels = parsed.models
+            if (parsed.meta) publishMeta(parsed.meta)
+          }
+        })
+      } catch (err) {
+        console.error(`[cached-catalog] refresh failed for "${provider.id}": ${String(err)}`)
+      }
     }
   }
 }

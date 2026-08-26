@@ -1,14 +1,32 @@
 import { describe, expect, test } from 'bun:test'
-import type { Provider } from '@earendil-works/pi-ai'
+import type { Provider, RefreshModelsContext } from '@earendil-works/pi-ai'
 import { InMemoryModelsStore } from '@earendil-works/pi-ai'
 import type { ModelMeta } from '../pipeline/catalog'
 import { withEndpointCatalog, withRemoteCatalog } from './cached-catalog'
 
-const providerStore = (store: InMemoryModelsStore, id: string) => ({
-  read: () => store.read(id),
-  write: (e: Parameters<InMemoryModelsStore['write']>[1]) => store.write(id, e),
-  delete: () => store.delete(id)
-})
+// Mirror what pi-ai's refresh loop builds for a provider: read the snapshot into
+// `stored`, back `publish` with the same InMemoryModelsStore (so store.read/write
+// assertions still hold), run `update()` after persisting, and always supply a
+// non-aborted signal.
+const makeCtx = async (
+  store: InMemoryModelsStore,
+  id: string,
+  over: { allowNetwork?: boolean; force?: boolean; signal?: AbortSignal } = {}
+): Promise<RefreshModelsContext> => {
+  const stored = await store.read(id)
+  return {
+    ...(stored ? { stored } : {}),
+    publish: async (pub) => {
+      if (pub.persist === null) await store.delete(id)
+      else if (pub.persist !== undefined) await store.write(id, pub.persist)
+      pub.update?.()
+      return true
+    },
+    allowNetwork: over.allowNetwork ?? true,
+    ...(over.force !== undefined ? { force: over.force } : {}),
+    signal: over.signal ?? new AbortController().signal
+  }
+}
 
 const baseModel = (id: string, provider = 'cc') => ({
   id,
@@ -44,56 +62,34 @@ describe('withRemoteCatalog', () => {
     const store = storeFor()
     const fetched = { models: [{ ...baseModel('new-model', 'anthropic') }] }
     const wrapped = withRemoteCatalog(staticProvider(), 'anthropic', {
-      now: () => 1000,
       fetcher: async () => new Response(JSON.stringify(fetched))
     })
-    await wrapped.refreshModels?.({
-      store: providerStore(store, 'cc'),
-      allowNetwork: true
-    })
+    await wrapped.refreshModels?.(await makeCtx(store, 'cc', { allowNetwork: true }))
     const ids = wrapped
       .getModels()
       .map((m) => m.id)
       .sort()
     expect(ids).toEqual(['new-model', 'old-model'])
     expect(wrapped.getModels().every((m) => m.provider === 'cc')).toBe(true)
-    expect((await store.read('cc'))?.checkedAt).toBe(1000)
-  })
-
-  test('within freshness window: restores from store, skips network', async () => {
-    const store = storeFor()
-    await store.write('cc', { models: [baseModel('stored-model')], checkedAt: 1000 })
-    let calls = 0
-    const wrapped = withRemoteCatalog(staticProvider(), 'anthropic', {
-      now: () => 1000 + 60_000,
-      fetcher: async () => {
-        calls += 1
-        return new Response('{}')
-      }
-    })
-    await wrapped.refreshModels?.({ store: providerStore(store, 'cc'), allowNetwork: true })
-    expect(calls).toBe(0)
-    expect(wrapped.getModels().map((m) => m.id)).toContain('stored-model')
+    expect((await store.read('cc'))?.models.map((m) => m.id)).toEqual(['new-model'])
   })
 
   test('fetch failure keeps previous list', async () => {
     const store = storeFor()
     await store.write('cc', { models: [baseModel('stored-model')], checkedAt: 0 })
     const wrapped = withRemoteCatalog(staticProvider(), 'anthropic', {
-      now: () => 999_999_999,
       fetcher: async () => new Response('boom', { status: 500 })
     })
-    await wrapped.refreshModels?.({ store: providerStore(store, 'cc'), allowNetwork: true })
+    await wrapped.refreshModels?.(await makeCtx(store, 'cc', { allowNetwork: true }))
     expect(wrapped.getModels().map((m) => m.id)).toContain('stored-model')
   })
 
   test('a wrong-shape 200 does not persist an empty catalog', async () => {
     const store = storeFor()
     const wrapped = withRemoteCatalog(staticProvider(), 'anthropic', {
-      now: () => 1000,
       fetcher: async () => new Response(JSON.stringify({ error: 'rate limited' }))
     })
-    await wrapped.refreshModels?.({ store: providerStore(store, 'cc'), allowNetwork: true })
+    await wrapped.refreshModels?.(await makeCtx(store, 'cc', { allowNetwork: true }))
     expect(wrapped.getModels().map((m) => m.id)).toEqual(['old-model'])
     expect(await store.read('cc')).toBeUndefined()
   })
@@ -105,10 +101,9 @@ describe('withRemoteCatalog', () => {
       checkedAt: 1000
     } as unknown as Parameters<InMemoryModelsStore['write']>[1])
     const wrapped = withRemoteCatalog(staticProvider(), 'anthropic', {
-      now: () => 1000,
       fetcher: async () => new Response('{}')
     })
-    await wrapped.refreshModels?.({ store: providerStore(store, 'cc'), allowNetwork: true })
+    await wrapped.refreshModels?.(await makeCtx(store, 'cc', { allowNetwork: true }))
     expect(wrapped.getModels().map((m) => m.id)).toEqual(['old-model'])
   })
 
@@ -130,10 +125,7 @@ describe('withRemoteCatalog', () => {
         })
       }
     })
-    await wrapped.refreshModels?.({
-      store: providerStore(store, 'cc'),
-      allowNetwork: true
-    })
+    await wrapped.refreshModels?.(await makeCtx(store, 'cc', { allowNetwork: true }))
     expect(seenSignal?.aborted).toBe(true)
     // No caller signal to compose with, so the bare deadline is what fired.
     expect((seenSignal?.reason as Error | undefined)?.name).toBe('TimeoutError')
@@ -149,30 +141,13 @@ describe('withRemoteCatalog', () => {
     }
     try {
       const wrapped = withRemoteCatalog(staticProvider(), 'cc', {
-        now: () => 1e9,
         fetcher: async () => new Response(JSON.stringify({ models: [] }))
       })
-      await wrapped.refreshModels?.({ store: providerStore(store, 'cc'), allowNetwork: true })
+      await wrapped.refreshModels?.(await makeCtx(store, 'cc', { allowNetwork: true }))
     } finally {
       console.error = originalError
     }
     expect(errors.some((e) => e.includes('no parseable models'))).toBe(false)
-  })
-
-  test('concurrent refreshes share one in-flight fetch', async () => {
-    const store = storeFor()
-    let calls = 0
-    const wrapped = withRemoteCatalog(staticProvider(), 'cc', {
-      now: () => 1e9, // past any freshness window; empty store forces a fetch
-      fetcher: async () => {
-        calls++
-        await new Promise((r) => setTimeout(r, 10))
-        return new Response(JSON.stringify([{ id: 'm1' }]))
-      }
-    })
-    const ctx = { store: providerStore(store, 'cc'), allowNetwork: true }
-    await Promise.all([wrapped.refreshModels?.(ctx), wrapped.refreshModels?.(ctx)])
-    expect(calls).toBe(1)
   })
 })
 
@@ -204,10 +179,9 @@ describe('withEndpointCatalog', () => {
   test('fetched ids become models, with 0 marking limits the endpoint omitted', async () => {
     const store = new InMemoryModelsStore()
     const wrapped = withEndpointCatalog(fakeProvider(), {
-      now: () => 1000,
       fetcher: async () => new Response(JSON.stringify(bareList))
     })
-    await wrapped.refreshModels?.({ store: providerStore(store, 'nvidia'), allowNetwork: true })
+    await wrapped.refreshModels?.(await makeCtx(store, 'nvidia', { allowNetwork: true }))
 
     const models = wrapped.getModels()
     expect(models.map((m) => m.id).sort()).toEqual([
@@ -217,16 +191,15 @@ describe('withEndpointCatalog', () => {
     expect(models.every((m) => m.provider === 'nvidia')).toBe(true)
     expect(models[0]?.contextWindow).toBe(0)
     expect(models[0]?.maxTokens).toBe(0)
-    expect((await store.read('nvidia'))?.checkedAt).toBe(1000)
+    expect((await store.read('nvidia'))?.models.length).toBe(2)
   })
 
   test('metadata the endpoint does serve is carried onto the model', async () => {
     const store = new InMemoryModelsStore()
     const wrapped = withEndpointCatalog(fakeProvider('chutes'), {
-      now: () => 1000,
       fetcher: async () => new Response(JSON.stringify(richList))
     })
-    await wrapped.refreshModels?.({ store: providerStore(store, 'chutes'), allowNetwork: true })
+    await wrapped.refreshModels?.(await makeCtx(store, 'chutes', { allowNetwork: true }))
 
     const model = wrapped.getModels()[0]
     expect(model?.contextWindow).toBe(1_000_000)
@@ -241,57 +214,36 @@ describe('withEndpointCatalog', () => {
     let seen: string | null = null
     const wrapped = withEndpointCatalog(fakeProvider(), {
       apiKey: 'secret-key',
-      now: () => 1000,
       fetcher: async (_url, init) => {
         seen = new Headers(init?.headers).get('authorization')
         return new Response(JSON.stringify(bareList))
       }
     })
-    await wrapped.refreshModels?.({ store: providerStore(store, 'nvidia'), allowNetwork: true })
-    // tsgo (native preview) mis-narrows `seen` to `null` across the awaited
-    // closure that assigns it; cast keeps the runtime assertion unchanged.
+    await wrapped.refreshModels?.(await makeCtx(store, 'nvidia', { allowNetwork: true }))
+    // tsc narrows `seen` to `null` across the awaited closure that assigns it;
+    // the cast keeps the runtime assertion unchanged.
     expect(seen as string | null).toBe('Bearer secret-key')
-  })
-
-  test('a fresh cache entry suppresses the fetch, force overrides it', async () => {
-    const store = new InMemoryModelsStore()
-    let calls = 0
-    const fetcher = async () => {
-      calls += 1
-      return new Response(JSON.stringify(bareList))
-    }
-    const wrapped = withEndpointCatalog(fakeProvider(), { now: () => 1000, fetcher })
-    const ctx = { store: providerStore(store, 'nvidia'), allowNetwork: true }
-
-    await wrapped.refreshModels?.(ctx)
-    expect(calls).toBe(1)
-    await wrapped.refreshModels?.(ctx)
-    expect(calls).toBe(1)
-    await wrapped.refreshModels?.({ ...ctx, force: true })
-    expect(calls).toBe(2)
   })
 
   test('allowNetwork false serves the store without fetching', async () => {
     const store = new InMemoryModelsStore()
     let calls = 0
     const seeded = withEndpointCatalog(fakeProvider(), {
-      now: () => 1000,
       fetcher: async () => {
         calls += 1
         return new Response(JSON.stringify(bareList))
       }
     })
-    await seeded.refreshModels?.({ store: providerStore(store, 'nvidia'), allowNetwork: true })
+    await seeded.refreshModels?.(await makeCtx(store, 'nvidia', { allowNetwork: true }))
     expect(calls).toBe(1)
 
     const offline = withEndpointCatalog(fakeProvider(), {
-      now: () => 9_999_999_999,
       fetcher: async () => {
         calls += 1
         return new Response(JSON.stringify(bareList))
       }
     })
-    await offline.refreshModels?.({ store: providerStore(store, 'nvidia'), allowNetwork: false })
+    await offline.refreshModels?.(await makeCtx(store, 'nvidia', { allowNetwork: false }))
     expect(calls).toBe(1)
     expect(offline.getModels().length).toBe(2)
   })
@@ -299,35 +251,31 @@ describe('withEndpointCatalog', () => {
   test('a failed fetch leaves previously known models intact and does not throw', async () => {
     const store = new InMemoryModelsStore()
     const wrapped = withEndpointCatalog(fakeProvider(), {
-      now: () => 1000,
       fetcher: async () => new Response(JSON.stringify(bareList))
     })
-    await wrapped.refreshModels?.({ store: providerStore(store, 'nvidia'), allowNetwork: true })
+    await wrapped.refreshModels?.(await makeCtx(store, 'nvidia', { allowNetwork: true }))
     expect(wrapped.getModels().length).toBe(2)
 
     const later = withEndpointCatalog(fakeProvider(), {
-      now: () => 9_999_999_999,
       fetcher: async () => new Response('nope', { status: 500 })
     })
-    await later.refreshModels?.({ store: providerStore(store, 'nvidia'), allowNetwork: true })
+    await later.refreshModels?.(await makeCtx(store, 'nvidia', { allowNetwork: true }))
     expect(later.getModels().length).toBe(2)
   })
 
   test('a wrong-shape 200 (e.g. a rate-limit error body) leaves previously known models and the stored entry intact', async () => {
     const store = new InMemoryModelsStore()
     const wrapped = withEndpointCatalog(fakeProvider(), {
-      now: () => 1000,
       fetcher: async () => new Response(JSON.stringify(bareList))
     })
-    await wrapped.refreshModels?.({ store: providerStore(store, 'nvidia'), allowNetwork: true })
+    await wrapped.refreshModels?.(await makeCtx(store, 'nvidia', { allowNetwork: true }))
     expect(wrapped.getModels().length).toBe(2)
 
     const later = withEndpointCatalog(fakeProvider(), {
-      now: () => 9_999_999_999,
       // 200 OK, but not the { data: [...] } shape — dataArray() parses this to [].
       fetcher: async () => new Response(JSON.stringify({ error: 'rate limited' }))
     })
-    await later.refreshModels?.({ store: providerStore(store, 'nvidia'), allowNetwork: true })
+    await later.refreshModels?.(await makeCtx(store, 'nvidia', { allowNetwork: true }))
     expect(later.getModels().length).toBe(2)
     expect((await store.read('nvidia'))?.models.length).toBe(2)
   })
@@ -335,16 +283,13 @@ describe('withEndpointCatalog', () => {
   test('a wrong-shape 200 on a cold (empty) cache does not persist an empty catalog', async () => {
     // Distinct from the warm-cache case above: nothing was ever fetched
     // successfully before, so there is nothing to "protect" in memory — but
-    // writing {models: [], checkedAt: now} here would still be wrong, because
-    // it would pass the freshness check on the next boot and hide the
-    // provider for a full REFRESH_INTERVAL_MS window with no way to tell a
-    // genuine empty catalog from a mis-shaped 200.
+    // writing an empty {models: []} would still be wrong, so the wrapper skips
+    // the publish rather than seed an empty catalog from a mis-shaped 200.
     const store = new InMemoryModelsStore()
     const wrapped = withEndpointCatalog(fakeProvider(), {
-      now: () => 1000,
       fetcher: async () => new Response(JSON.stringify({ error: 'rate limited' }))
     })
-    await wrapped.refreshModels?.({ store: providerStore(store, 'nvidia'), allowNetwork: true })
+    await wrapped.refreshModels?.(await makeCtx(store, 'nvidia', { allowNetwork: true }))
     expect(wrapped.getModels()).toEqual([])
     expect(await store.read('nvidia')).toBeUndefined()
   })
@@ -355,10 +300,9 @@ describe('withEndpointCatalog', () => {
       InMemoryModelsStore['write']
     >[1])
     const wrapped = withEndpointCatalog(fakeProvider(), {
-      now: () => 1000,
       fetcher: async () => new Response(JSON.stringify(bareList))
     })
-    await wrapped.refreshModels?.({ store: providerStore(store, 'nvidia'), allowNetwork: true })
+    await wrapped.refreshModels?.(await makeCtx(store, 'nvidia', { allowNetwork: false }))
     expect(wrapped.getModels()).toEqual([])
   })
 
@@ -369,10 +313,9 @@ describe('withEndpointCatalog', () => {
       checkedAt: 1000
     } as unknown as Parameters<InMemoryModelsStore['write']>[1])
     const wrapped = withEndpointCatalog(fakeProvider(), {
-      now: () => 1000,
       fetcher: async () => new Response(JSON.stringify(bareList))
     })
-    await wrapped.refreshModels?.({ store: providerStore(store, 'nvidia'), allowNetwork: true })
+    await wrapped.refreshModels?.(await makeCtx(store, 'nvidia', { allowNetwork: false }))
     expect(wrapped.getModels()).toEqual([])
   })
 
@@ -383,43 +326,10 @@ describe('withEndpointCatalog', () => {
       checkedAt: 1000
     } as unknown as Parameters<InMemoryModelsStore['write']>[1])
     const wrapped = withEndpointCatalog(fakeProvider(), {
-      now: () => 1000,
       fetcher: async () => new Response(JSON.stringify(bareList))
     })
-    await wrapped.refreshModels?.({ store: providerStore(store, 'nvidia'), allowNetwork: true })
+    await wrapped.refreshModels?.(await makeCtx(store, 'nvidia', { allowNetwork: false }))
     expect(wrapped.getModels()).toEqual([])
-  })
-
-  test('concurrent callers share one in-flight refresh', async () => {
-    const store = new InMemoryModelsStore()
-    let calls = 0
-    const wrapped = withEndpointCatalog(fakeProvider(), {
-      now: () => 1000,
-      fetcher: async () => {
-        calls += 1
-        return new Response(JSON.stringify(bareList))
-      }
-    })
-    const ctx = { store: providerStore(store, 'nvidia'), allowNetwork: true }
-    await Promise.all([wrapped.refreshModels?.(ctx), wrapped.refreshModels?.(ctx)])
-    expect(calls).toBe(1)
-  })
-
-  test('a rejected refresh clears inflight so the next attempt still fetches', async () => {
-    const store = new InMemoryModelsStore()
-    let calls = 0
-    const wrapped = withEndpointCatalog(fakeProvider(), {
-      now: () => 1000,
-      fetcher: async () => {
-        calls += 1
-        return new Response('nope', { status: 500 })
-      }
-    })
-    const ctx = { store: providerStore(store, 'nvidia'), allowNetwork: true }
-    await wrapped.refreshModels?.(ctx)
-    expect(calls).toBe(1)
-    await wrapped.refreshModels?.(ctx)
-    expect(calls).toBe(2)
   })
 
   test('a signal aborted before the fetch leaves the store unwritten', async () => {
@@ -428,17 +338,14 @@ describe('withEndpointCatalog', () => {
     controller.abort()
     let calls = 0
     const wrapped = withEndpointCatalog(fakeProvider(), {
-      now: () => 1000,
       fetcher: async () => {
         calls += 1
         return new Response(JSON.stringify(bareList))
       }
     })
-    await wrapped.refreshModels?.({
-      store: providerStore(store, 'nvidia'),
-      allowNetwork: true,
-      signal: controller.signal
-    })
+    await wrapped.refreshModels?.(
+      await makeCtx(store, 'nvidia', { allowNetwork: true, signal: controller.signal })
+    )
     expect(calls).toBe(0)
     expect(await store.read('nvidia')).toBeUndefined()
   })
@@ -447,17 +354,14 @@ describe('withEndpointCatalog', () => {
     const store = new InMemoryModelsStore()
     const controller = new AbortController()
     const wrapped = withEndpointCatalog(fakeProvider(), {
-      now: () => 1000,
       fetcher: async () => {
         controller.abort()
         return new Response(JSON.stringify(bareList))
       }
     })
-    await wrapped.refreshModels?.({
-      store: providerStore(store, 'nvidia'),
-      allowNetwork: true,
-      signal: controller.signal
-    })
+    await wrapped.refreshModels?.(
+      await makeCtx(store, 'nvidia', { allowNetwork: true, signal: controller.signal })
+    )
     expect(await store.read('nvidia')).toBeUndefined()
     expect(wrapped.getModels()).toEqual([])
   })
@@ -466,7 +370,6 @@ describe('withEndpointCatalog', () => {
     const store = new InMemoryModelsStore()
     let seenSignal: AbortSignal | undefined
     const wrapped = withEndpointCatalog(fakeProvider(), {
-      now: () => 1000,
       timeoutMs: 20,
       // Mirrors real fetch: never resolves on its own, but rejects when its
       // signal aborts — exactly what withEndpointCatalog must supply a timeout
@@ -481,8 +384,8 @@ describe('withEndpointCatalog', () => {
         })
       }
     })
-    await wrapped.refreshModels?.({ store: providerStore(store, 'nvidia'), allowNetwork: true })
-    // No caller signal to compose with, so the bare deadline is what fired.
+    await wrapped.refreshModels?.(await makeCtx(store, 'nvidia', { allowNetwork: true }))
+    // The deadline signal composed into the caller's is what fired.
     expect((seenSignal?.reason as Error | undefined)?.name).toBe('TimeoutError')
     expect(await store.read('nvidia')).toBeUndefined()
     expect(wrapped.getModels()).toEqual([])
@@ -499,11 +402,10 @@ describe('lossless meta', () => {
     const store = new InMemoryModelsStore()
     const liveMeta = new Map<string, ModelMeta>()
     const wrapped = withEndpointCatalog(fakeProvider(), {
-      now: () => 1000,
       liveMeta,
       fetcher: async () => new Response(JSON.stringify(bareList))
     })
-    await wrapped.refreshModels?.({ store: providerStore(store, 'nvidia'), allowNetwork: true })
+    await wrapped.refreshModels?.(await makeCtx(store, 'nvidia', { allowNetwork: true }))
 
     const entry = liveMeta.get('nvidia/qwen/qwen3.5-122b-a10b')
     expect(entry?.name).toBe('qwen/qwen3.5-122b-a10b')
@@ -526,31 +428,28 @@ describe('lossless meta', () => {
     const store = new InMemoryModelsStore()
     const liveMeta = new Map<string, ModelMeta>()
     const wrapped = withEndpointCatalog(fakeProvider('chutes'), {
-      now: () => 1000,
       liveMeta,
       fetcher: async () => new Response(JSON.stringify(richList))
     })
-    await wrapped.refreshModels?.({ store: providerStore(store, 'chutes'), allowNetwork: true })
+    await wrapped.refreshModels?.(await makeCtx(store, 'chutes', { allowNetwork: true }))
     expect(liveMeta.get('chutes/zai-org/GLM-5.2-TEE')?.cost).toEqual({ input: 0.91, output: 2.86 })
   })
 
   test('an offline restore populates the sink from the store without fetching', async () => {
     const store = new InMemoryModelsStore()
     const seeded = withEndpointCatalog(fakeProvider('chutes'), {
-      now: () => 1000,
       fetcher: async () => new Response(JSON.stringify(richList))
     })
-    await seeded.refreshModels?.({ store: providerStore(store, 'chutes'), allowNetwork: true })
+    await seeded.refreshModels?.(await makeCtx(store, 'chutes', { allowNetwork: true }))
 
     const liveMeta = new Map<string, ModelMeta>()
     const offline = withEndpointCatalog(fakeProvider('chutes'), {
-      now: () => 9_999_999_999,
       liveMeta,
       fetcher: async () => {
         throw new Error('offline restore must not fetch')
       }
     })
-    await offline.refreshModels?.({ store: providerStore(store, 'chutes'), allowNetwork: false })
+    await offline.refreshModels?.(await makeCtx(store, 'chutes', { allowNetwork: false }))
     expect(liveMeta.get('chutes/zai-org/GLM-5.2-TEE')?.cost).toEqual({ input: 0.91, output: 2.86 })
     expect(offline.getModels().length).toBe(1)
   })
@@ -560,13 +459,12 @@ describe('lossless meta', () => {
     await store.write('nvidia', { models: [baseModel('stored-model', 'nvidia')], checkedAt: 1000 })
     const liveMeta = new Map<string, ModelMeta>()
     const wrapped = withEndpointCatalog(fakeProvider(), {
-      now: () => 1000 + 60_000,
       liveMeta,
       fetcher: async () => {
-        throw new Error('fresh cache must not fetch')
+        throw new Error('offline restore must not fetch')
       }
     })
-    await wrapped.refreshModels?.({ store: providerStore(store, 'nvidia'), allowNetwork: true })
+    await wrapped.refreshModels?.(await makeCtx(store, 'nvidia', { allowNetwork: false }))
     expect(wrapped.getModels().map((m) => m.id)).toEqual(['stored-model'])
     expect(liveMeta.size).toBe(0)
   })
@@ -581,13 +479,12 @@ describe('lossless meta', () => {
       } as unknown as Parameters<InMemoryModelsStore['write']>[1])
       const liveMeta = new Map<string, ModelMeta>()
       const wrapped = withEndpointCatalog(fakeProvider(), {
-        now: () => 1000 + 60_000,
         liveMeta,
         fetcher: async () => {
-          throw new Error('fresh cache must not fetch')
+          throw new Error('offline restore must not fetch')
         }
       })
-      await wrapped.refreshModels?.({ store: providerStore(store, 'nvidia'), allowNetwork: true })
+      await wrapped.refreshModels?.(await makeCtx(store, 'nvidia', { allowNetwork: false }))
       expect(wrapped.getModels().map((m) => m.id)).toEqual(['stored-model'])
       expect(liveMeta.size).toBe(0)
     }
@@ -599,10 +496,9 @@ describe('lossless meta', () => {
       data: [{ id: 'm1', context_length: 4096, pricing: { prompt: '0.5', completion: '1.5' } }]
     }
     const wrapped = withEndpointCatalog(staticProvider(), {
-      now: () => 1000,
       fetcher: async () => new Response(JSON.stringify(payload))
     })
-    await wrapped.refreshModels?.({ store: providerStore(store, 'cc'), allowNetwork: true })
+    await wrapped.refreshModels?.(await makeCtx(store, 'cc', { allowNetwork: true }))
 
     const raw = (await store.read('cc')) as { meta?: Record<string, unknown> }
     expect(raw.meta?.m1).toBeDefined()
@@ -612,11 +508,10 @@ describe('lossless meta', () => {
     const store = storeFor()
     const liveMeta = new Map<string, ModelMeta>()
     const wrapped = withRemoteCatalog(staticProvider(), 'anthropic', {
-      now: () => 1000,
       liveMeta,
       fetcher: async () => new Response(JSON.stringify({ models: [baseModel('new-model')] }))
     })
-    await wrapped.refreshModels?.({ store: providerStore(store, 'cc'), allowNetwork: true })
+    await wrapped.refreshModels?.(await makeCtx(store, 'cc', { allowNetwork: true }))
     expect(
       wrapped
         .getModels()

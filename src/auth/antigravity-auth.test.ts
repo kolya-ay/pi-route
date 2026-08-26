@@ -2,7 +2,7 @@
 
 import { describe, expect, it, mock, test } from 'bun:test'
 
-import type { AuthInteraction } from '@earendil-works/pi-ai'
+import type { ProviderAuthInteraction } from '@earendil-works/pi-ai'
 
 import type { FetchFn } from '../models/fetch-timeout'
 import { deadlined } from '../models/fetch-timeout'
@@ -127,7 +127,7 @@ describe('exchangeCode', () => {
       signal: controller.signal,
       notify: () => {},
       prompt: async () => 'the-code'
-    } as unknown as AuthInteraction
+    } as unknown as ProviderAuthInteraction
     const cred = await antigravityOAuth({ fetchFn }).login(interaction)
     expect(cred.projectId).toBe('proj-1')
     // deadlined() composes interaction.signal with its timeout, so the actual fetch
@@ -286,7 +286,10 @@ describe('antigravityOAuth', () => {
     const seen: AbortSignal[] = []
     const oauth = antigravityOAuth({ fetchFn: hangingFetch(seen), timeoutMs: 20 })
     const err = await catchError(
-      oauth.refresh({ type: 'oauth', access: 'a', refresh: 'r', expires: 0, projectId: 'p' })
+      oauth.refresh(
+        { type: 'oauth', access: 'a', refresh: 'r', expires: 0, projectId: 'p' },
+        new AbortController().signal
+      )
     )
     expect(err).toBeInstanceOf(Error)
     expect(seen[0]).toBeInstanceOf(AbortSignal)
@@ -299,13 +302,16 @@ describe('refresh', () => {
       fetchFn: async () => new Response(JSON.stringify({ access_token: 'a2', expires_in: 3600 }))
     })
     const before = Date.now()
-    const cred = await auth.refresh({
-      type: 'oauth',
-      refresh: 'r',
-      access: 'a',
-      expires: 0,
-      projectId: 'p'
-    })
+    const cred = await auth.refresh(
+      {
+        type: 'oauth',
+        refresh: 'r',
+        access: 'a',
+        expires: 0,
+        projectId: 'p'
+      },
+      new AbortController().signal
+    )
     expect(cred.access).toBe('a2')
     expect(cred.expires).toBeLessThanOrEqual(before + 3600_000 - 5 * 60_000 + 1000)
   })
@@ -313,13 +319,16 @@ describe('refresh', () => {
   test('sends grant_type=refresh_token with real client credentials', async () => {
     const mockFetch = mock(async () => Response.json({ access_token: 'new', expires_in: 3600 }))
     const auth = antigravityOAuth({ fetchFn: mockFetch })
-    await auth.refresh({
-      type: 'oauth',
-      refresh: 'my-refresh',
-      access: 'a',
-      expires: 0,
-      projectId: 'p'
-    })
+    await auth.refresh(
+      {
+        type: 'oauth',
+        refresh: 'my-refresh',
+        access: 'a',
+        expires: 0,
+        projectId: 'p'
+      },
+      new AbortController().signal
+    )
     const [url, init] = mockFetch.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toBe('https://oauth2.googleapis.com/token')
     const body = new URLSearchParams(init.body as string)
@@ -333,13 +342,16 @@ describe('refresh', () => {
     const auth = antigravityOAuth({
       fetchFn: async () => Response.json({ access_token: 'new-access', expires_in: 3600 })
     })
-    const cred = await auth.refresh({
-      type: 'oauth',
-      refresh: 'kept-refresh',
-      access: 'a',
-      expires: 0,
-      projectId: 'kept-project'
-    })
+    const cred = await auth.refresh(
+      {
+        type: 'oauth',
+        refresh: 'kept-refresh',
+        access: 'a',
+        expires: 0,
+        projectId: 'kept-project'
+      },
+      new AbortController().signal
+    )
     expect(cred.access).toBe('new-access')
     expect(cred.refresh).toBe('kept-refresh')
     expect(cred.projectId).toBe('kept-project')
@@ -350,13 +362,16 @@ describe('refresh', () => {
       fetchFn: async () =>
         Response.json({ access_token: 'a', refresh_token: 'rotated', expires_in: 3600 })
     })
-    const cred = await auth.refresh({
-      type: 'oauth',
-      refresh: 'old',
-      access: 'a',
-      expires: 0,
-      projectId: 'p'
-    })
+    const cred = await auth.refresh(
+      {
+        type: 'oauth',
+        refresh: 'old',
+        access: 'a',
+        expires: 0,
+        projectId: 'p'
+      },
+      new AbortController().signal
+    )
     expect(cred.refresh).toBe('rotated')
   })
 
@@ -365,7 +380,10 @@ describe('refresh', () => {
       fetchFn: async () => new Response('{"error":"invalid_grant"}', { status: 400 })
     })
     await expect(
-      auth.refresh({ type: 'oauth', refresh: 'r', access: 'a', expires: 0, projectId: 'p' })
+      auth.refresh(
+        { type: 'oauth', refresh: 'r', access: 'a', expires: 0, projectId: 'p' },
+        new AbortController().signal
+      )
     ).rejects.toThrow(/definitively/)
   })
 
@@ -374,7 +392,10 @@ describe('refresh', () => {
       fetchFn: async () => new Response('nope', { status: 401 })
     })
     await expect(
-      auth.refresh({ type: 'oauth', refresh: 'r', access: 'a', expires: 0, projectId: 'p' })
+      auth.refresh(
+        { type: 'oauth', refresh: 'r', access: 'a', expires: 0, projectId: 'p' },
+        new AbortController().signal
+      )
     ).rejects.toThrow(/definitively/)
   })
 
@@ -383,7 +404,10 @@ describe('refresh', () => {
       fetchFn: async () => new Response('{"error":"backend"}', { status: 500 })
     })
     await expect(
-      auth.refresh({ type: 'oauth', refresh: 'r', access: 'a', expires: 0, projectId: 'p' })
+      auth.refresh(
+        { type: 'oauth', refresh: 'r', access: 'a', expires: 0, projectId: 'p' },
+        new AbortController().signal
+      )
     ).rejects.not.toThrow(/definitively/)
   })
 
@@ -392,7 +416,10 @@ describe('refresh', () => {
     const auth = antigravityOAuth({ fetchFn: hangingFetch(seen), timeoutMs: 10 })
 
     const err = await catchError(
-      auth.refresh({ type: 'oauth', refresh: 'r', access: 'a', expires: 0, projectId: 'p' })
+      auth.refresh(
+        { type: 'oauth', refresh: 'r', access: 'a', expires: 0, projectId: 'p' },
+        new AbortController().signal
+      )
     )
 
     expect(err.name).toBe('TimeoutError')
@@ -422,7 +449,10 @@ describe('refresh', () => {
       fetchFn: async () => Response.json({ access_token: 'a', expires_in: 3600 })
     })
     await expect(
-      auth.refresh({ type: 'oauth', refresh: 'r', access: 'a', expires: 0 })
+      auth.refresh(
+        { type: 'oauth', refresh: 'r', access: 'a', expires: 0 },
+        new AbortController().signal
+      )
     ).rejects.toThrow(/projectId/)
   })
 })

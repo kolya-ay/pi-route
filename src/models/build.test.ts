@@ -185,8 +185,9 @@ describe('buildModels', () => {
       // and would fetch regardless — this is what distinguishes "left alone"
       // from "silently rewrapped".
       await models.getProvider('ag')?.refreshModels?.({
-        store: { read: async () => undefined, write: async () => {}, delete: async () => {} },
-        allowNetwork: true
+        publish: async () => true,
+        allowNetwork: true,
+        signal: new AbortController().signal
       })
       expect(calls).toBe(0)
     } finally {

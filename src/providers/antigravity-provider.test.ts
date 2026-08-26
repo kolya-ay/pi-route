@@ -6,7 +6,7 @@ import type {
   Context,
   Model,
   OAuthCredential,
-  ProviderModelsStore,
+  RefreshModelsContext,
   Tool
 } from '@earendil-works/pi-ai'
 
@@ -70,11 +70,18 @@ const oauthCredential: OAuthCredential = {
   expires: Date.now() + 3_600_000
 }
 
-const stubStore: ProviderModelsStore = {
-  read: async () => undefined,
-  write: async () => {},
-  delete: async () => {}
-}
+// createProvider's refreshModels applies discovered models only through
+// `publish({update})`; mirror pi-ai by running the update so getModels() reflects
+// the fetch.
+const agCtx = (over: Partial<RefreshModelsContext> = {}): RefreshModelsContext => ({
+  publish: async (pub) => {
+    pub.update?.()
+    return true
+  },
+  allowNetwork: true,
+  signal: new AbortController().signal,
+  ...over
+})
 
 describe('antigravityProvider discovery', () => {
   it('returns no models without an oauth credential', async () => {
@@ -84,7 +91,7 @@ describe('antigravityProvider discovery', () => {
       return new Response('{}', { status: 200 })
     }
     const provider = antigravityProvider('ag', fetchFn)
-    await provider.refreshModels?.({ store: stubStore, allowNetwork: true })
+    await provider.refreshModels?.(agCtx())
     expect(provider.getModels()).toEqual([])
     expect(calls).toBe(0)
   })
@@ -104,11 +111,7 @@ describe('antigravityProvider discovery', () => {
         : new Response('unavailable', { status: 500 })
     }
     const provider = antigravityProvider('ag', fetchFn)
-    await provider.refreshModels?.({
-      credential: oauthCredential,
-      store: stubStore,
-      allowNetwork: true
-    })
+    await provider.refreshModels?.(agCtx({ credential: oauthCredential }))
 
     expect(seen).toHaveLength(2)
     expect(seen[0]).toContain('daily-cloudcode-pa.googleapis.com')
@@ -129,11 +132,7 @@ describe('antigravityProvider discovery', () => {
         })
       })
     const provider = antigravityProvider('ag', deadlined(fetchFn, 10))
-    await provider.refreshModels?.({
-      credential: oauthCredential,
-      store: stubStore,
-      allowNetwork: true
-    })
+    await provider.refreshModels?.(agCtx({ credential: oauthCredential }))
 
     expect(aborted).toEqual([true, true])
     expect(provider.getModels()).toEqual([])

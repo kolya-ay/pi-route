@@ -79,7 +79,7 @@ describe('anthropicToContext', () => {
     const assistantMsg = ctx.messages[1]
     expect(assistantMsg?.role).toBe('assistant')
     expect(Array.isArray(assistantMsg?.content)).toBe(true)
-    const toolCallBlock = (assistantMsg?.content as ToolCall[])[0]
+    const toolCallBlock = ((assistantMsg as AssistantMessage).content as ToolCall[])[0]
     expect(toolCallBlock?.type).toBe('toolCall')
     expect(toolCallBlock?.name).toBe('get_weather')
     expect(toolCallBlock?.id).toBe('call_1')
@@ -160,7 +160,7 @@ describe('openaiToContext', () => {
     const assistantMsg = ctx.messages[1]
     expect(assistantMsg?.role).toBe('assistant')
     expect(Array.isArray(assistantMsg?.content)).toBe(true)
-    const block = (assistantMsg?.content as ToolCall[])[0]
+    const block = ((assistantMsg as AssistantMessage).content as ToolCall[])[0]
     expect(block?.type).toBe('toolCall')
     expect(block?.name).toBe('get_weather')
     expect(block?.id).toBe('call_abc123')

@@ -92,14 +92,14 @@ describe('/v1/limits', () => {
       provider: 'anthropic',
       refresh: 'refresh-1',
       access: 'claude-token',
-      expires: Date.now() + 60_000
+      expires: Date.now() + 3_600_000
     })
     await writeCredentialFile(dir, 'codex-oauth', {
       provider: 'openai-codex',
       refresh: 'refresh-2',
       access:
         'header.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjdC0xIn19.sig',
-      expires: Date.now() + 60_000
+      expires: Date.now() + 3_600_000
     })
 
     globalThis.fetch = (async (input: Request | string | URL) => {

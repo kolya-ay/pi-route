@@ -129,14 +129,14 @@ describe('createAnthropicSseStream - contentIndex state machine', () => {
       'message_delta',
       'message_stop'
     ])
-    expect((evts[1]?.data as Record<string, unknown>).index).toBe(0)
-    expect((evts[1]?.data as Record<string, unknown>).content_block).toMatchObject({
+    expect((evts[1]!.data as Record<string, unknown>).index).toBe(0)
+    expect((evts[1]!.data as Record<string, unknown>).content_block).toMatchObject({
       type: 'thinking'
     })
-    expect((evts[3]?.data as Record<string, unknown>).index).toBe(0) // auto-close for thinking
-    expect((evts[4]?.data as Record<string, unknown>).index).toBe(1)
-    expect((evts[4]?.data as Record<string, unknown>).content_block).toMatchObject({ type: 'text' })
-    expect((evts[6]?.data as Record<string, unknown>).index).toBe(1)
+    expect((evts[3]!.data as Record<string, unknown>).index).toBe(0) // auto-close for thinking
+    expect((evts[4]!.data as Record<string, unknown>).index).toBe(1)
+    expect((evts[4]!.data as Record<string, unknown>).content_block).toMatchObject({ type: 'text' })
+    expect((evts[6]!.data as Record<string, unknown>).index).toBe(1)
   })
 
   it('done while block open: emits content_block_stop before message_delta', async () => {
@@ -159,7 +159,7 @@ describe('createAnthropicSseStream - contentIndex state machine', () => {
       'message_delta',
       'message_stop'
     ])
-    expect((evts[3]?.data as Record<string, unknown>).index).toBe(0)
+    expect((evts[3]!.data as Record<string, unknown>).index).toBe(0)
   })
 
   it('error mid-stream while block open: emits content_block_stop then error', async () => {
@@ -184,8 +184,8 @@ describe('createAnthropicSseStream - contentIndex state machine', () => {
       'content_block_stop', // auto-emitted before error
       'error'
     ])
-    expect((evts[3]?.data as Record<string, unknown>).index).toBe(0)
-    expect((evts[4]?.data as Record<string, unknown>).type).toBe('error')
+    expect((evts[3]!.data as Record<string, unknown>).index).toBe(0)
+    expect((evts[4]!.data as Record<string, unknown>).type).toBe('error')
   })
 })
 
@@ -466,7 +466,7 @@ describe('createOpenAiSseStream', () => {
     })
     expect(textChunks).toHaveLength(2)
     const tc1Choices = textChunks[0]?.choices as Record<string, unknown>[]
-    expect((tc1Choices[0]?.delta as Record<string, unknown>).content).toBe('Hello')
+    expect((tc1Choices[0]!.delta as Record<string, unknown>).content).toBe('Hello')
 
     // Final chunk with finish_reason
     const lastDataLine = lines.filter((l) => l.startsWith('data: ') && !l.includes('[DONE]')).at(-1)
@@ -542,11 +542,11 @@ describe('createOpenAiSseStream', () => {
       return delta?.tool_calls !== undefined
     })
     expect(toolStartChunk).toBeDefined()
-    const toolStartDelta = (toolStartChunk?.choices as Record<string, unknown>[])[0]
-      ?.delta as Record<string, unknown>
+    const toolStartDelta = (toolStartChunk!.choices as Record<string, unknown>[])[0]!
+      .delta as Record<string, unknown>
     const toolCalls = toolStartDelta.tool_calls as Record<string, unknown>[]
     expect(toolCalls[0]?.id).toBe('call_1')
-    expect((toolCalls[0]?.function as Record<string, unknown>).name).toBe('get_weather')
+    expect((toolCalls[0]!.function as Record<string, unknown>).name).toBe('get_weather')
 
     // toolcall_delta -> arguments
     const toolDeltaChunks = dataChunks.filter((c) => {
