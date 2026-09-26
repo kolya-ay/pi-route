@@ -8,6 +8,11 @@ import { endTime, startTime } from 'hono/timing'
 import { readEnvConfig } from '../config/env'
 import { resolveCandidates } from '../pipeline/resolve'
 import { DispatchAuthError } from '../providers/models-dispatch'
+import {
+  parseStructuredOutput,
+  type StructuredOutput,
+  StructuredOutputRequestError
+} from '../structured-output'
 import { buildRequestCaptureAttrs, type CaptureOpts } from '../telemetry/capture'
 import type { Env } from '../telemetry/hono-env'
 import { extractSessionId } from '../telemetry/session-id'
@@ -68,6 +73,16 @@ export const createDispatchHandler = (deps: DispatchDeps) => {
     const model = String(parsed.model ?? '')
     const stream = Boolean(parsed.stream)
     const sessionId = extractSessionId(c.req.raw.headers, parsed)
+
+    // Parsed once, before routing: an unenforceable or malformed schema is a client
+    // error, so it must not be retried across failover candidates as a 502.
+    let structuredOutput: StructuredOutput | undefined
+    try {
+      structuredOutput = parseStructuredOutput(deps.format, parsed)
+    } catch (err) {
+      if (err instanceof StructuredOutputRequestError) return c.json({ error: err.message }, 400)
+      throw err
+    }
     // Built once per request; spread into every dispatch_attempt span so retries
     // and failover hops all carry the captured prompt/system/tools.
     const requestCaptureAttrs = buildRequestCaptureAttrs(captureOpts, parsed)
@@ -167,6 +182,7 @@ export const createDispatchHandler = (deps: DispatchDeps) => {
                 rawRequest: outgoingRequest,
                 model: finalModel,
                 stream,
+                ...(structuredOutput !== undefined ? { structuredOutput } : {}),
                 telHooks: { tel, span, capture: captureOpts }
               },
               safeEntry.account,

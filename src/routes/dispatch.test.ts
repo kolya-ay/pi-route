@@ -4,11 +4,14 @@ import { describe, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { MutableModels } from '@earendil-works/pi-ai'
+import type { Api, AssistantMessage, Model, MutableModels, ToolCall } from '@earendil-works/pi-ai'
+import { createAssistantMessageEventStream } from '@earendil-works/pi-ai'
 import { Hono } from 'hono'
 import { timing } from 'hono/timing'
 import { buildCatalog } from '../pipeline/catalog'
+import { createModelsDispatch } from '../providers/models-dispatch'
 import { createState } from '../state'
+import { STRUCTURED_OUTPUT_TOOL } from '../structured-output'
 import type { Env } from '../telemetry/hono-env'
 import { createTel } from '../telemetry/tel'
 import { useTestExporter } from '../telemetry/test-fixture'
@@ -27,7 +30,8 @@ const stubModels = { getModels: () => [], getModel: () => undefined } as unknown
 const mkApp = (
   options: RouterOptions,
   registry: Map<string, ProviderEntry>,
-  authDir = '/tmp'
+  authDir = '/tmp',
+  format: 'openai' | 'responses' = 'openai'
 ): Hono<Env> => {
   const catalog = buildCatalog(options, stubModels, authDir, new Map())
   const state = createState(options, catalog, stubModels, { accounts: {} }, authDir)
@@ -43,11 +47,8 @@ const mkApp = (
     })
   })
   app.post(
-    '/v1/chat/completions',
-    createDispatchHandler({
-      format: 'openai',
-      registry
-    })
+    format === 'responses' ? '/v1/responses' : '/v1/chat/completions',
+    createDispatchHandler({ format, registry })
   )
   return app
 }
@@ -426,5 +427,306 @@ describe('dispatch capture wire-up', () => {
     } finally {
       if (prev !== undefined) process.env.PI_ROUTE_CAPTURE_PROMPTS = prev
     }
+  })
+})
+
+describe('dispatch structured output', () => {
+  const schema = {
+    type: 'object',
+    properties: { capital: { type: 'string' } },
+    required: ['capital'],
+    additionalProperties: false
+  }
+
+  const options: RouterOptions = {
+    providers: { a: { type: 'openai-compatible', account: keyAccount, formatTranslation: 'auto' } },
+    pipeline: [{ kind: 'pool', name: 'gpt', to: ['a/x'], strategy: 'failover' }],
+    expose: []
+  }
+
+  const capturingApp = (seen: unknown[], format: 'openai' | 'responses' = 'openai'): Hono<Env> => {
+    const provider: Provider = {
+      name: 'a',
+      type: 'openai-compatible',
+      dispatch: async (request) => {
+        seen.push(request.structuredOutput)
+        return okResponse('a', 'x')
+      }
+    }
+    const registry = new Map<string, ProviderEntry>([['a', { provider, account: keyAccount }]])
+    return mkApp(options, registry, '/tmp', format)
+  }
+
+  const post = (app: Hono<Env>, path: string, body: Record<string, unknown>) =>
+    app.request(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+
+  test('hands providers the same constraint for both inbound syntaxes', async () => {
+    const chatSeen: unknown[] = []
+    const chatRes = await post(capturingApp(chatSeen), '/v1/chat/completions', {
+      model: 'gpt/x',
+      messages: [{ role: 'user', content: 'hi' }],
+      response_format: {
+        type: 'json_schema',
+        json_schema: { name: 'capital', strict: true, schema }
+      }
+    })
+    const responsesSeen: unknown[] = []
+    const responsesRes = await post(capturingApp(responsesSeen, 'responses'), '/v1/responses', {
+      model: 'gpt/x',
+      input: 'hi',
+      text: { format: { type: 'json_schema', name: 'capital', schema } }
+    })
+
+    expect(chatRes.status).toBe(200)
+    expect(responsesRes.status).toBe(200)
+    expect(chatSeen[0]).toEqual({ name: 'capital', schema })
+    expect(responsesSeen[0]).toEqual(chatSeen[0])
+  })
+
+  test('leaves structuredOutput undefined for ordinary requests', async () => {
+    const seen: unknown[] = []
+    const res = await post(capturingApp(seen), '/v1/chat/completions', {
+      model: 'gpt/x',
+      messages: [{ role: 'user', content: 'hi' }]
+    })
+    expect(res.status).toBe(200)
+    expect(seen[0]).toBeUndefined()
+  })
+
+  test('rejects an unenforceable or conflicting schema with 400 before dispatch', async () => {
+    const cases: [string, Record<string, unknown>][] = [
+      [
+        '/v1/chat/completions',
+        { model: 'gpt/x', messages: [], response_format: { type: 'json_object' } }
+      ],
+      [
+        '/v1/responses',
+        { model: 'gpt/x', input: 'hi', text: { format: { type: 'json_schema', schema } } }
+      ],
+      [
+        '/v1/chat/completions',
+        {
+          model: 'gpt/x',
+          messages: [],
+          tools: [{ type: 'function', function: { name: 'lookup', parameters: {} } }],
+          response_format: { type: 'json_schema', json_schema: { name: 'capital', schema } }
+        }
+      ]
+    ]
+
+    for (const [path, body] of cases) {
+      const seen: unknown[] = []
+      const app = capturingApp(seen, path === '/v1/responses' ? 'responses' : 'openai')
+      const res = await post(app, path, body)
+      expect(res.status).toBe(400)
+      expect((await res.json()) as { error: string }).toHaveProperty('error')
+      expect(seen).toHaveLength(0)
+    }
+  })
+
+  test('answers 400 rather than a routing failure when the model is unknown', async () => {
+    const seen: unknown[] = []
+    const res = await post(capturingApp(seen), '/v1/chat/completions', {
+      model: 'no-such-route',
+      messages: [],
+      response_format: { type: 'json_schema', json_schema: { name: 'capital' } }
+    })
+    expect(res.status).toBe(400)
+    expect(seen).toHaveLength(0)
+  })
+})
+
+describe('structured output response contracts', () => {
+  const schema = {
+    type: 'object',
+    properties: { capital: { type: 'string' } },
+    required: ['capital'],
+    additionalProperties: false
+  }
+  const document = '{"capital":"Paris"}'
+
+  const schemaModel = (api: string): Model<Api> =>
+    ({
+      id: 'x',
+      name: 'X',
+      api,
+      provider: 'a',
+      baseUrl: 'http://x',
+      reasoning: false,
+      input: ['text'],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 1000,
+      maxTokens: 500
+    }) as Model<Api>
+
+  // A constrained-tool backend: the schema answer arrives as private tool arguments,
+  // which pi-route must republish as ordinary assistant text.
+  const toolCallModels = (api = 'anthropic-messages'): MutableModels => {
+    const toolCall: ToolCall = {
+      type: 'toolCall',
+      id: 'call-1',
+      name: STRUCTURED_OUTPUT_TOOL,
+      arguments: { capital: 'Paris' }
+    }
+    const message: AssistantMessage = {
+      role: 'assistant',
+      content: [toolCall],
+      api: 'anthropic-messages',
+      provider: 'a',
+      model: 'x',
+      usage: {
+        input: 2,
+        output: 3,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 5,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+      },
+      stopReason: 'toolUse',
+      timestamp: 1
+    }
+    return {
+      getModel: () => schemaModel(api),
+      stream: () => {
+        const events = createAssistantMessageEventStream()
+        events.push({ type: 'start', partial: message })
+        events.push({ type: 'toolcall_start', contentIndex: 0, partial: message })
+        events.push({ type: 'toolcall_delta', contentIndex: 0, delta: document, partial: message })
+        events.push({ type: 'toolcall_end', contentIndex: 0, toolCall, partial: message })
+        events.push({ type: 'done', reason: 'toolUse', message })
+        events.end(message)
+        return events
+      }
+    } as unknown as MutableModels
+  }
+
+  const modelsApp = (
+    models: MutableModels,
+    format: 'openai' | 'responses',
+    mode: 'auto' | 'native' | 'constrained-tool' = 'auto',
+    extraProviders: Record<string, ProviderEntry> = {},
+    to: string[] = ['a/x']
+  ): Hono<Env> => {
+    const options: RouterOptions = {
+      providers: Object.fromEntries(
+        to.map((address) => [
+          address.split('/')[0] as string,
+          { type: 'openai-compatible', account: keyAccount, formatTranslation: mode }
+        ])
+      ),
+      pipeline: [{ kind: 'pool', name: 'gpt', to, strategy: 'failover' }],
+      expose: []
+    }
+    const registry = new Map<string, ProviderEntry>([
+      ['a', { provider: createModelsDispatch(models, 'a', false, mode), account: keyAccount }],
+      ...Object.entries(extraProviders)
+    ])
+    return mkApp(options, registry, '/tmp', format)
+  }
+
+  const request = (app: Hono<Env>, format: 'openai' | 'responses', stream: boolean) =>
+    app.request(format === 'openai' ? '/v1/chat/completions' : '/v1/responses', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(
+        format === 'openai'
+          ? {
+              model: 'gpt/x',
+              stream,
+              messages: [{ role: 'user', content: 'hi' }],
+              response_format: { type: 'json_schema', json_schema: { name: 'capital', schema } }
+            }
+          : {
+              model: 'gpt/x',
+              stream,
+              input: 'hi',
+              text: { format: { type: 'json_schema', name: 'capital', schema } }
+            }
+      )
+    })
+
+  const sseFrames = (raw: string): Record<string, unknown>[] =>
+    raw
+      .split('\n')
+      .filter((line) => line.startsWith('data: ') && line !== 'data: [DONE]')
+      .map((line) => JSON.parse(line.slice(6)) as Record<string, unknown>)
+
+  test('chat returns the JSON document as message content', async () => {
+    const res = await request(modelsApp(toolCallModels(), 'openai'), 'openai', false)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      choices: [{ message: { content: string; tool_calls?: unknown }; finish_reason: string }]
+    }
+    expect(body.choices[0].message.content).toBe(document)
+    expect(body.choices[0].message.tool_calls).toBeUndefined()
+    expect(body.choices[0].finish_reason).toBe('stop')
+  })
+
+  test('responses returns the JSON document as output text', async () => {
+    const res = await request(modelsApp(toolCallModels(), 'responses'), 'responses', false)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      output: { type: string; content?: { type: string; text: string }[] }[]
+    }
+    expect(body.output.map((item) => item.type)).toEqual(['message'])
+    expect(body.output[0]?.content).toMatchObject([{ type: 'output_text', text: document }])
+  })
+
+  test('chat streams the document as content deltas', async () => {
+    const res = await request(modelsApp(toolCallModels(), 'openai'), 'openai', true)
+    const frames = sseFrames(await res.text())
+    const choices = frames.flatMap(
+      (frame) => frame.choices as { delta?: Record<string, unknown>; finish_reason?: string }[]
+    )
+    expect(choices.map((c) => c.delta?.content ?? '').join('')).toBe(document)
+    expect(choices.some((c) => c.delta?.tool_calls !== undefined)).toBe(false)
+    expect(choices.at(-1)?.finish_reason).toBe('stop')
+  })
+
+  test('responses streams the document as output-text deltas', async () => {
+    const res = await request(modelsApp(toolCallModels(), 'responses'), 'responses', true)
+    const raw = await res.text()
+    const frames = sseFrames(raw)
+    const deltas = frames
+      .filter((frame) => frame.type === 'response.output_text.delta')
+      .map((frame) => String(frame.delta))
+    expect(deltas.join('')).toBe(document)
+    expect(raw).not.toContain('response.function_call_arguments')
+    expect(frames.some((frame) => frame.type === 'response.completed')).toBe(true)
+    expect(raw).toContain('data: [DONE]')
+  })
+
+  test('fails over to a candidate whose policy can enforce the schema', async () => {
+    const enforcing: Provider = {
+      name: 'b',
+      type: 'openai-compatible',
+      dispatch: async () => okResponse('b', 'x')
+    }
+    const app = modelsApp(
+      toolCallModels('google-generative-ai'),
+      'openai',
+      'auto',
+      { b: { provider: enforcing, account: keyAccount } },
+      ['a/x', 'b/x']
+    )
+    const res = await request(app, 'openai', false)
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { choices: unknown[] }).choices).toHaveLength(1)
+  })
+
+  test('returns an explicit error when no candidate can enforce the schema', async () => {
+    const res = await request(
+      modelsApp(toolCallModels('google-generative-ai'), 'openai'),
+      'openai',
+      false
+    )
+    expect(res.status).toBe(502)
+    const body = (await res.json()) as { error: string }
+    expect(body.error).toContain('google-generative-ai')
+    expect(body.error).toContain('json_schema')
   })
 })
