@@ -3,6 +3,7 @@
 import type { OAuthCredentials } from '@earendil-works/pi-ai'
 import type { Span } from '@opentelemetry/api'
 
+import type { StructuredOutput } from './structured-output'
 import type { CaptureOpts } from './telemetry/capture'
 import type { Tel } from './telemetry/tel'
 
@@ -44,6 +45,9 @@ export type IncomingRequest = {
   model: string
   stream: boolean
   telHooks?: TelHooks
+  // Normalized json_schema constraint, parsed once at the route before routing so
+  // an invalid request fails as a 400 instead of entering provider failover.
+  structuredOutput?: StructuredOutput | undefined
 }
 
 export type ProviderResponse = {
