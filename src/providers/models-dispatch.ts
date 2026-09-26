@@ -4,15 +4,17 @@ import type { Api, Model, Models } from '@earendil-works/pi-ai'
 import { ModelsError } from '@earendil-works/pi-ai'
 
 import { perTokenUsd } from '../pipeline/money'
-import type { IncomingRequest, Provider, ProviderResponse } from '../types'
+import type { FormatTranslationMode, IncomingRequest, Provider, ProviderResponse } from '../types'
 
 import {
   capMaxTokens,
+  type EventTransform,
   jsonResponse,
   makeMetadata,
   RETRY_OPTIONS,
   streamingResponse
 } from './pi-ai-runtime'
+import { normalizeStructuredOutputEvents, prepareStructuredOutput } from './structured-output'
 import { toContext } from './to-context'
 
 export class DispatchAuthError extends Error {}
@@ -72,7 +74,8 @@ const withKnownLimits = (model: Model<Api>): Model<Api> =>
 export const createModelsDispatch = (
   models: Models,
   providerName: string,
-  construct = false
+  construct = false,
+  formatTranslation: FormatTranslationMode = 'auto'
 ): Provider => ({
   name: providerName,
   type: 'models',
@@ -87,15 +90,25 @@ export const createModelsDispatch = (
     if (!catalogModel) throw new Error(`model not found: ${providerName}/${request.model}`)
     const model = capMaxTokens(withKnownLimits(catalogModel), body)
 
+    // Capability resolution throws before streaming, so an unenforceable schema
+    // fails this candidate instead of silently producing unconstrained output.
+    const plan = request.structuredOutput
+      ? prepareStructuredOutput(model, context, request.structuredOutput, formatTranslation)
+      : undefined
+    const transform: EventTransform | undefined = plan?.normalizeEvents
+      ? normalizeStructuredOutputEvents
+      : undefined
+
     // models.stream() resolves auth lazily, so an OAuth refresh failure surfaces
     // as an in-stream error event (mapped in pi-ai-runtime), NOT a sync throw.
     // This catch only covers synchronous setup errors; it stays for completeness.
     let eventStream: ReturnType<typeof models.stream>
     try {
-      eventStream = models.stream(model, context, {
+      eventStream = models.stream(model, plan?.context ?? context, {
         ...RETRY_OPTIONS,
         maxTokens: model.maxTokens,
-        signal: request.rawRequest.signal
+        signal: request.rawRequest.signal,
+        ...plan?.options
       })
     } catch (err) {
       throw mapAuthError(err, providerName)
@@ -112,7 +125,7 @@ export const createModelsDispatch = (
       }
     }
     return request.stream
-      ? streamingResponse(eventStream, request, metadata, ctx)
-      : jsonResponse(eventStream, request, metadata, ctx)
+      ? streamingResponse(eventStream, request, metadata, ctx, transform)
+      : jsonResponse(eventStream, request, metadata, ctx, transform)
   }
 })

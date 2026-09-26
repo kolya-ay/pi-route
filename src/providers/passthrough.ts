@@ -1,11 +1,18 @@
 // src/providers/passthrough.ts
 
-import type { Account, IncomingRequest, Provider, ProviderResponse } from '../types'
+import type {
+  Account,
+  FormatTranslationMode,
+  IncomingRequest,
+  Provider,
+  ProviderResponse
+} from '../types'
 
 export const createPassthroughProvider = (
   name: string,
   type: Provider['type'],
   baseUrl: string,
+  formatTranslation: FormatTranslationMode = 'auto',
   fetchFn: (req: Request) => Promise<Response> = (req) => globalThis.fetch(req)
 ): Provider => ({
   name,
@@ -17,6 +24,19 @@ export const createPassthroughProvider = (
     apiKey: string
   ): Promise<ProviderResponse> {
     const start = Date.now()
+
+    // Raw passthrough can only enforce a schema the upstream already understands:
+    // it forwards bytes, so it can neither inject a private tool nor rewrite that
+    // tool's stream back into text.
+    if (request.structuredOutput) {
+      const nativeSurface =
+        type === 'openai' && (request.format === 'openai' || request.format === 'responses')
+      if (formatTranslation === 'constrained-tool' || !nativeSurface) {
+        throw new Error(
+          `formatTranslation ${formatTranslation} cannot enforce json_schema for raw ${type} passthrough`
+        )
+      }
+    }
 
     const headers = new Headers(request.rawRequest.headers)
 

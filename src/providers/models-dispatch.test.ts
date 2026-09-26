@@ -1,12 +1,13 @@
 // src/providers/models-dispatch.test.ts
 
 import { describe, expect, it } from 'bun:test'
-import type { Api, AssistantMessage, Model, Models } from '@earendil-works/pi-ai'
+import type { Api, AssistantMessage, Context, Model, Models, ToolCall } from '@earendil-works/pi-ai'
 import { createAssistantMessageEventStream, ModelsError } from '@earendil-works/pi-ai'
 
+import { STRUCTURED_OUTPUT_TOOL } from '../structured-output'
 import { createTel } from '../telemetry/tel'
 import { useTestExporter } from '../telemetry/test-fixture'
-import type { IncomingRequest } from '../types'
+import type { FormatTranslationMode, IncomingRequest } from '../types'
 import { createModelsDispatch, DispatchAuthError, mapAuthError } from './models-dispatch'
 
 const mkRequest = (overrides: Partial<IncomingRequest> = {}): IncomingRequest => ({
@@ -155,6 +156,135 @@ describe('createModelsDispatch', () => {
     await provider.dispatch(mkRequest({ stream: false }), { credential: 'key', key: 'k' }, 'k')
     // mkModel() carries real, non-zero limits (1000/500) — the fill-in must not touch them.
     expect(captured).toEqual({ contextWindow: 1000, maxTokens: 500 })
+  })
+})
+
+describe('createModelsDispatch structured output', () => {
+  const constraint = {
+    name: 'capital',
+    schema: {
+      type: 'object',
+      properties: { capital: { type: 'string' } },
+      required: ['capital'],
+      additionalProperties: false
+    }
+  }
+
+  const capture = (api: Model<Api>['api']) => {
+    const seen: { context?: Context; options?: Record<string, unknown> | undefined } = {}
+    const stream = ((_model: Model<Api>, context: Context, options?: Record<string, unknown>) => {
+      seen.context = context
+      seen.options = options
+      return structuredStream()
+    }) as unknown as Models['stream']
+    return {
+      seen,
+      models: mkModels({ getModel: () => ({ ...mkModel(), api }), stream })
+    }
+  }
+
+  const structuredStream = () => {
+    const stream = createAssistantMessageEventStream()
+    const message: AssistantMessage = {
+      ...mkMessage(),
+      content: [
+        {
+          type: 'toolCall',
+          id: 'call-1',
+          name: STRUCTURED_OUTPUT_TOOL,
+          arguments: { capital: 'Paris' }
+        }
+      ],
+      stopReason: 'toolUse'
+    }
+    stream.push({ type: 'start', partial: message })
+    stream.push({ type: 'toolcall_start', contentIndex: 0, partial: message })
+    stream.push({
+      type: 'toolcall_delta',
+      contentIndex: 0,
+      delta: '{"capital":"Paris"}',
+      partial: message
+    })
+    stream.push({
+      type: 'toolcall_end',
+      contentIndex: 0,
+      toolCall: message.content[0] as ToolCall,
+      partial: message
+    })
+    stream.push({ type: 'done', reason: 'toolUse', message })
+    stream.end(message)
+    return stream
+  }
+
+  const dispatchWith = async (
+    api: Model<Api>['api'],
+    mode: FormatTranslationMode,
+    format: IncomingRequest['format'] = 'openai'
+  ) => {
+    const { seen, models } = capture(api)
+    const provider = createModelsDispatch(models, 'prov', false, mode)
+    const response = await provider.dispatch(
+      mkRequest({ format, structuredOutput: constraint }),
+      { credential: 'key', key: 'k' },
+      'k'
+    )
+    return { seen, response }
+  }
+
+  it('puts the native chat wire shape on the stream options', async () => {
+    const { seen } = await dispatchWith('openai-completions', 'native')
+    expect(seen.options?.samplingParams).toEqual({
+      response_format: {
+        type: 'json_schema',
+        json_schema: { name: 'capital', strict: true, schema: constraint.schema }
+      }
+    })
+    expect(seen.context?.tools).toBeUndefined()
+  })
+
+  it('forces a private strict tool for backends without a native mapping', async () => {
+    const { seen } = await dispatchWith('anthropic-messages', 'auto')
+    expect(seen.context?.tools).toEqual([
+      {
+        name: STRUCTURED_OUTPUT_TOOL,
+        description: 'Return capital',
+        parameters: constraint.schema,
+        constrainedSampling: { type: 'json_schema', strict: 'require' }
+      }
+    ])
+    expect(seen.options?.toolChoice).toEqual({ type: 'tool', name: STRUCTURED_OUTPUT_TOOL })
+  })
+
+  it('returns the schema document as assistant content, never a tool call', async () => {
+    const { response } = await dispatchWith('anthropic-messages', 'constrained-tool')
+    const body = response.body as {
+      choices: [{ message: { content: string; tool_calls?: unknown }; finish_reason: string }]
+    }
+    expect(body.choices[0].message.content).toBe('{"capital":"Paris"}')
+    expect(body.choices[0].message.tool_calls).toBeUndefined()
+    expect(body.choices[0].finish_reason).toBe('stop')
+  })
+
+  it('fails before streaming when the backend cannot enforce the mode', async () => {
+    const { seen, models } = capture('openai-codex-responses')
+    const provider = createModelsDispatch(models, 'prov', false, 'native')
+    await expect(
+      provider.dispatch(
+        mkRequest({ format: 'openai', structuredOutput: constraint }),
+        { credential: 'key', key: 'k' },
+        'k'
+      )
+    ).rejects.toThrow(/openai-codex-responses/)
+    expect(seen.options).toBeUndefined()
+  })
+
+  it('leaves ordinary requests untouched', async () => {
+    const { seen, models } = capture('openai-completions')
+    const provider = createModelsDispatch(models, 'prov', false, 'constrained-tool')
+    await provider.dispatch(mkRequest(), { credential: 'key', key: 'k' }, 'k')
+    expect(seen.context?.tools).toBeUndefined()
+    expect(seen.options?.samplingParams).toBeUndefined()
+    expect(seen.options?.toolChoice).toBeUndefined()
   })
 })
 

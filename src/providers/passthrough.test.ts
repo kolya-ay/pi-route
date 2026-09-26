@@ -134,6 +134,7 @@ describe('createPassthroughProvider: openai', () => {
       'test-custom',
       'openai',
       'https://api.openai.com',
+      'auto',
       customFetch
     )
     const request = makeRequest('http://router.internal/v1/chat/completions')
@@ -142,5 +143,121 @@ describe('createPassthroughProvider: openai', () => {
     await provider.dispatch(request, account, 'sk-key')
 
     expect(fetchCalled).toBe(true)
+  })
+})
+
+describe('createPassthroughProvider: structured output', () => {
+  const constraint = {
+    name: 'capital',
+    schema: {
+      type: 'object',
+      properties: { capital: { type: 'string' } },
+      required: ['capital'],
+      additionalProperties: false
+    }
+  }
+
+  const structuredRequest = (
+    format: 'openai' | 'responses',
+    body: Record<string, unknown>
+  ): IncomingRequest => ({
+    id: 'req-test',
+    format,
+    rawRequest: new Request(
+      `http://router.internal/v1/${format === 'responses' ? 'responses' : 'chat/completions'}`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body)
+      }
+    ),
+    model: 'gpt-5',
+    stream: false,
+    structuredOutput: constraint
+  })
+
+  const recordingFetch = (seen: { body?: unknown }) => async (req: Request) => {
+    seen.body = await req.json()
+    return new Response('{}', { headers: { 'content-type': 'application/json' } })
+  }
+
+  it('forwards the chat schema field untouched', async () => {
+    const seen: { body?: unknown } = {}
+    const provider = createPassthroughProvider(
+      'oa',
+      'openai',
+      'https://api.openai.com/v1',
+      'native',
+      recordingFetch(seen)
+    )
+    const response_format = {
+      type: 'json_schema',
+      json_schema: { name: 'capital', strict: true, schema: constraint.schema }
+    }
+    await provider.dispatch(
+      structuredRequest('openai', { model: 'gpt-5', messages: [], response_format }),
+      makeAccount(),
+      'sk'
+    )
+    expect((seen.body as Record<string, unknown>).response_format).toEqual(response_format)
+  })
+
+  it('forwards the responses schema field untouched under auto', async () => {
+    const seen: { body?: unknown } = {}
+    const provider = createPassthroughProvider(
+      'oa',
+      'openai',
+      'https://api.openai.com/v1',
+      'auto',
+      recordingFetch(seen)
+    )
+    const text = { format: { type: 'json_schema', name: 'capital', schema: constraint.schema } }
+    await provider.dispatch(
+      structuredRequest('responses', { model: 'gpt-5', input: 'hi', text }),
+      makeAccount(),
+      'sk'
+    )
+    expect((seen.body as Record<string, unknown>).text).toEqual(text)
+  })
+
+  it('refuses modes and upstreams it cannot enforce, before calling out', async () => {
+    const cases: [string, 'auto' | 'native' | 'constrained-tool'][] = [
+      ['openai', 'constrained-tool'],
+      ['anthropic', 'auto']
+    ]
+    for (const [type, mode] of cases) {
+      let called = false
+      const provider = createPassthroughProvider(
+        'p',
+        type,
+        'https://api.example.com/v1',
+        mode,
+        async () => {
+          called = true
+          return new Response('{}')
+        }
+      )
+      await expect(
+        provider.dispatch(
+          structuredRequest('openai', { model: 'gpt-5', messages: [] }),
+          makeAccount(),
+          'sk'
+        )
+      ).rejects.toThrow(/json_schema/)
+      expect(called).toBe(false)
+    }
+  })
+
+  it('leaves requests without structured output unaffected by the policy', async () => {
+    const seen: { body?: unknown } = {}
+    const provider = createPassthroughProvider(
+      'p',
+      'anthropic',
+      'https://api.anthropic.com',
+      'constrained-tool',
+      recordingFetch(seen)
+    )
+    await provider.dispatch(makeRequest('http://router.internal/v1/messages'), makeAccount(), 'sk')
+    expect(seen.body).toEqual({})
   })
 })

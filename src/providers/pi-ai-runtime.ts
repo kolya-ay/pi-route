@@ -45,34 +45,52 @@ export type StreamMetricsCtx = {
   costs: { inputCost: PerTokenUsd; outputCost: PerTokenUsd }
 }
 
-const wrapIfTelHooks = (
+// Applied after telemetry wrapping so metrics still observe the real upstream
+// events while the public serializers see the rewritten ones.
+export type EventTransform = (
+  events: AsyncIterable<AssistantMessageEvent>
+) => AsyncIterable<AssistantMessageEvent>
+
+const prepareEvents = (
   eventStream: AssistantMessageEventStream,
   request: IncomingRequest,
-  ctx: StreamMetricsCtx
+  ctx: StreamMetricsCtx,
+  transform?: EventTransform
 ): AsyncIterable<AssistantMessageEvent> => {
-  if (request.telHooks === undefined) return eventStream
-  const { tel, span, capture } = request.telHooks
-  return wrapStreamForMetrics(eventStream, span, tel, ctx.costs, capture)
+  const measured =
+    request.telHooks === undefined
+      ? eventStream
+      : wrapStreamForMetrics(
+          eventStream,
+          request.telHooks.span,
+          request.telHooks.tel,
+          ctx.costs,
+          request.telHooks.capture
+        )
+  return transform ? transform(measured) : measured
 }
 
 export const streamingResponse = (
   eventStream: AssistantMessageEventStream,
   request: IncomingRequest,
   metadata: ProviderResponse['metadata'],
-  ctx: StreamMetricsCtx
-): ProviderResponse => {
-  const events = wrapIfTelHooks(eventStream, request, ctx)
-  return {
-    status: 200,
-    headers: new Headers({
-      'content-type': 'text/event-stream',
-      'cache-control': 'no-cache',
-      connection: 'keep-alive'
-    }),
-    body: formatSse(request.format, events, request.id, request.model),
-    metadata
-  }
-}
+  ctx: StreamMetricsCtx,
+  transform?: EventTransform
+): ProviderResponse => ({
+  status: 200,
+  headers: new Headers({
+    'content-type': 'text/event-stream',
+    'cache-control': 'no-cache',
+    connection: 'keep-alive'
+  }),
+  body: formatSse(
+    request.format,
+    prepareEvents(eventStream, request, ctx, transform),
+    request.id,
+    request.model
+  ),
+  metadata
+})
 
 // Collect-and-serialize for non-streaming. Throws on mid-stream error so the
 // dispatch.ts catch-wrapper can surface a 502 + provider_error telemetry.
@@ -80,9 +98,10 @@ export const jsonResponse = async (
   eventStream: AssistantMessageEventStream,
   request: IncomingRequest,
   metadata: ProviderResponse['metadata'],
-  ctx: StreamMetricsCtx
+  ctx: StreamMetricsCtx,
+  transform?: EventTransform
 ): Promise<ProviderResponse> => {
-  const events = wrapIfTelHooks(eventStream, request, ctx)
+  const events = prepareEvents(eventStream, request, ctx, transform)
   let message: AssistantMessage | undefined
   for await (const event of events) {
     if (event.type === 'done') message = event.message

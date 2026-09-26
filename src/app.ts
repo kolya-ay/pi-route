@@ -50,12 +50,15 @@ const buildEntry = (models: MutableModels, name: string, config: ProviderConfig)
     const baseUrl = config.baseUrl ?? PASSTHROUGH_BASE_URLS[config.type] ?? ''
     if (!baseUrl) throw new Error(`provider "${name}" (type ${config.type}) requires baseUrl`)
     return {
-      provider: createPassthroughProvider(name, config.type, baseUrl),
+      provider: createPassthroughProvider(name, config.type, baseUrl, config.formatTranslation),
       account: config.account
     }
   }
   const construct = config.type === 'openai-compatible'
-  return { provider: createModelsDispatch(models, name, construct), account: config.account }
+  return {
+    provider: createModelsDispatch(models, name, construct, config.formatTranslation),
+    account: config.account
+  }
 }
 
 export const createApp = async (
