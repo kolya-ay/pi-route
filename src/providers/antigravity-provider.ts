@@ -14,16 +14,22 @@ import {
   type AssistantMessage,
   type AssistantMessageEventStream,
   type Context,
+  collapseSystemMessages,
   createAssistantMessageEventStream,
   createProvider,
+  getCurrentSystemPrompt,
+  getCurrentTools,
+  type JsonObject,
   type Message,
   type Model,
+  normalizeContext,
   type Provider,
   type RefreshModelsContext,
   type StreamOptions,
   type TextContent,
   type Tool,
-  type ToolCall
+  type ToolCall,
+  withoutInitialSystemMessage
 } from '@earendil-works/pi-ai'
 
 import { antigravityOAuth, PROJECT_HEADER } from '../auth/antigravity-auth'
@@ -76,7 +82,7 @@ export const parseDiscovery = (
 
 type GooglePart =
   | { text: string; thought?: boolean }
-  | { functionCall: { name: string; args: Record<string, unknown>; id?: string } }
+  | { functionCall: { name: string; args: JsonObject; id?: string } }
   | { functionResponse: { name: string; response: { output: string } } }
 
 type GoogleContent = { role: 'user' | 'model'; parts: GooglePart[] }
@@ -114,11 +120,15 @@ const messageToContent = (msg: Message): GoogleContent => {
         parts: [{ functionResponse: { name: msg.toolName, response: { output: text } } }]
       }
     }
+    case 'system':
+      throw new Error('System message must lead the transcript')
   }
 }
 
 export const contextToContents = (ctx: Context): GoogleContent[] =>
-  ctx.messages.map(messageToContent)
+  withoutInitialSystemMessage(collapseSystemMessages(normalizeContext(ctx)).messages).map(
+    messageToContent
+  )
 
 // --- Cloud Code envelope ---
 
@@ -170,7 +180,7 @@ export const buildEnvelope = (params: EnvelopeParams): Record<string, unknown> =
 export type ParsedPart =
   | { type: 'text'; text: string }
   | { type: 'thinking'; text: string }
-  | { type: 'functionCall'; name: string; args: Record<string, unknown>; id?: string }
+  | { type: 'functionCall'; name: string; args: JsonObject; id?: string }
   | {
       type: 'usage'
       promptTokenCount: number
@@ -196,7 +206,7 @@ export const parseCloudCodeChunk = (chunk: Record<string, unknown>): ParsedPart[
 
   const parsed: ParsedPart[] = rawParts.map((part) => {
     if (part.functionCall !== undefined) {
-      const fc = part.functionCall as { name: string; args: Record<string, unknown>; id?: string }
+      const fc = part.functionCall as { name: string; args: JsonObject; id?: string }
       return {
         type: 'functionCall' as const,
         name: fc.name,
@@ -461,14 +471,19 @@ export const streamAntigravity = (
   }
 
   const projectId = options?.headers?.[PROJECT_HEADER]
+  const transcript = collapseSystemMessages(normalizeContext(context))
   const envelope = buildEnvelope({
     modelId: model.id,
-    contents: contextToContents(context),
+    contents: contextToContents(transcript),
     maxOutputTokens: options?.maxTokens ?? model.maxTokens,
     temperature: options?.temperature ?? 0.7,
     ...(typeof projectId === 'string' ? { projectId } : {}),
-    ...(context.systemPrompt !== undefined ? { systemPrompt: context.systemPrompt } : {}),
-    ...(context.tools !== undefined ? { tools: context.tools } : {})
+    ...(getCurrentSystemPrompt(transcript.messages)
+      ? { systemPrompt: getCurrentSystemPrompt(transcript.messages) }
+      : {}),
+    ...(getCurrentTools(transcript.messages).length > 0
+      ? { tools: getCurrentTools(transcript.messages) }
+      : {})
   })
 
   const doStream = async () => {

@@ -9,6 +9,7 @@ import type {
   RefreshModelsContext,
   Tool
 } from '@earendil-works/pi-ai'
+import { createModels, createProvider } from '@earendil-works/pi-ai'
 
 import { PROJECT_HEADER } from '../auth/antigravity-auth'
 import { deadlined } from '../models/fetch-timeout'
@@ -496,5 +497,139 @@ describe('streamAntigravity projectId', () => {
     const message = await streamAntigravity(fetchFn, streamModel, ctx).result()
     expect(message.stopReason).toBe('error')
     expect(message.errorMessage).toContain('access token')
+  })
+})
+
+describe('antigravity transcript integration', () => {
+  it('preserves Models system prompt and tools outside conversation contents', async () => {
+    const requests: RequestInit[] = []
+    const fetchFn = async (_url: string, init?: RequestInit) => {
+      requests.push(init ?? {})
+      return new Response(sseBody, { status: 200 })
+    }
+    const models = createModels({
+      authContext: { env: async () => undefined, fileExists: async () => false }
+    })
+    models.setProvider(
+      createProvider({
+        id: 'ag',
+        auth: {
+          apiKey: {
+            name: 'test',
+            resolve: async () => ({ auth: { apiKey: 'tok' } })
+          }
+        },
+        models: [streamModel],
+        api: {
+          stream: (model, context, options) => streamAntigravity(fetchFn, model, context, options),
+          streamSimple: (model, context, options) =>
+            streamAntigravity(fetchFn, model, context, options)
+        }
+      })
+    )
+
+    await models
+      .stream(streamModel, {
+        systemPrompt: 'Follow the policy.',
+        tools: [{ name: 'readFile', description: 'Read a file', parameters: { type: 'object' } }],
+        messages: [{ role: 'user', content: 'Hello', timestamp: 0 }]
+      })
+      .result()
+
+    const request = JSON.parse(requests[0]?.body as string).request as Record<string, unknown>
+    expect(request.systemInstruction).toEqual({
+      role: 'user',
+      parts: [{ text: 'Follow the policy.' }]
+    })
+    expect(request.tools).toEqual([
+      {
+        functionDeclarations: [
+          { name: 'readFile', description: 'Read a file', parameters: { type: 'object' } }
+        ]
+      }
+    ])
+    expect(request.contents).toEqual([{ role: 'user', parts: [{ text: 'Hello' }] }])
+  })
+
+  it('replays later system prompt and tool updates before converting contents', async () => {
+    const requests: RequestInit[] = []
+    const fetchFn = async (_url: string, init?: RequestInit) => {
+      requests.push(init ?? {})
+      return new Response(sseBody, { status: 200 })
+    }
+    const context: Context = {
+      messages: [
+        {
+          role: 'system',
+          content: 'Initial policy.',
+          toolsAdded: [
+            { name: 'readFile', description: 'Read a file', parameters: { type: 'object' } }
+          ],
+          timestamp: 0
+        },
+        { role: 'user', content: 'First request.', timestamp: 1 },
+        {
+          role: 'system',
+          content: 'Use the updated policy.',
+          toolsAdded: [
+            { name: 'writeFile', description: 'Write a file', parameters: { type: 'object' } }
+          ],
+          timestamp: 2
+        },
+        { role: 'user', content: 'Second request.', timestamp: 3 }
+      ]
+    }
+
+    await streamAntigravity(fetchFn, streamModel, context, { apiKey: 'tok' }).result()
+
+    const request = JSON.parse(requests[0]?.body as string).request as Record<string, unknown>
+    expect(request.systemInstruction).toEqual({
+      role: 'user',
+      parts: [{ text: 'Initial policy.\n\nUse the updated policy.' }]
+    })
+    expect(request.tools).toEqual([
+      {
+        functionDeclarations: [
+          { name: 'readFile', description: 'Read a file', parameters: { type: 'object' } },
+          { name: 'writeFile', description: 'Write a file', parameters: { type: 'object' } }
+        ]
+      }
+    ])
+    expect(request.contents).toEqual([
+      { role: 'user', parts: [{ text: 'First request.' }] },
+      { role: 'user', parts: [{ text: 'Second request.' }] }
+    ])
+  })
+
+  it('preserves raw Context system prompt and tools when called directly', async () => {
+    const requests: RequestInit[] = []
+    const fetchFn = async (_url: string, init?: RequestInit) => {
+      requests.push(init ?? {})
+      return new Response(sseBody, { status: 200 })
+    }
+
+    await streamAntigravity(
+      fetchFn,
+      streamModel,
+      {
+        systemPrompt: 'Direct policy.',
+        tools: [{ name: 'readFile', description: 'Read a file', parameters: { type: 'object' } }],
+        messages: [{ role: 'user', content: 'Hello', timestamp: 0 }]
+      },
+      { apiKey: 'tok' }
+    ).result()
+
+    const request = JSON.parse(requests[0]?.body as string).request as Record<string, unknown>
+    expect(request.systemInstruction).toEqual({
+      role: 'user',
+      parts: [{ text: 'Direct policy.' }]
+    })
+    expect(request.tools).toEqual([
+      {
+        functionDeclarations: [
+          { name: 'readFile', description: 'Read a file', parameters: { type: 'object' } }
+        ]
+      }
+    ])
   })
 })

@@ -4,6 +4,7 @@ import type {
   Api,
   AssistantMessage,
   Context,
+  JsonObject,
   Message,
   TextContent,
   Tool,
@@ -106,9 +107,7 @@ const extractAnthropicMessageContent = (
             id: typeof b.id === 'string' ? b.id : '',
             name: typeof b.name === 'string' ? b.name : '',
             arguments:
-              typeof b.input === 'object' && b.input !== null
-                ? (b.input as Record<string, unknown>)
-                : {}
+              typeof b.input === 'object' && b.input !== null ? (b.input as JsonObject) : {}
           }
         }
         return { type: 'text' as const, text: String(b.text ?? '') }
@@ -217,10 +216,10 @@ const convertOpenAiMessage = (m: Record<string, unknown>): Message | null => {
             typeof tc.function === 'object' && tc.function !== null
               ? (tc.function as Record<string, unknown>)
               : {}
-          const args = ((): Record<string, unknown> => {
+          const args = ((): JsonObject => {
             try {
               const raw = fn.arguments
-              return typeof raw === 'string' ? (JSON.parse(raw) as Record<string, unknown>) : {}
+              return typeof raw === 'string' ? (JSON.parse(raw) as JsonObject) : {}
             } catch {
               return {}
             }
@@ -347,9 +346,9 @@ export const responsesToContext = (body: Record<string, unknown>): Context => {
         const callId = typeof it.call_id === 'string' ? it.call_id : ''
         const name = typeof it.name === 'string' ? it.name : ''
         const argsStr = typeof it.arguments === 'string' ? it.arguments : '{}'
-        let args: Record<string, unknown> = {}
+        let args: JsonObject = {}
         try {
-          args = JSON.parse(argsStr) as Record<string, unknown>
+          args = JSON.parse(argsStr) as JsonObject
         } catch {
           /* keep empty */
         }
