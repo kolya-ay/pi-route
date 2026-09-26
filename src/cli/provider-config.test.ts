@@ -52,8 +52,16 @@ describe('removeCredential', () => {
 describe('formatProviderList', () => {
   const options = {
     providers: {
-      cerebras: { type: 'openai-compatible', account: { credential: 'apiKey', name: 'cerebras' } },
-      cc: { type: 'anthropic', account: { credential: 'oauth', name: 'anthropic-cc' } }
+      cerebras: {
+        type: 'openai-compatible',
+        account: { credential: 'apiKey', name: 'cerebras' },
+        formatTranslation: 'auto'
+      },
+      cc: {
+        type: 'anthropic',
+        account: { credential: 'oauth', name: 'anthropic-cc' },
+        formatTranslation: 'auto'
+      }
     },
     pipeline: [],
     expose: []
@@ -61,10 +69,15 @@ describe('formatProviderList', () => {
 
   const withDisabled = {
     providers: {
-      cerebras: { type: 'openai-compatible', account: { credential: 'apiKey', name: 'cerebras' } },
+      cerebras: {
+        type: 'openai-compatible',
+        account: { credential: 'apiKey', name: 'cerebras' },
+        formatTranslation: 'auto'
+      },
       off: {
         type: 'openai-compatible',
-        account: { credential: 'apiKey', name: 'off', disabled: true }
+        account: { credential: 'apiKey', name: 'off', disabled: true },
+        formatTranslation: 'auto'
       }
     },
     pipeline: [],

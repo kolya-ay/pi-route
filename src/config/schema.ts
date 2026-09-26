@@ -38,6 +38,8 @@ const ModelMetaOverrideSchema = z.strictObject({
 // pricing fields, so discovery is on unless the config opts out.
 const OPENAI_LIKE = new Set(['openai-compatible', 'openai'])
 
+const FormatTranslationSchema = z.enum(['auto', 'native', 'constrained-tool'])
+
 const ProviderSchema = z
   .strictObject({
     type: z.string(),
@@ -46,7 +48,8 @@ const ProviderSchema = z
     account: AccountValueSchema.optional(),
     disabled: z.boolean().optional(),
     discover: z.union([z.literal(false), z.array(DiscoverStrategySchema)]).optional(),
-    modelOverrides: z.record(z.string(), ModelMetaOverrideSchema).optional()
+    modelOverrides: z.record(z.string(), ModelMetaOverrideSchema).optional(),
+    formatTranslation: FormatTranslationSchema.default('auto')
   })
   .refine((p) => (p.apiKey === undefined) !== (p.account === undefined), {
     message: 'provider requires exactly one of `apiKey` or `account`'
@@ -95,7 +98,8 @@ const normalizeProvider = (raw: RawProvider): ProviderConfig => {
     ...(raw.baseUrl !== undefined ? { baseUrl: raw.baseUrl } : {}),
     account: normalizeAccount(raw),
     ...(discover !== undefined ? { discover } : {}),
-    ...(raw.modelOverrides !== undefined ? { modelOverrides: raw.modelOverrides } : {})
+    ...(raw.modelOverrides !== undefined ? { modelOverrides: raw.modelOverrides } : {}),
+    formatTranslation: raw.formatTranslation
   }
 }
 

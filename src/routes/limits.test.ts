@@ -42,7 +42,11 @@ describe('/v1/limits', () => {
     try {
       const options: RouterOptions = {
         providers: {
-          router: { type: 'openrouter', account: { credential: 'key', key: 'sk-test' } }
+          router: {
+            type: 'openrouter',
+            account: { credential: 'key', key: 'sk-test' },
+            formatTranslation: 'auto'
+          }
         },
         pipeline: [],
         expose: []
@@ -63,12 +67,21 @@ describe('/v1/limits', () => {
     try {
       const options: RouterOptions = {
         providers: {
-          claude: { type: 'anthropic', account: { credential: 'key', key: 'sk-ant' } },
-          codex: { type: 'openai-codex', account: { credential: 'key', key: 'sk-codex' } },
+          claude: {
+            type: 'anthropic',
+            account: { credential: 'key', key: 'sk-ant' },
+            formatTranslation: 'auto'
+          },
+          codex: {
+            type: 'openai-codex',
+            account: { credential: 'key', key: 'sk-codex' },
+            formatTranslation: 'auto'
+          },
           ignored: {
             type: 'openai',
             baseUrl: 'https://api.openai.com/v1',
-            account: { credential: 'key', key: 'sk-openai' }
+            account: { credential: 'key', key: 'sk-openai' },
+            formatTranslation: 'auto'
           }
         },
         pipeline: [],
@@ -126,8 +139,16 @@ describe('/v1/limits', () => {
     try {
       const options: RouterOptions = {
         providers: {
-          claude: { type: 'anthropic', account: { credential: 'oauth', name: 'claude-oauth' } },
-          codex: { type: 'openai-codex', account: { credential: 'oauth', name: 'codex-oauth' } }
+          claude: {
+            type: 'anthropic',
+            account: { credential: 'oauth', name: 'claude-oauth' },
+            formatTranslation: 'auto'
+          },
+          codex: {
+            type: 'openai-codex',
+            account: { credential: 'oauth', name: 'codex-oauth' },
+            formatTranslation: 'auto'
+          }
         },
         pipeline: [],
         expose: []

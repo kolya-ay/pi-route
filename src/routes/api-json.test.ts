@@ -5,7 +5,13 @@ import type { RouterOptions } from '../types'
 import { buildOpencodeModels, renderApiJson, resolveApiUrl } from './api-json'
 
 const opts = (over: Partial<RouterOptions> = {}): RouterOptions => ({
-  providers: { cerebras: { type: 'cerebras', account: { credential: 'key', key: 'k' } } },
+  providers: {
+    cerebras: {
+      type: 'cerebras',
+      account: { credential: 'key', key: 'k' },
+      formatTranslation: 'auto'
+    }
+  },
   pipeline: [],
   expose: [],
   ...over
@@ -43,7 +49,8 @@ describe('buildOpencodeModels', () => {
           type: 'openai-compatible',
           baseUrl: 'http://x/v1',
           account: { credential: 'key', key: 'k' },
-          discover: ['fallback']
+          discover: ['fallback'],
+          formatTranslation: 'auto'
         }
       },
       pipeline: [],

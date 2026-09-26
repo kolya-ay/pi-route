@@ -14,7 +14,13 @@ import {
 } from './model-projection'
 
 const opts = (over: Partial<RouterOptions> = {}): RouterOptions => ({
-  providers: { cerebras: { type: 'cerebras', account: { credential: 'key', key: 'k' } } },
+  providers: {
+    cerebras: {
+      type: 'cerebras',
+      account: { credential: 'key', key: 'k' },
+      formatTranslation: 'auto'
+    }
+  },
   pipeline: [],
   expose: [],
   ...over

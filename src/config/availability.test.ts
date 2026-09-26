@@ -7,9 +7,17 @@ import { availableProviders, isAvailable } from './availability'
 
 const options = (): RouterOptions => ({
   providers: {
-    key: { type: 'cerebras', account: { credential: 'key', key: 'k' } },
-    oauth: { type: 'anthropic', account: { credential: 'oauth', name: 'anthropic-cc' } },
-    off: { type: 'cerebras', account: { credential: 'key', key: 'k', disabled: true } }
+    key: { type: 'cerebras', account: { credential: 'key', key: 'k' }, formatTranslation: 'auto' },
+    oauth: {
+      type: 'anthropic',
+      account: { credential: 'oauth', name: 'anthropic-cc' },
+      formatTranslation: 'auto'
+    },
+    off: {
+      type: 'cerebras',
+      account: { credential: 'key', key: 'k', disabled: true },
+      formatTranslation: 'auto'
+    }
   },
   pipeline: [],
   expose: []

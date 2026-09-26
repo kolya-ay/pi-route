@@ -14,7 +14,7 @@ const authKey = 'secret'
 
 const baseOpts: RouterOptions = {
   providers: {
-    foo: { type: 'cerebras', account: { credential: 'key', key: 'k' } }
+    foo: { type: 'cerebras', account: { credential: 'key', key: 'k' }, formatTranslation: 'auto' }
   },
   pipeline: [],
   expose: []

@@ -19,7 +19,13 @@ import {
 // A Models with cerebras (static catalog incl. gpt-oss-120b) for guess/toModelMeta.
 const cerebrasModels = () =>
   buildTestModels({
-    providers: { cerebras: { type: 'cerebras', account: { credential: 'key', key: 'k' } } },
+    providers: {
+      cerebras: {
+        type: 'cerebras',
+        account: { credential: 'key', key: 'k' },
+        formatTranslation: 'auto'
+      }
+    },
     pipeline: [],
     expose: []
   })
@@ -109,7 +115,8 @@ describe('resolveMetadata', () => {
         baseUrl: 'http://x/v1',
         account: { credential: 'key', key: 'k' },
         discover: discover as never,
-        modelOverrides: overrides
+        modelOverrides: overrides,
+        formatTranslation: 'auto'
       }
     },
     pipeline: [],
@@ -297,7 +304,8 @@ const nvidiaGuessFixture = () => ({
         type: 'openai-compatible',
         baseUrl: 'https://example.test/v1',
         discover: ['guess'],
-        account: { credential: 'key', name: 'nvidia', key: 'k' }
+        account: { credential: 'key', name: 'nvidia', key: 'k' },
+        formatTranslation: 'auto'
       }
     },
     pipeline: [],
@@ -441,7 +449,8 @@ test('fetchProviderMetadata gives up on a hung endpoint instead of hanging', asy
         type: 'openai-compatible',
         baseUrl: 'https://example.test/v1',
         discover: ['openai-models-list'],
-        account: { credential: 'key', key: 'k' }
+        account: { credential: 'key', key: 'k' },
+        formatTranslation: 'auto'
       } as never,
       50
     )
@@ -511,7 +520,8 @@ describe('enrichLiveMeta', () => {
         type: 'openai-compatible',
         baseUrl: 'https://example.test/v1',
         discover: ['openai-models-list'],
-        account: { credential: 'key', key: 'k', disabled: true }
+        account: { credential: 'key', key: 'k', disabled: true },
+        formatTranslation: 'auto'
       }
     })
     expect(calls).toEqual([])
@@ -527,7 +537,8 @@ describe('enrichLiveMeta', () => {
         type: 'openai-compatible',
         baseUrl: 'https://example.test/v1',
         discover: ['openai-models-list'],
-        account: { credential: 'oauth', name: 'openai-compatible-acct' }
+        account: { credential: 'oauth', name: 'openai-compatible-acct' },
+        formatTranslation: 'auto'
       }
     })
     expect(calls).toEqual(['https://example.test/v1/models'])
@@ -540,7 +551,8 @@ describe('enrichLiveMeta', () => {
           type: 'openai-compatible',
           baseUrl: 'https://example.test/v1',
           discover: ['litellm'],
-          account: { credential: 'key', key: 'k' }
+          account: { credential: 'key', key: 'k' },
+          formatTranslation: 'auto'
         }
       },
       ['proxy']
@@ -556,7 +568,8 @@ describe('enrichLiveMeta', () => {
         type: 'some-proxy',
         baseUrl: 'https://example.test/v1',
         discover: ['openai-models-list'],
-        account: { credential: 'key', key: 'k' }
+        account: { credential: 'key', key: 'k' },
+        formatTranslation: 'auto'
       }
     })
     expect(calls).toEqual(['https://example.test/v1/models'])
@@ -575,13 +588,15 @@ describe('enrichLiveMeta', () => {
         type: 'openai-compatible',
         baseUrl: 'https://cov/v1',
         account: { credential: 'key', key: 'k' },
-        discover: ['openai-models-list']
+        discover: ['openai-models-list'],
+        formatTranslation: 'auto'
       },
       bare: {
         type: 'openai-compatible',
         baseUrl: 'https://bare/v1',
         account: { credential: 'key', key: 'k' },
-        discover: ['openai-models-list']
+        discover: ['openai-models-list'],
+        formatTranslation: 'auto'
       }
     },
     pipeline: [],

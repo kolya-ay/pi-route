@@ -24,6 +24,8 @@ providers:
   #   type: openai-compatible
   #   baseUrl: https://llm.chutes.ai/v1
   #   apiKey: $CHUTES_API_KEY
+  # Convert structured response formats for providers that do not support them natively.
+  #   formatTranslation: constrained-tool  # auto (default), native, constrained-tool
 
 # Server-facing settings: the gate token and the OpenCode /api.json masquerade.
 # server:

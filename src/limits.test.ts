@@ -51,7 +51,8 @@ describe('collectLimitsSnapshot', () => {
       providers: {
         router: {
           type: 'openrouter',
-          account: { credential: 'key', key: 'sk-test' }
+          account: { credential: 'key', key: 'sk-test' },
+          formatTranslation: 'auto'
         }
       },
       pipeline: [],
@@ -66,15 +67,18 @@ describe('collectLimitsSnapshot', () => {
       providers: {
         claude: {
           type: 'anthropic',
-          account: { credential: 'key', key: 'sk-ant-test' }
+          account: { credential: 'key', key: 'sk-ant-test' },
+          formatTranslation: 'auto'
         },
         codex: {
           type: 'openai-codex',
-          account: { credential: 'key', key: 'sk-codex-test' }
+          account: { credential: 'key', key: 'sk-codex-test' },
+          formatTranslation: 'auto'
         },
         ignored: {
           type: 'openai',
-          account: { credential: 'key', key: 'sk-openai-test' }
+          account: { credential: 'key', key: 'sk-openai-test' },
+          formatTranslation: 'auto'
         }
       },
       pipeline: [],
@@ -96,7 +100,8 @@ describe('collectLimitsSnapshot', () => {
       providers: {
         codex: {
           type: 'openai-codex',
-          account: { credential: 'oauth', name: 'missing' }
+          account: { credential: 'oauth', name: 'missing' },
+          formatTranslation: 'auto'
         }
       },
       pipeline: [],
@@ -134,11 +139,13 @@ describe('collectLimitsSnapshot', () => {
         providers: {
           claude: {
             type: 'anthropic',
-            account: { credential: 'oauth', name: 'claude-oauth' }
+            account: { credential: 'oauth', name: 'claude-oauth' },
+            formatTranslation: 'auto'
           },
           codex: {
             type: 'openai-codex',
-            account: { credential: 'key', key: 'sk-codex-test' }
+            account: { credential: 'key', key: 'sk-codex-test' },
+            formatTranslation: 'auto'
           }
         },
         pipeline: [],
@@ -199,11 +206,13 @@ describe('collectLimitsSnapshot', () => {
         providers: {
           claude: {
             type: 'anthropic',
-            account: { credential: 'oauth', name: 'claude-oauth' }
+            account: { credential: 'oauth', name: 'claude-oauth' },
+            formatTranslation: 'auto'
           },
           codex: {
             type: 'openai-codex',
-            account: { credential: 'oauth', name: 'codex-oauth' }
+            account: { credential: 'oauth', name: 'codex-oauth' },
+            formatTranslation: 'auto'
           }
         },
         pipeline: [],
@@ -279,7 +288,8 @@ describe('collectLimitsSnapshot', () => {
         providers: {
           claude: {
             type: 'anthropic',
-            account: { credential: 'oauth', name: 'claude-oauth' }
+            account: { credential: 'oauth', name: 'claude-oauth' },
+            formatTranslation: 'auto'
           }
         },
         pipeline: [],
@@ -322,7 +332,8 @@ describe('collectLimitsSnapshot', () => {
         providers: {
           claude: {
             type: 'anthropic',
-            account: { credential: 'oauth', name: 'claude-oauth' }
+            account: { credential: 'oauth', name: 'claude-oauth' },
+            formatTranslation: 'auto'
           }
         },
         pipeline: [],
@@ -357,7 +368,8 @@ describe('collectLimitsSnapshot', () => {
         providers: {
           codex: {
             type: 'openai-codex',
-            account: { credential: 'oauth', name: 'codex-oauth' }
+            account: { credential: 'oauth', name: 'codex-oauth' },
+            formatTranslation: 'auto'
           }
         },
         pipeline: [],
@@ -426,7 +438,8 @@ describe('collectLimitsSnapshot', () => {
         providers: {
           claude: {
             type: 'anthropic',
-            account: { credential: 'oauth', name: 'claude-oauth' }
+            account: { credential: 'oauth', name: 'claude-oauth' },
+            formatTranslation: 'auto'
           }
         },
         pipeline: [],
@@ -476,7 +489,8 @@ describe('collectLimitsSnapshot', () => {
         providers: {
           codex: {
             type: 'openai-codex',
-            account: { credential: 'oauth', name: 'codex-oauth' }
+            account: { credential: 'oauth', name: 'codex-oauth' },
+            formatTranslation: 'auto'
           }
         },
         pipeline: [],
@@ -533,7 +547,8 @@ describe('collectLimitsSnapshot', () => {
         providers: {
           codex: {
             type: 'openai-codex',
-            account: { credential: 'oauth', name: 'codex-oauth' }
+            account: { credential: 'oauth', name: 'codex-oauth' },
+            formatTranslation: 'auto'
           }
         },
         pipeline: [],
@@ -568,7 +583,8 @@ describe('collectLimitsSnapshot', () => {
         providers: {
           codex: {
             type: 'openai-codex',
-            account: { credential: 'oauth', name: 'codex-oauth' }
+            account: { credential: 'oauth', name: 'codex-oauth' },
+            formatTranslation: 'auto'
           }
         },
         pipeline: [],
@@ -622,11 +638,13 @@ describe('collectLimitsSnapshot', () => {
         providers: {
           claude: {
             type: 'anthropic',
-            account: { credential: 'oauth', name: 'claude-oauth' }
+            account: { credential: 'oauth', name: 'claude-oauth' },
+            formatTranslation: 'auto'
           },
           codex: {
             type: 'openai-codex',
-            account: { credential: 'oauth', name: 'codex-oauth' }
+            account: { credential: 'oauth', name: 'codex-oauth' },
+            formatTranslation: 'auto'
           }
         },
         pipeline: [],
@@ -675,7 +693,8 @@ describe('collectLimitsSnapshot', () => {
         providers: {
           claude: {
             type: 'anthropic',
-            account: { credential: 'oauth', name: 'claude-oauth' }
+            account: { credential: 'oauth', name: 'claude-oauth' },
+            formatTranslation: 'auto'
           }
         },
         pipeline: [],
@@ -719,7 +738,8 @@ describe('collectLimitsSnapshot', () => {
         providers: {
           claude: {
             type: 'anthropic',
-            account: { credential: 'oauth', name: 'claude-oauth' }
+            account: { credential: 'oauth', name: 'claude-oauth' },
+            formatTranslation: 'auto'
           }
         },
         pipeline: [],
@@ -758,7 +778,8 @@ describe('collectLimitsSnapshot', () => {
         providers: {
           claude: {
             type: 'anthropic',
-            account: { credential: 'oauth', name: 'claude-oauth' }
+            account: { credential: 'oauth', name: 'claude-oauth' },
+            formatTranslation: 'auto'
           }
         },
         pipeline: [],
@@ -794,7 +815,8 @@ describe('collectLimitsSnapshot', () => {
         providers: {
           claude: {
             type: 'anthropic',
-            account: { credential: 'oauth', name: 'claude-oauth' }
+            account: { credential: 'oauth', name: 'claude-oauth' },
+            formatTranslation: 'auto'
           }
         },
         pipeline: [],
@@ -825,7 +847,8 @@ describe('collectLimitsSnapshot', () => {
         providers: {
           codex: {
             type: 'openai-codex',
-            account: { credential: 'oauth', name: 'codex-oauth' }
+            account: { credential: 'oauth', name: 'codex-oauth' },
+            formatTranslation: 'auto'
           }
         },
         pipeline: [],
@@ -848,7 +871,11 @@ describe('collectLimitsSnapshot', () => {
     const state = mkState(
       {
         providers: {
-          claude: { type: 'anthropic', account: { credential: 'oauth', name: 'anthropic-main' } }
+          claude: {
+            type: 'anthropic',
+            account: { credential: 'oauth', name: 'anthropic-main' },
+            formatTranslation: 'auto'
+          }
         },
         pipeline: [],
         expose: []
@@ -870,7 +897,11 @@ describe('collectLimitsSnapshot', () => {
     const state = mkState(
       {
         providers: {
-          claude: { type: 'anthropic', account: { credential: 'oauth', name: 'anthropic-main' } }
+          claude: {
+            type: 'anthropic',
+            account: { credential: 'oauth', name: 'anthropic-main' },
+            formatTranslation: 'auto'
+          }
         },
         pipeline: [],
         expose: []

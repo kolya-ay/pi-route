@@ -107,7 +107,7 @@ const providerLogin = async (
   // `<type>-<account>.json` file the loader resolves for a configured provider.
   const account: Account = { credential: 'oauth', name: credentialName(configType, name) }
   const options: RouterOptions = {
-    providers: { [name]: { type: configType, account } },
+    providers: { [name]: { type: configType, account, formatTranslation: 'auto' } },
     pipeline: [],
     expose: []
   }

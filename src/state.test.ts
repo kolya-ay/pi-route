@@ -6,7 +6,11 @@ import type { RouterOptions } from './types'
 
 const minimalOptions: RouterOptions = {
   providers: {
-    p1: { type: 'anthropic', account: { credential: 'key', key: 'sk-test' } }
+    p1: {
+      type: 'anthropic',
+      account: { credential: 'key', key: 'sk-test' },
+      formatTranslation: 'auto'
+    }
   },
   pipeline: [],
   expose: []

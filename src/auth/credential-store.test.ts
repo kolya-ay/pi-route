@@ -9,11 +9,16 @@ import { fileCredentialStore } from './credential-store'
 
 const options = {
   providers: {
-    cc: { type: 'anthropic', account: { credential: 'oauth', name: 'cc' } },
+    cc: {
+      type: 'anthropic',
+      account: { credential: 'oauth', name: 'cc' },
+      formatTranslation: 'auto'
+    },
     chutes: {
       type: 'openai-compatible',
       baseUrl: 'https://x',
-      account: { credential: 'key', key: 'sk-123' }
+      account: { credential: 'key', key: 'sk-123' },
+      formatTranslation: 'auto'
     }
   },
   pipeline: [],
@@ -91,7 +96,11 @@ describe('fileCredentialStore', () => {
   test('a disabled account reads undefined', async () => {
     const store = fileCredentialStore('/nonexistent', {
       providers: {
-        cc: { type: 'cerebras', account: { credential: 'key', key: 'sk', disabled: true } }
+        cc: {
+          type: 'cerebras',
+          account: { credential: 'key', key: 'sk', disabled: true },
+          formatTranslation: 'auto'
+        }
       }
     } as unknown as RouterOptions)
     expect(await store.read('cc')).toBeUndefined()
@@ -99,7 +108,13 @@ describe('fileCredentialStore', () => {
 
   test('an enabled account still reads its key', async () => {
     const store = fileCredentialStore('/nonexistent', {
-      providers: { cc: { type: 'cerebras', account: { credential: 'key', key: 'sk' } } }
+      providers: {
+        cc: {
+          type: 'cerebras',
+          account: { credential: 'key', key: 'sk' },
+          formatTranslation: 'auto'
+        }
+      }
     } as unknown as RouterOptions)
     expect(await store.read('cc')).toEqual({ type: 'api_key', key: 'sk' })
   })

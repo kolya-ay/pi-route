@@ -7,7 +7,11 @@ import { createModelsRoute } from './models'
 
 const opts = (over: Partial<RouterOptions> = {}): RouterOptions => ({
   providers: {
-    cerebras: { type: 'cerebras', account: { credential: 'key', key: 'k' } }
+    cerebras: {
+      type: 'cerebras',
+      account: { credential: 'key', key: 'k' },
+      formatTranslation: 'auto'
+    }
   },
   pipeline: [],
   expose: [],

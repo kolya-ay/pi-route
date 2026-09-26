@@ -6,8 +6,16 @@ import { resolveCandidates } from './resolve'
 
 const opts = (over: Partial<RouterOptions> = {}): RouterOptions => ({
   providers: {
-    'claude-personal': { type: 'anthropic', account: { credential: 'key', key: 'x' } },
-    'claude-work': { type: 'anthropic', account: { credential: 'key', key: 'y' } }
+    'claude-personal': {
+      type: 'anthropic',
+      account: { credential: 'key', key: 'x' },
+      formatTranslation: 'auto'
+    },
+    'claude-work': {
+      type: 'anthropic',
+      account: { credential: 'key', key: 'y' },
+      formatTranslation: 'auto'
+    }
   },
   pipeline: [],
   expose: [],
@@ -85,7 +93,11 @@ describe('resolveCandidates', () => {
   test('exact-match pools with when gating remain exact', () => {
     const o = opts({
       providers: {
-        provider: { type: 'anthropic', account: { credential: 'key', key: 'x' } }
+        provider: {
+          type: 'anthropic',
+          account: { credential: 'key', key: 'x' },
+          formatTranslation: 'auto'
+        }
       },
       pipeline: [
         {

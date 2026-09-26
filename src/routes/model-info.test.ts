@@ -5,7 +5,13 @@ import type { RouterOptions } from '../types'
 import { buildModelInfoBody } from './model-info'
 
 const opts = (over: Partial<RouterOptions> = {}): RouterOptions => ({
-  providers: { cerebras: { type: 'cerebras', account: { credential: 'key', key: 'k' } } },
+  providers: {
+    cerebras: {
+      type: 'cerebras',
+      account: { credential: 'key', key: 'k' },
+      formatTranslation: 'auto'
+    }
+  },
   pipeline: [],
   expose: [],
   ...over
@@ -53,7 +59,8 @@ describe('/model/info (LiteLLM)', () => {
           baseUrl: 'http://x/v1',
           account: { credential: 'key', key: 'k' },
           discover: ['fallback'],
-          modelOverrides: { 'deepseek-ai/deepseek-v4-pro': { contextWindow: 163840 } }
+          modelOverrides: { 'deepseek-ai/deepseek-v4-pro': { contextWindow: 163840 } },
+          formatTranslation: 'auto'
         }
       },
       pipeline: [],

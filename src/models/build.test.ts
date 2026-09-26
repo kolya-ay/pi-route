@@ -9,13 +9,26 @@ const dirs = () => mkdtempSync(join(tmpdir(), 'pi-route-build-'))
 
 const options = {
   providers: {
-    cc: { type: 'anthropic', account: { credential: 'oauth', name: 'cc' } },
-    codex: { type: 'openai-codex', account: { credential: 'oauth', name: 'codex' } },
-    ag: { type: 'antigravity', account: { credential: 'oauth', name: 'antigravity' } },
+    cc: {
+      type: 'anthropic',
+      account: { credential: 'oauth', name: 'cc' },
+      formatTranslation: 'auto'
+    },
+    codex: {
+      type: 'openai-codex',
+      account: { credential: 'oauth', name: 'codex' },
+      formatTranslation: 'auto'
+    },
+    ag: {
+      type: 'antigravity',
+      account: { credential: 'oauth', name: 'antigravity' },
+      formatTranslation: 'auto'
+    },
     chutes: {
       type: 'openai-compatible',
       baseUrl: 'https://llm.chutes.ai/v1',
-      account: { credential: 'key', key: 'k' }
+      account: { credential: 'key', key: 'k' },
+      formatTranslation: 'auto'
     }
   },
   pipeline: [],
@@ -55,13 +68,15 @@ describe('buildModels', () => {
           type: 'openai-compatible',
           baseUrl: 'https://example.test/v1',
           discover: ['guess'],
-          account: { credential: 'key', name: 'nvidia', key: 'k' }
+          account: { credential: 'key', name: 'nvidia', key: 'k' },
+          formatTranslation: 'auto'
         },
         quiet: {
           type: 'openai-compatible',
           baseUrl: 'https://quiet.test/v1',
           discover: false,
-          account: { credential: 'key', name: 'quiet', key: 'k' }
+          account: { credential: 'key', name: 'quiet', key: 'k' },
+          formatTranslation: 'auto'
         }
       },
       pipeline: [],
@@ -80,7 +95,8 @@ describe('buildModels', () => {
         nvidia: {
           type: 'openai-compatible',
           baseUrl: 'https://example.test/v1',
-          account: { credential: 'key', name: 'nvidia', key: 'k', disabled: true }
+          account: { credential: 'key', name: 'nvidia', key: 'k', disabled: true },
+          formatTranslation: 'auto'
         }
       },
       pipeline: [],
@@ -102,13 +118,15 @@ describe('buildModels', () => {
             type: 'openai-compatible',
             baseUrl: 'https://e/v1',
             account: { credential: 'key', key: 'k' },
-            discover: ['auto']
+            discover: ['auto'],
+            formatTranslation: 'auto'
           },
           off: {
             type: 'openai-compatible',
             baseUrl: 'https://e/v1',
             account: { credential: 'key', key: 'k', disabled: true },
-            discover: ['auto']
+            discover: ['auto'],
+            formatTranslation: 'auto'
           }
         },
         pipeline: [],
@@ -130,7 +148,8 @@ describe('buildModels', () => {
             credential: 'oauth',
             name: 'antigravity',
             ...(disabled === undefined ? {} : { disabled })
-          }
+          },
+          formatTranslation: 'auto'
         }
       }
     }) as unknown as RouterOptions
@@ -151,7 +170,11 @@ describe('buildModels', () => {
     const withCc = {
       ...options,
       providers: {
-        cc: { type: 'anthropic', account: { credential: 'oauth', name: 'cc', disabled: true } }
+        cc: {
+          type: 'anthropic',
+          account: { credential: 'oauth', name: 'cc', disabled: true },
+          formatTranslation: 'auto'
+        }
       }
     } as unknown as RouterOptions
     const models = buildModels(withCc, { stateDir: dirs(), authDir: dirs() })
@@ -172,7 +195,8 @@ describe('buildModels', () => {
           ag: {
             type: 'antigravity',
             baseUrl: 'https://not-antigravity.test/v1',
-            account: { credential: 'oauth', name: 'antigravity' }
+            account: { credential: 'oauth', name: 'antigravity' },
+            formatTranslation: 'auto'
           }
         },
         pipeline: [],

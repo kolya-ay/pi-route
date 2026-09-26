@@ -165,7 +165,8 @@ describe('renderModelDetail', () => {
           type: 'openai-compatible',
           baseUrl: 'https://example.test/v1',
           account: { credential: 'key', key: 'k' },
-          discover: []
+          discover: [],
+          formatTranslation: 'auto'
         }
       },
       pipeline: [],

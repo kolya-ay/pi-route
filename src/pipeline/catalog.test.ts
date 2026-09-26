@@ -31,7 +31,11 @@ describe('buildCatalog', () => {
     const c = build(
       baseOpts({
         providers: {
-          cerebras: { type: 'cerebras', account: { credential: 'key', key: 'k' } }
+          cerebras: {
+            type: 'cerebras',
+            account: { credential: 'key', key: 'k' },
+            formatTranslation: 'auto'
+          }
         }
       })
     )
@@ -42,7 +46,11 @@ describe('buildCatalog', () => {
     const c = build(
       baseOpts({
         providers: {
-          cc: { type: 'anthropic', account: { credential: 'oauth', name: 'anthropic-cc' } }
+          cc: {
+            type: 'anthropic',
+            account: { credential: 'oauth', name: 'anthropic-cc' },
+            formatTranslation: 'auto'
+          }
         }
       })
     )
@@ -56,7 +64,8 @@ describe('buildCatalog', () => {
           chutes: {
             type: 'openai-compatible',
             baseUrl: 'https://llm.chutes.ai/v1',
-            account: { credential: 'key', key: 'k' }
+            account: { credential: 'key', key: 'k' },
+            formatTranslation: 'auto'
           }
         },
         pipeline: [{ kind: 'alias', name: 'opus', target: 'chutes/zai-org/GLM-5.1-TEE' }]
@@ -68,7 +77,13 @@ describe('buildCatalog', () => {
   test('alias names are addressable and leafFor resolves one hop', () => {
     const c = build(
       baseOpts({
-        providers: { p: { type: 'cerebras', account: { credential: 'key', key: 'k' } } },
+        providers: {
+          p: {
+            type: 'cerebras',
+            account: { credential: 'key', key: 'k' },
+            formatTranslation: 'auto'
+          }
+        },
         pipeline: [{ kind: 'alias', name: 'opus', target: 'p/some-specific-model' }]
       })
     )
@@ -81,7 +96,13 @@ describe('buildCatalog', () => {
   test('pool prefix addresses are addressable', () => {
     const c = build(
       baseOpts({
-        providers: { p: { type: 'cerebras', account: { credential: 'key', key: 'k' } } },
+        providers: {
+          p: {
+            type: 'cerebras',
+            account: { credential: 'key', key: 'k' },
+            formatTranslation: 'auto'
+          }
+        },
         pipeline: [
           {
             kind: 'pool',
@@ -104,7 +125,13 @@ describe('buildCatalog', () => {
   test('exact-match pools do not derive prefix addresses', () => {
     const c = build(
       baseOpts({
-        providers: { p: { type: 'cerebras', account: { credential: 'key', key: 'k' } } },
+        providers: {
+          p: {
+            type: 'cerebras',
+            account: { credential: 'key', key: 'k' },
+            formatTranslation: 'auto'
+          }
+        },
         pipeline: [
           {
             kind: 'pool',
@@ -129,7 +156,13 @@ describe('buildCatalog', () => {
   test('exact-match default pool targeting a provider leaf is only addressable by bare default', () => {
     const c = build(
       baseOpts({
-        providers: { p: { type: 'cerebras', account: { credential: 'key', key: 'k' } } },
+        providers: {
+          p: {
+            type: 'cerebras',
+            account: { credential: 'key', key: 'k' },
+            formatTranslation: 'auto'
+          }
+        },
         pipeline: [
           {
             kind: 'pool',
@@ -151,7 +184,11 @@ describe('availability filtering', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cat-'))
     const o: RouterOptions = {
       providers: {
-        cc: { type: 'anthropic', account: { credential: 'oauth', name: 'anthropic-cc' } }
+        cc: {
+          type: 'anthropic',
+          account: { credential: 'oauth', name: 'anthropic-cc' },
+          formatTranslation: 'auto'
+        }
       },
       pipeline: [],
       expose: []
@@ -166,7 +203,11 @@ describe('availability filtering', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cat-'))
     const o: RouterOptions = {
       providers: {
-        cc: { type: 'anthropic', account: { credential: 'oauth', name: 'anthropic-cc' } }
+        cc: {
+          type: 'anthropic',
+          account: { credential: 'oauth', name: 'anthropic-cc' },
+          formatTranslation: 'auto'
+        }
       },
       pipeline: [{ kind: 'alias', name: 'slow', target: 'cc/claude-opus-4-8' }],
       expose: []
@@ -193,8 +234,16 @@ describe('availability filtering', () => {
     writeFileSync(join(dir, 'anthropic-cc.json'), '{}')
     const o: RouterOptions = {
       providers: {
-        cc: { type: 'anthropic', account: { credential: 'oauth', name: 'anthropic-cc' } },
-        gone: { type: 'anthropic', account: { credential: 'oauth', name: 'anthropic-gone' } }
+        cc: {
+          type: 'anthropic',
+          account: { credential: 'oauth', name: 'anthropic-cc' },
+          formatTranslation: 'auto'
+        },
+        gone: {
+          type: 'anthropic',
+          account: { credential: 'oauth', name: 'anthropic-gone' },
+          formatTranslation: 'auto'
+        }
       },
       pipeline: [
         {
@@ -217,7 +266,11 @@ describe('availability filtering', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cat-'))
     const o: RouterOptions = {
       providers: {
-        cc: { type: 'anthropic', account: { credential: 'oauth', name: 'anthropic-cc' } }
+        cc: {
+          type: 'anthropic',
+          account: { credential: 'oauth', name: 'anthropic-cc' },
+          formatTranslation: 'auto'
+        }
       },
       pipeline: [
         {
@@ -257,8 +310,16 @@ describe('availability filtering', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cat-'))
     const o: RouterOptions = {
       providers: {
-        cc: { type: 'anthropic', account: { credential: 'oauth', name: 'anthropic-cc' } },
-        gone: { type: 'anthropic', account: { credential: 'oauth', name: 'anthropic-gone' } }
+        cc: {
+          type: 'anthropic',
+          account: { credential: 'oauth', name: 'anthropic-cc' },
+          formatTranslation: 'auto'
+        },
+        gone: {
+          type: 'anthropic',
+          account: { credential: 'oauth', name: 'anthropic-gone' },
+          formatTranslation: 'auto'
+        }
       },
       pipeline: [
         {

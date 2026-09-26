@@ -100,12 +100,15 @@ export type ModelMetaOverride = {
   input?: string[] | undefined
 }
 
+export type FormatTranslationMode = 'auto' | 'native' | 'constrained-tool'
+
 export type ProviderConfig = {
   type: ProviderType
   baseUrl?: string | undefined
   account: Account
   discover?: false | DiscoverStrategy[] | undefined
   modelOverrides?: Record<string, ModelMetaOverride> | undefined
+  formatTranslation: FormatTranslationMode
 }
 
 export type BalancingStrategyName = 'round-robin' | 'sticky' | 'fill-first' | 'failover'

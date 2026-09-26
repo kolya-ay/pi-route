@@ -84,8 +84,8 @@ describe('dispatch failover', () => {
 
     const options: RouterOptions = {
       providers: {
-        a: { type: 'openai-compatible', account: keyAccount },
-        b: { type: 'openai-compatible', account: keyAccount }
+        a: { type: 'openai-compatible', account: keyAccount, formatTranslation: 'auto' },
+        b: { type: 'openai-compatible', account: keyAccount, formatTranslation: 'auto' }
       },
       pipeline: [{ kind: 'pool', name: 'gpt', to: ['a/x', 'b/x'], strategy: 'failover' }],
       expose: []
@@ -142,8 +142,8 @@ describe('dispatch failover', () => {
 
     const options: RouterOptions = {
       providers: {
-        a: { type: 'openai-compatible', account: keyAccount },
-        b: { type: 'openai-compatible', account: keyAccount }
+        a: { type: 'openai-compatible', account: keyAccount, formatTranslation: 'auto' },
+        b: { type: 'openai-compatible', account: keyAccount, formatTranslation: 'auto' }
       },
       pipeline: [{ kind: 'pool', name: 'gpt', to: ['a/x', 'b/x'], strategy: 'failover' }],
       expose: []
@@ -177,7 +177,11 @@ describe('dispatch failover', () => {
     const dir = mkdtempSync(join(tmpdir(), 'disp-'))
     const options: RouterOptions = {
       providers: {
-        cc: { type: 'anthropic', account: { credential: 'oauth', name: 'anthropic-cc' } }
+        cc: {
+          type: 'anthropic',
+          account: { credential: 'oauth', name: 'anthropic-cc' },
+          formatTranslation: 'auto'
+        }
       },
       pipeline: [{ kind: 'alias', name: 'solo', target: 'cc/claude-opus-4-8' }],
       expose: []
@@ -216,7 +220,7 @@ describe('dispatch failover', () => {
     writeFileSync(join(dir, 'anthropic-cc.json'), '{}')
     const ccAccount: Account = { credential: 'oauth', name: 'anthropic-cc' }
     const options: RouterOptions = {
-      providers: { cc: { type: 'anthropic', account: ccAccount } },
+      providers: { cc: { type: 'anthropic', account: ccAccount, formatTranslation: 'auto' } },
       pipeline: [{ kind: 'alias', name: 'solo', target: 'cc/claude-opus-4-8' }],
       expose: []
     }
@@ -265,8 +269,16 @@ describe('dispatch failover', () => {
 
     const options: RouterOptions = {
       providers: {
-        a: { type: 'anthropic', account: { credential: 'oauth', name: 'a' } },
-        b: { type: 'anthropic', account: { credential: 'oauth', name: 'b' } }
+        a: {
+          type: 'anthropic',
+          account: { credential: 'oauth', name: 'a' },
+          formatTranslation: 'auto'
+        },
+        b: {
+          type: 'anthropic',
+          account: { credential: 'oauth', name: 'b' },
+          formatTranslation: 'auto'
+        }
       },
       pipeline: [{ kind: 'pool', name: 'gpt', to: ['a/x', 'b/x'], strategy: 'failover' }],
       expose: []
@@ -301,7 +313,7 @@ describe('dispatch capture wire-up', () => {
   })
 
   const baseOptions: RouterOptions = {
-    providers: { a: { type: 'openai-compatible', account: keyAccount } },
+    providers: { a: { type: 'openai-compatible', account: keyAccount, formatTranslation: 'auto' } },
     pipeline: [{ kind: 'pool', name: 'gpt', to: ['a/x'], strategy: 'failover' }],
     expose: []
   }
@@ -366,7 +378,9 @@ describe('dispatch capture wire-up', () => {
       }
     }
     const options: RouterOptions = {
-      providers: { a: { type: 'openai-compatible', account: keyAccount } },
+      providers: {
+        a: { type: 'openai-compatible', account: keyAccount, formatTranslation: 'auto' }
+      },
       pipeline: [{ kind: 'pool', name: 'gpt', to: ['a/x'], strategy: 'failover' }],
       expose: []
     }

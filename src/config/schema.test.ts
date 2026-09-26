@@ -9,6 +9,31 @@ describe('parseConfig — providers', () => {
     expect(opts.providers.cerebras?.account).toEqual({ credential: 'key', key: 'sk-foo' })
   })
 
+  test.each(['auto', 'native', 'constrained-tool'] as const)(
+    'preserves formatTranslation: %s',
+    (formatTranslation) => {
+      const opts = parseConfig({
+        providers: { cerebras: { type: 'cerebras', apiKey: 'sk-foo', formatTranslation } }
+      })
+      expect(opts.providers.cerebras?.formatTranslation).toBe(formatTranslation)
+    }
+  )
+
+  test('formatTranslation defaults to auto', () => {
+    const opts = parseConfig({ providers: { cerebras: { type: 'cerebras', apiKey: 'sk-foo' } } })
+    expect(opts.providers.cerebras?.formatTranslation).toBe('auto')
+  })
+
+  test('rejects an invalid formatTranslation', () => {
+    expect(() =>
+      parseConfig({
+        providers: {
+          cerebras: { type: 'cerebras', apiKey: 'sk-foo', formatTranslation: 'invalid' }
+        }
+      })
+    ).toThrow()
+  })
+
   test('account string desugars to oauth account keyed <type>-<account>', () => {
     const opts = parseConfig({
       providers: { anthropic: { type: 'anthropic', account: 'main' } }
@@ -69,7 +94,9 @@ describe('parseConfig — providers', () => {
   })
 
   test('still accepts oauth on a non-openai type (antigravity)', () => {
-    const opts = parseConfig({ providers: { ag: { type: 'antigravity', account: 'u@e.com' } } })
+    const opts = parseConfig({
+      providers: { ag: { type: 'antigravity', account: 'u@e.com' } }
+    })
     expect(opts.providers.ag?.account.credential).toBe('oauth')
   })
 })
@@ -313,7 +340,9 @@ describe('discover defaults', () => {
   })
 
   test('other provider types get no default', () => {
-    const o = parseConfig({ providers: { cc: { type: 'anthropic', account: 'cc' } } })
+    const o = parseConfig({
+      providers: { cc: { type: 'anthropic', account: 'cc' } }
+    })
     expect(o.providers.cc?.discover).toBeUndefined()
   })
 })

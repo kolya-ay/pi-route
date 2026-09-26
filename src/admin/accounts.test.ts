@@ -11,7 +11,7 @@ import { getAccount, listAccounts, setAccountInvalid } from './accounts'
 
 const baseOpts: RouterOptions = {
   providers: {
-    foo: { type: 'cerebras', account: { credential: 'key', key: 'k' } }
+    foo: { type: 'cerebras', account: { credential: 'key', key: 'k' }, formatTranslation: 'auto' }
   },
   pipeline: [],
   expose: []
@@ -56,7 +56,11 @@ describe('admin/accounts', () => {
     const s = mkState({
       ...baseOpts,
       providers: {
-        foo: { type: 'cerebras', account: { credential: 'key', key: 'k', disabled: true } }
+        foo: {
+          type: 'cerebras',
+          account: { credential: 'key', key: 'k', disabled: true },
+          formatTranslation: 'auto'
+        }
       }
     })
     expect(listAccounts(s)[0]?.disabled).toBe(true)
