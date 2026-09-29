@@ -26,6 +26,20 @@ providers:
   #   apiKey: $CHUTES_API_KEY
   # Convert structured response formats for providers that do not support them natively.
   #   formatTranslation: constrained-tool  # auto (default), native, constrained-tool
+  #   structuredOutputApi: openai-completions  # send schema requests down this api
+  #     # For OpenRouter: its catalog entry for anthropic/* is the anthropic-messages
+  #     # compat endpoint, which refuses strict tools. openai-completions is
+  #     # OpenRouter's native api and enforces response_format, $defs included.
+  #
+  # Where a schema can only be enforced through the private constrained tool
+  # (anthropic-messages providers such as a Claude-subscription `cc`), pi-route
+  # normalises it first: local $defs/$ref are inlined, and the numeric keywords
+  # Anthropic's tool validator rejects — minimum, maximum, exclusiveMinimum,
+  # exclusiveMaximum, multipleOf — are dropped, because it refuses the request
+  # outright otherwise. The enforced schema is then weaker than the one asked for,
+  # so each dropped keyword is logged and recorded on the request span as
+  # `pi.structured_output.dropped_keywords`. Native routes are untouched: a
+  # provider reached through structuredOutputApi gets the schema verbatim.
 
 # Server-facing settings: the gate token and the OpenCode /api.json masquerade.
 # server:

@@ -99,6 +99,37 @@ describe('parseConfig — providers', () => {
     })
     expect(opts.providers.ag?.account.credential).toBe('oauth')
   })
+
+  test.each(['openai-completions', 'openai-responses'] as const)(
+    'preserves structuredOutputApi: %s',
+    (structuredOutputApi) => {
+      const opts = parseConfig({
+        providers: { openrouter: { type: 'openrouter', apiKey: 'k', structuredOutputApi } }
+      })
+      expect(opts.providers.openrouter?.structuredOutputApi).toBe(structuredOutputApi)
+    }
+  )
+
+  test('structuredOutputApi defaults to absent', () => {
+    const opts = parseConfig({
+      providers: { openrouter: { type: 'openrouter', apiKey: 'k' } }
+    })
+    expect(opts.providers.openrouter?.structuredOutputApi).toBeUndefined()
+  })
+
+  test('rejects a structuredOutputApi that cannot carry a native schema', () => {
+    expect(() =>
+      parseConfig({
+        providers: {
+          openrouter: {
+            type: 'openrouter',
+            apiKey: 'k',
+            structuredOutputApi: 'anthropic-messages'
+          }
+        }
+      })
+    ).toThrow()
+  })
 })
 
 describe('parseConfig — pipeline value shapes', () => {

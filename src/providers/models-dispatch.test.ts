@@ -1,10 +1,18 @@
 // src/providers/models-dispatch.test.ts
 
 import { describe, expect, it } from 'bun:test'
-import type { Api, AssistantMessage, Context, Model, Models, ToolCall } from '@earendil-works/pi-ai'
+import type {
+  Api,
+  AssistantMessage,
+  Context,
+  JsonObject,
+  Model,
+  Models,
+  ToolCall
+} from '@earendil-works/pi-ai'
 import { createAssistantMessageEventStream, ModelsError } from '@earendil-works/pi-ai'
 
-import { STRUCTURED_OUTPUT_TOOL } from '../structured-output'
+import { STRUCTURED_OUTPUT_TOOL, type StructuredOutput } from '../structured-output'
 import { createTel } from '../telemetry/tel'
 import { useTestExporter } from '../telemetry/test-fixture'
 import type { FormatTranslationMode, IncomingRequest } from '../types'
@@ -53,14 +61,46 @@ const mkMessage = (input = 1, output = 1): AssistantMessage => ({
   timestamp: Date.now()
 })
 
-// Duck-typed Models: dispatch only reads .getModel and .stream.
-const mkModels = (over: Partial<Pick<Models, 'getModel' | 'stream'>>): Models =>
-  ({ getModel: () => mkModel(), stream: () => cannedStream(), ...over }) as unknown as Models
+// Duck-typed Models: dispatch reads .getModel, .getProvider and .stream.
+const mkModels = (over: Partial<Pick<Models, 'getModel' | 'getProvider' | 'stream'>>): Models =>
+  ({
+    getModel: () => mkModel(),
+    getProvider: () => ({ baseUrl: 'http://provider/v1' }),
+    stream: () => cannedStream(),
+    ...over
+  }) as unknown as Models
 
 const cannedStream = (input = 1, output = 1) => {
   const stream = createAssistantMessageEventStream()
   const message = mkMessage(input, output)
   stream.push({ type: 'done', reason: 'stop', message })
+  stream.end(message)
+  return stream
+}
+
+// One private-tool-call stream, shared by every structured-output dispatch test.
+const toolCallStream = (args: JsonObject) => {
+  const stream = createAssistantMessageEventStream()
+  const message: AssistantMessage = {
+    ...mkMessage(),
+    content: [{ type: 'toolCall', id: 'call-1', name: STRUCTURED_OUTPUT_TOOL, arguments: args }],
+    stopReason: 'toolUse'
+  }
+  stream.push({ type: 'start', partial: message })
+  stream.push({ type: 'toolcall_start', contentIndex: 0, partial: message })
+  stream.push({
+    type: 'toolcall_delta',
+    contentIndex: 0,
+    delta: JSON.stringify(args),
+    partial: message
+  })
+  stream.push({
+    type: 'toolcall_end',
+    contentIndex: 0,
+    toolCall: message.content[0] as ToolCall,
+    partial: message
+  })
+  stream.push({ type: 'done', reason: 'toolUse', message })
   stream.end(message)
   return stream
 }
@@ -175,45 +215,12 @@ describe('createModelsDispatch structured output', () => {
     const stream = ((_model: Model<Api>, context: Context, options?: Record<string, unknown>) => {
       seen.context = context
       seen.options = options
-      return structuredStream()
+      return toolCallStream({ capital: 'Paris' })
     }) as unknown as Models['stream']
     return {
       seen,
       models: mkModels({ getModel: () => ({ ...mkModel(), api }), stream })
     }
-  }
-
-  const structuredStream = () => {
-    const stream = createAssistantMessageEventStream()
-    const message: AssistantMessage = {
-      ...mkMessage(),
-      content: [
-        {
-          type: 'toolCall',
-          id: 'call-1',
-          name: STRUCTURED_OUTPUT_TOOL,
-          arguments: { capital: 'Paris' }
-        }
-      ],
-      stopReason: 'toolUse'
-    }
-    stream.push({ type: 'start', partial: message })
-    stream.push({ type: 'toolcall_start', contentIndex: 0, partial: message })
-    stream.push({
-      type: 'toolcall_delta',
-      contentIndex: 0,
-      delta: '{"capital":"Paris"}',
-      partial: message
-    })
-    stream.push({
-      type: 'toolcall_end',
-      contentIndex: 0,
-      toolCall: message.content[0] as ToolCall,
-      partial: message
-    })
-    stream.push({ type: 'done', reason: 'toolUse', message })
-    stream.end(message)
-    return stream
   }
 
   const dispatchWith = async (
@@ -288,6 +295,62 @@ describe('createModelsDispatch structured output', () => {
   })
 })
 
+describe('createModelsDispatch structured output dropped-keyword telemetry', () => {
+  const exporter = useTestExporter()
+
+  const rangedConstraint = {
+    name: 'ranged',
+    schema: {
+      type: 'object',
+      properties: { n: { type: 'integer', minimum: 0 } },
+      required: ['n'],
+      additionalProperties: false
+    }
+  }
+
+  const cleanConstraint = {
+    name: 'clean',
+    schema: {
+      type: 'object',
+      properties: { n: { type: 'integer' } },
+      required: ['n'],
+      additionalProperties: false
+    }
+  }
+
+  const dispatchUnderSpan = async (structuredOutput: StructuredOutput) => {
+    const models = mkModels({
+      getModel: () => ({ ...mkModel(), api: 'anthropic-messages' }),
+      stream: () => toolCallStream({ n: 3 })
+    })
+    const tel = createTel()
+    await tel.withSpan('outer', {}, async (span) => {
+      const provider = createModelsDispatch(models, 'prov', false, 'constrained-tool')
+      await provider.dispatch(
+        mkRequest({
+          format: 'openai',
+          structuredOutput,
+          telHooks: { tel, span, capture: { capturePrompts: false, maxBytes: 0 } }
+        }),
+        { credential: 'key', key: 'k' },
+        'k'
+      )
+    })
+  }
+
+  it('records the dropped keywords on the active span for the constrained-tool route', async () => {
+    await dispatchUnderSpan(rangedConstraint)
+    const attrs = exporter.getFinishedSpans()[0]?.attributes
+    expect(attrs?.['pi.structured_output.dropped_keywords']).toEqual(['minimum'])
+  })
+
+  it('sets no attribute when nothing is dropped', async () => {
+    await dispatchUnderSpan(cleanConstraint)
+    const attrs = exporter.getFinishedSpans()[0]?.attributes
+    expect(attrs?.['pi.structured_output.dropped_keywords']).toBeUndefined()
+  })
+})
+
 // The unit boundary this suite exists to guard: Model.cost is USD per MILLION
 // tokens (see model-projection.ts perTokenString, metadata.ts parseLitellmModelInfo),
 // but wrapStreamForMetrics multiplies raw token counts by its `costs`. Dispatch
@@ -338,5 +401,135 @@ describe('mapAuthError', () => {
   it('returns a ModelsError("auth") unchanged (only "oauth" maps)', () => {
     const err = new ModelsError('auth', 'nope')
     expect(mapAuthError(err, 'prov')).toBe(err)
+  })
+})
+
+describe('structuredOutputApi swap', () => {
+  const schemaRequest = () =>
+    mkRequest({
+      format: 'openai',
+      structuredOutput: {
+        name: 'cap',
+        schema: {
+          type: 'object',
+          properties: { capital: { type: 'string' } },
+          required: ['capital'],
+          additionalProperties: false
+        }
+      }
+    })
+
+  // The stream must satisfy whichever route ends up taken: if the swap does NOT
+  // happen, the model keeps anthropic-messages, which has no native mapping, so
+  // 'auto' falls back to the constrained-tool route and expects a private
+  // schema tool call in the response (see the `structured output` describe
+  // block above) — a plain-text cannedStream() would throw during normalization
+  // before the test ever reaches its `seen[0]` assertion.
+
+  const captureModel = () => {
+    const seen: Model<Api>[] = []
+    const models = mkModels({
+      stream: ((model: Model<Api>) => {
+        seen.push(model)
+        return toolCallStream({ capital: 'Paris' })
+      }) as unknown as Models['stream']
+    })
+    return { models, seen }
+  }
+
+  it('swaps api and baseUrl when a schema is present and the key is set', async () => {
+    const { models, seen } = captureModel()
+    const provider = createModelsDispatch(models, 'openrouter', false, 'auto', 'openai-completions')
+    await provider.dispatch(schemaRequest(), { credential: 'key', key: 'k' }, 'k')
+    expect(seen[0]?.api).toBe('openai-completions')
+    expect(seen[0]?.baseUrl).toBe('http://provider/v1')
+  })
+
+  it('keeps catalog metadata across the swap', async () => {
+    const { models, seen } = captureModel()
+    const provider = createModelsDispatch(models, 'openrouter', false, 'auto', 'openai-completions')
+    await provider.dispatch(schemaRequest(), { credential: 'key', key: 'k' }, 'k')
+    expect(seen[0]?.cost).toEqual({ input: 1, output: 2, cacheRead: 0, cacheWrite: 0 })
+    expect(seen[0]?.contextWindow).toBe(1000)
+  })
+
+  it('does not swap when no schema is present', async () => {
+    const { models, seen } = captureModel()
+    const provider = createModelsDispatch(models, 'openrouter', false, 'auto', 'openai-completions')
+    await provider.dispatch(mkRequest(), { credential: 'key', key: 'k' }, 'k')
+    expect(seen[0]?.api).toBe('anthropic-messages')
+  })
+
+  it('does not swap when the key is unset', async () => {
+    const { models, seen } = captureModel()
+    const provider = createModelsDispatch(models, 'openrouter', false, 'auto')
+    await provider.dispatch(schemaRequest(), { credential: 'key', key: 'k' }, 'k')
+    expect(seen[0]?.api).toBe('anthropic-messages')
+  })
+})
+
+describe('structuredOutputApi without a provider baseUrl', () => {
+  it('refuses rather than posting to the catalog entry’s path', async () => {
+    const models = mkModels({ getProvider: (() => undefined) as unknown as Models['getProvider'] })
+    const provider = createModelsDispatch(models, 'openrouter', false, 'auto', 'openai-completions')
+    await expect(
+      provider.dispatch(
+        mkRequest({
+          format: 'openai',
+          structuredOutput: {
+            name: 'cap',
+            schema: {
+              type: 'object',
+              properties: { capital: { type: 'string' } },
+              required: ['capital'],
+              additionalProperties: false
+            }
+          }
+        }),
+        { credential: 'key', key: 'k' },
+        'k'
+      )
+    ).rejects.toThrow(/no baseUrl to route structured output/)
+  })
+})
+
+describe('structuredOutputApi swap drops api-specific metadata', () => {
+  it('leaves compat and thinkingLevelMap behind with the old api', async () => {
+    // compat is a conditional type on the api: OpenRouter's anthropic/* entries carry
+    // supportsTemperature:false, which only the anthropic adapter reads. Carried across,
+    // the openai adapter ignores it and sends a temperature the model rejects.
+    const seen: Model<Api>[] = []
+    const withCompat = {
+      ...mkModel(),
+      compat: { supportsTemperature: false },
+      thinkingLevelMap: { low: 'low' }
+    } as unknown as Model<Api>
+    const models = mkModels({
+      getModel: () => withCompat,
+      stream: ((model: Model<Api>) => {
+        seen.push(model)
+        return toolCallStream({ capital: 'Paris' })
+      }) as unknown as Models['stream']
+    })
+    const provider = createModelsDispatch(models, 'openrouter', false, 'auto', 'openai-completions')
+    await provider.dispatch(
+      mkRequest({
+        format: 'openai',
+        structuredOutput: {
+          name: 'cap',
+          schema: {
+            type: 'object',
+            properties: { capital: { type: 'string' } },
+            required: ['capital'],
+            additionalProperties: false
+          }
+        }
+      }),
+      { credential: 'key', key: 'k' },
+      'k'
+    )
+    expect(seen[0]?.api).toBe('openai-completions')
+    expect(seen[0]).not.toHaveProperty('compat')
+    expect(seen[0]).not.toHaveProperty('thinkingLevelMap')
   })
 })

@@ -2,9 +2,16 @@
 
 import type { Api, Model, Models } from '@earendil-works/pi-ai'
 import { ModelsError } from '@earendil-works/pi-ai'
+import { trace } from '@opentelemetry/api'
 
 import { perTokenUsd } from '../pipeline/money'
-import type { FormatTranslationMode, IncomingRequest, Provider, ProviderResponse } from '../types'
+import type {
+  FormatTranslationMode,
+  IncomingRequest,
+  Provider,
+  ProviderResponse,
+  StructuredOutputApi
+} from '../types'
 
 import {
   capMaxTokens,
@@ -67,6 +74,35 @@ const withKnownLimits = (model: Model<Api>): Model<Api> =>
         maxTokens: model.maxTokens || DEFAULT_MAX_TOKENS
       }
 
+// A provider's catalog entry can name an api that cannot carry a schema — OpenRouter
+// lists anthropic/* under its anthropic-messages compat endpoint, which refuses
+// strict tools. Re-point such a request at the api the provider natively speaks.
+// The two groups differ in baseUrl, so the api alone is not enough; the provider's
+// own baseUrl is the value the native group already carries. Keeping the catalog
+// entry's baseUrl would post a body of one api's shape to the other's path — the
+// silent mismatch this swap exists to remove — so a provider that cannot supply one
+// refuses instead.
+// `compat` and `thinkingLevelMap` describe the api being left behind — `Model.compat`
+// is a conditional type on the api, so e.g. OpenRouter's anthropic/claude-opus-4.7
+// carries `supportsTemperature: false`, which only the anthropic adapter reads. Carry
+// it across and the openai adapter never consults it, then sends a `temperature` the
+// model rejects. They belong to the old api, so they are left with it.
+const forStructuredOutput = (
+  models: Models,
+  providerName: string,
+  model: Model<Api>,
+  api: StructuredOutputApi
+): Model<Api> => {
+  const baseUrl = models.getProvider(providerName)?.baseUrl
+  if (!baseUrl) {
+    throw new Error(
+      `provider "${providerName}" has no baseUrl to route structured output through ${api}`
+    )
+  }
+  const { compat: _compat, thinkingLevelMap: _thinkingLevelMap, ...carried } = model
+  return { ...carried, api, baseUrl }
+}
+
 // One dispatch implementation for every Models-backed provider. Auth is resolved
 // inside models.stream() (OAuth refresh under the store lock); the `account`/`apiKey`
 // dispatch params are unused here, kept for route-facing Provider signature parity.
@@ -75,7 +111,8 @@ export const createModelsDispatch = (
   models: Models,
   providerName: string,
   construct = false,
-  formatTranslation: FormatTranslationMode = 'auto'
+  formatTranslation: FormatTranslationMode = 'auto',
+  structuredOutputApi?: StructuredOutputApi
 ): Provider => ({
   name: providerName,
   type: 'models',
@@ -88,7 +125,11 @@ export const createModelsDispatch = (
       models.getModel(providerName, request.model) ??
       (construct ? constructModel(models, providerName, request.model) : undefined)
     if (!catalogModel) throw new Error(`model not found: ${providerName}/${request.model}`)
-    const model = capMaxTokens(withKnownLimits(catalogModel), body)
+    const routed =
+      request.structuredOutput && structuredOutputApi
+        ? forStructuredOutput(models, providerName, catalogModel, structuredOutputApi)
+        : catalogModel
+    const model = capMaxTokens(withKnownLimits(routed), body)
 
     // Capability resolution throws before streaming, so an unenforceable schema
     // fails this candidate instead of silently producing unconstrained output.
@@ -98,6 +139,22 @@ export const createModelsDispatch = (
     const transform: EventTransform | undefined = plan?.normalizeEvents
       ? normalizeStructuredOutputEvents
       : undefined
+
+    // A non-empty list means the enforced schema is weaker than the one requested.
+    // The span carries it for anyone collecting telemetry, but OTel is off by default
+    // (tel.ts never makes the noop span active, so getActiveSpan() is undefined), and
+    // a weakening nobody can see is the thing this reporting exists to prevent — so
+    // log it too. That line is the only record in a default deployment.
+    if (plan && plan.droppedKeywords.length > 0) {
+      const dropped = plan.droppedKeywords.join(', ')
+      console.warn(
+        `[structured-output] ${providerName}/${request.model}: dropped ${dropped} — ` +
+          'this backend cannot enforce those keywords, so the schema is weaker than requested'
+      )
+      trace
+        .getActiveSpan()
+        ?.setAttribute('pi.structured_output.dropped_keywords', plan.droppedKeywords)
+    }
 
     // models.stream() resolves auth lazily, so an OAuth refresh failure surfaces
     // as an in-stream error event (mapped in pi-ai-runtime), NOT a sync throw.

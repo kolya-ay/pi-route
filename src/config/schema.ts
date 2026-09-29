@@ -39,6 +39,7 @@ const ModelMetaOverrideSchema = z.strictObject({
 const OPENAI_LIKE = new Set(['openai-compatible', 'openai'])
 
 const FormatTranslationSchema = z.enum(['auto', 'native', 'constrained-tool'])
+const StructuredOutputApiSchema = z.enum(['openai-completions', 'openai-responses'])
 
 const ProviderSchema = z
   .strictObject({
@@ -49,7 +50,8 @@ const ProviderSchema = z
     disabled: z.boolean().optional(),
     discover: z.union([z.literal(false), z.array(DiscoverStrategySchema)]).optional(),
     modelOverrides: z.record(z.string(), ModelMetaOverrideSchema).optional(),
-    formatTranslation: FormatTranslationSchema.default('auto')
+    formatTranslation: FormatTranslationSchema.default('auto'),
+    structuredOutputApi: StructuredOutputApiSchema.optional()
   })
   .refine((p) => (p.apiKey === undefined) !== (p.account === undefined), {
     message: 'provider requires exactly one of `apiKey` or `account`'
@@ -99,7 +101,10 @@ const normalizeProvider = (raw: RawProvider): ProviderConfig => {
     account: normalizeAccount(raw),
     ...(discover !== undefined ? { discover } : {}),
     ...(raw.modelOverrides !== undefined ? { modelOverrides: raw.modelOverrides } : {}),
-    formatTranslation: raw.formatTranslation
+    formatTranslation: raw.formatTranslation,
+    ...(raw.structuredOutputApi !== undefined
+      ? { structuredOutputApi: raw.structuredOutputApi }
+      : {})
   }
 }
 

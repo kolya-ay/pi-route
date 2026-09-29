@@ -56,7 +56,13 @@ const buildEntry = (models: MutableModels, name: string, config: ProviderConfig)
   }
   const construct = config.type === 'openai-compatible'
   return {
-    provider: createModelsDispatch(models, name, construct, config.formatTranslation),
+    provider: createModelsDispatch(
+      models,
+      name,
+      construct,
+      config.formatTranslation,
+      config.structuredOutputApi
+    ),
     account: config.account
   }
 }

@@ -106,6 +106,11 @@ export type ModelMetaOverride = {
 
 export type FormatTranslationMode = 'auto' | 'native' | 'constrained-tool'
 
+// The only two apis `nativeParams` can build a request body for. Narrower than
+// pi-ai's `Api` union on purpose: any other value would name a route that cannot
+// enforce a schema, and that should fail at config load, not at dispatch.
+export type StructuredOutputApi = 'openai-completions' | 'openai-responses'
+
 export type ProviderConfig = {
   type: ProviderType
   baseUrl?: string | undefined
@@ -113,6 +118,7 @@ export type ProviderConfig = {
   discover?: false | DiscoverStrategy[] | undefined
   modelOverrides?: Record<string, ModelMetaOverride> | undefined
   formatTranslation: FormatTranslationMode
+  structuredOutputApi?: StructuredOutputApi | undefined
 }
 
 export type BalancingStrategyName = 'round-robin' | 'sticky' | 'fill-first' | 'failover'
