@@ -90,6 +90,28 @@ describe('buildRequestCaptureAttrs', () => {
   })
 })
 
+describe('schema capture', () => {
+  const opts = { capturePrompts: true, maxBytes: 10_000 }
+
+  it('captures a chat response_format', () => {
+    const attrs = buildRequestCaptureAttrs(opts, {
+      response_format: { type: 'json_schema', json_schema: { name: 'n' } }
+    })
+    expect(attrs['gen_ai.request.response_format']).toBe(
+      JSON.stringify({ type: 'json_schema', json_schema: { name: 'n' } })
+    )
+  })
+
+  it('captures a responses-api text.format', () => {
+    const attrs = buildRequestCaptureAttrs(opts, {
+      text: { format: { type: 'json_schema', name: 'n' } }
+    })
+    expect(attrs['gen_ai.request.response_format']).toBe(
+      JSON.stringify({ type: 'json_schema', name: 'n' })
+    )
+  })
+})
+
 describe('buildResponseCaptureAttr', () => {
   it('returns empty when capture disabled', () => {
     expect(

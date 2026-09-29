@@ -240,6 +240,14 @@ export const createDispatchHandler = (deps: DispatchDeps) => {
             // An OAuth failure won't be fixed by the next candidate — short-circuit
             // to 401 instead of failing over and masking it as a 502.
             if (err instanceof DispatchAuthError) return c.json({ error: err.message }, 401)
+            // A schema this backend cannot express is the client's to fix, and the
+            // next candidate would reject it identically — short-circuit to 400
+            // rather than failing over and reporting it as an upstream 502, which
+            // is what a retry-on-5xx client would hammer. Same contract phase 1 set
+            // for a malformed response_format caught at parse time.
+            if (err instanceof StructuredOutputRequestError) {
+              return c.json({ error: err.message }, 400)
+            }
             lastErr = err
             emitFallback(message)
             return null

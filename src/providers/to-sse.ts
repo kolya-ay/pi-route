@@ -1,8 +1,28 @@
 // src/providers/to-sse.ts
 
-import type { AssistantMessage, AssistantMessageEvent, ToolCall } from '@earendil-works/pi-ai'
+import {
+  type AssistantMessage,
+  type AssistantMessageEvent,
+  isContextOverflow,
+  type ToolCall
+} from '@earendil-works/pi-ai'
 
 import type { IncomingRequest } from '../types'
+
+// Several providers report an oversized prompt in a way that says nothing useful on
+// its own — cerebras answers a 400 with an empty body, which pi-ai renders as
+// "400 status code (no body)". pi-ai already knows that whole family, so name the
+// cause rather than passing the opaque text straight through to the client.
+//
+// Note the detection of cerebras's bodyless form is gated inside pi-ai on the
+// message's `provider`, which for pi-route is the operator's config key; an operator
+// who renames that provider gets the original message back, not a wrong one.
+export const describeStreamError = (error: AssistantMessage): string => {
+  const message = error.errorMessage ?? 'pi-ai stream error'
+  return isContextOverflow(error)
+    ? `context overflow — the prompt exceeds this model's context window (upstream said: ${message})`
+    : message
+}
 
 const mapAnthropicStopReason = (reason: string): string =>
   reason === 'stop'
@@ -182,7 +202,7 @@ const anthropicEventToSse = (
       tail.push(
         sseEvent('error', {
           type: 'error',
-          error: { type: 'api_error', message: event.error.errorMessage ?? 'Unknown error' }
+          error: { type: 'api_error', message: describeStreamError(event.error) }
         })
       )
       return tail.join('')
@@ -308,7 +328,7 @@ const openAiEventToSse = (
     case 'error':
       return (
         sseData({
-          error: { message: event.error.errorMessage ?? 'Unknown error', type: 'api_error' }
+          error: { message: describeStreamError(event.error), type: 'api_error' }
         }) + sseDone()
       )
 

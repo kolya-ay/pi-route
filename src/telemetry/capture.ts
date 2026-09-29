@@ -29,7 +29,13 @@ const cap = (
 
 export const buildRequestCaptureAttrs = (
   opts: CaptureOpts,
-  body: { messages?: unknown; system?: unknown; tools?: unknown }
+  body: {
+    messages?: unknown
+    system?: unknown
+    tools?: unknown
+    response_format?: unknown
+    text?: unknown
+  }
 ): Attributes => {
   if (!opts.capturePrompts) return {}
   const attrs: Attributes = {}
@@ -44,6 +50,20 @@ export const buildRequestCaptureAttrs = (
   if (body.tools != null) {
     const v = safeStringify(body.tools)
     if (v !== undefined) cap(attrs, 'gen_ai.tool.definitions', v, opts.maxBytes, truncated)
+  }
+  // The requested schema is neither a message nor a tool on the way in — Chat carries
+  // it on `response_format`, Responses inline on `text.format` — so without this the
+  // one field a schema bug lives in is the one field never recorded.
+  const requestedFormat =
+    body.response_format ??
+    (typeof body.text === 'object' && body.text !== null
+      ? (body.text as { format?: unknown }).format
+      : undefined)
+  if (requestedFormat != null) {
+    const v = safeStringify(requestedFormat)
+    if (v !== undefined) {
+      cap(attrs, 'gen_ai.request.response_format', v, opts.maxBytes, truncated)
+    }
   }
   if (truncated.length > 0) attrs['pi.captured_fields_truncated'] = truncated
   return attrs

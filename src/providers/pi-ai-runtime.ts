@@ -11,7 +11,7 @@ import { wrapStreamForMetrics } from '../telemetry/stream-metrics'
 import type { IncomingRequest, ProviderResponse } from '../types'
 
 import { mapAuthError } from './models-dispatch'
-import { formatJson, formatSse } from './to-sse'
+import { describeStreamError, formatJson, formatSse } from './to-sse'
 
 // Self-heal transient 429/5xx via pi-ai's SDK-level retry. 3 attempts caps
 // Codex's `usage_limit_reached` retry storm; 30s caps the per-attempt wait
@@ -109,10 +109,7 @@ export const jsonResponse = async (
       // Route through mapAuthError so an in-stream OAuth-refresh failure becomes a
       // DispatchAuthError (→ 401) instead of a generic 502. metadata.provider names
       // the backing provider for the login hint.
-      throw mapAuthError(
-        new Error(event.error.errorMessage ?? 'pi-ai stream error'),
-        metadata.provider
-      )
+      throw mapAuthError(new Error(describeStreamError(event.error)), metadata.provider)
     }
   }
   if (!message) throw new Error('No response from pi-ai stream')

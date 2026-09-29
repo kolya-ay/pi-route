@@ -8,6 +8,7 @@ import {
   createAnthropicSseStream,
   createOpenAiSseStream,
   createResponsesSseStream,
+  describeStreamError,
   openaiMessageToJson,
   responsesMessageToJson
 } from './to-sse'
@@ -951,5 +952,54 @@ describe('responsesMessageToJson', () => {
     expect(fcItem?.name).toBe('fn')
     expect(fcItem?.arguments).toBe('{"a":1}')
     expect(fcItem?.status).toBe('completed')
+  })
+})
+
+describe('describeStreamError', () => {
+  const errored = (errorMessage: string, provider: string): AssistantMessage =>
+    ({
+      role: 'assistant',
+      content: [],
+      api: 'openai-completions',
+      provider,
+      model: 'm',
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+      },
+      stopReason: 'error',
+      errorMessage,
+      timestamp: 0
+    }) as unknown as AssistantMessage
+
+  it('names the cause behind cerebras’s bodyless 400', () => {
+    // The opaque form that left a real ai-memory failure undiagnosed for days.
+    const described = describeStreamError(errored('400 status code (no body)', 'cerebras'))
+    expect(described).toMatch(/context overflow/)
+    expect(described).toContain('400 status code (no body)')
+  })
+
+  it('names an overflow reported in words by any provider', () => {
+    expect(
+      describeStreamError(
+        errored('Please reduce the length of the messages or completion', 'cerebras')
+      )
+    ).toMatch(/context overflow/)
+  })
+
+  it('passes an unrelated error through unchanged', () => {
+    expect(describeStreamError(errored('upstream refused the api key', 'cerebras'))).toBe(
+      'upstream refused the api key'
+    )
+  })
+
+  it('falls back when the provider gave no message at all', () => {
+    const blank = { ...errored('x', 'cerebras') } as Record<string, unknown>
+    blank.errorMessage = undefined
+    expect(describeStreamError(blank as unknown as AssistantMessage)).toBe('pi-ai stream error')
   })
 })
