@@ -393,3 +393,145 @@ describe('normalizeStructuredOutputEvents', () => {
     ).rejects.toThrow(/JSON/)
   })
 })
+
+describe('constrained tool schema normalization', () => {
+  const nested: StructuredOutput = {
+    name: 'proposal',
+    schema: {
+      type: 'object',
+      properties: { inner: { $ref: '#/$defs/Inner' } },
+      required: ['inner'],
+      additionalProperties: false,
+      $defs: {
+        Inner: {
+          type: 'object',
+          properties: { q: { type: 'string' } },
+          required: ['q'],
+          additionalProperties: false
+        }
+      }
+    }
+  }
+
+  it('inlines $defs into the private tool parameters', () => {
+    const plan = prepareStructuredOutput(
+      mkModel('anthropic-messages'),
+      context,
+      nested,
+      'constrained-tool'
+    )
+    const parameters = plan.context.tools?.[0]?.parameters as Record<string, unknown>
+    expect(parameters.$defs).toBeUndefined()
+    expect(parameters.properties).toEqual({
+      inner: {
+        type: 'object',
+        properties: { q: { type: 'string' } },
+        required: ['q'],
+        additionalProperties: false
+      }
+    })
+  })
+
+  it('leaves the schema verbatim on a native route', () => {
+    const plan = prepareStructuredOutput(mkModel('openai-completions'), context, nested, 'native')
+    const sampling = plan.options.samplingParams as Record<string, JsonObject>
+    const json = sampling.response_format?.json_schema as Record<string, unknown>
+    expect((json.schema as Record<string, unknown>).$defs).toBeDefined()
+  })
+
+  it('refuses a recursive schema instead of recursing', () => {
+    const recursive: StructuredOutput = {
+      name: 'tree',
+      schema: {
+        type: 'object',
+        properties: { node: { $ref: '#/$defs/Node' } },
+        $defs: {
+          Node: { type: 'object', properties: { child: { $ref: '#/$defs/Node' } } }
+        }
+      }
+    }
+    expect(() =>
+      prepareStructuredOutput(mkModel('anthropic-messages'), context, recursive, 'constrained-tool')
+    ).toThrow(/recursive/)
+  })
+})
+
+describe('dropped keyword reporting', () => {
+  const ranged: StructuredOutput = {
+    name: 'ranged',
+    schema: {
+      type: 'object',
+      properties: { n: { type: 'integer', minimum: 0 } },
+      required: ['n'],
+      additionalProperties: false
+    }
+  }
+
+  it('reports keywords dropped on the constrained-tool route', () => {
+    const plan = prepareStructuredOutput(
+      mkModel('anthropic-messages'),
+      context,
+      ranged,
+      'constrained-tool'
+    )
+    expect(plan.droppedKeywords).toEqual(['minimum'])
+    const parameters = plan.context.tools?.[0]?.parameters as Record<string, unknown>
+    expect((parameters.properties as Record<string, unknown>).n).toEqual({ type: 'integer' })
+  })
+
+  it('drops nothing on a native route', () => {
+    const plan = prepareStructuredOutput(mkModel('openai-completions'), context, ranged, 'native')
+    expect(plan.droppedKeywords).toEqual([])
+  })
+})
+
+describe('openrouter require_parameters', () => {
+  const mkOpenrouterModel = (): Model<Api> =>
+    ({ ...mkModel('openai-completions'), provider: 'openrouter' }) as Model<Api>
+
+  it('asks OpenRouter to route only to upstreams that honour the schema', () => {
+    const plan = prepareStructuredOutput(mkOpenrouterModel(), context, constraint, 'auto')
+    const sampling = plan.options.samplingParams as Record<string, unknown>
+    expect(sampling.provider).toEqual({ require_parameters: true })
+    expect(sampling.response_format).toBeDefined()
+  })
+
+  it('does not send the key to other providers', () => {
+    const plan = prepareStructuredOutput(mkModel('openai-completions'), context, constraint, 'auto')
+    const sampling = plan.options.samplingParams as Record<string, unknown>
+    expect(sampling.provider).toBeUndefined()
+  })
+
+  it('does not send the key on the responses api', () => {
+    const responses = { ...mkModel('openai-responses'), provider: 'openrouter' } as Model<Api>
+    const plan = prepareStructuredOutput(responses, context, constraint, 'auto')
+    const sampling = plan.options.samplingParams as Record<string, unknown>
+    expect(sampling.provider).toBeUndefined()
+  })
+})
+
+describe('openrouter detection is not a name match', () => {
+  it('still asks for require_parameters when the provider is renamed', () => {
+    // `model.provider` is the operator's config key, so a second OpenRouter account
+    // named anything else must not silently lose the enforcement guarantee.
+    const renamed = {
+      ...mkModel('openai-completions'),
+      provider: 'openrouter-2',
+      baseUrl: 'https://openrouter.ai/api/v1'
+    } as Model<Api>
+    const plan = prepareStructuredOutput(renamed, context, constraint, 'auto')
+    const sampling = plan.options.samplingParams as Record<string, unknown>
+    expect(sampling.provider).toEqual({ require_parameters: true })
+  })
+
+  it('does not send it to an unrelated provider on another baseUrl', () => {
+    const other = {
+      ...mkModel('openai-completions'),
+      provider: 'cerebras',
+      baseUrl: 'https://api.cerebras.ai/v1'
+    } as Model<Api>
+    const plan = prepareStructuredOutput(other, context, constraint, 'auto')
+    const sampling = plan.options.samplingParams as Record<string, unknown>
+    expect(sampling.provider).toBeUndefined()
+  })
+})

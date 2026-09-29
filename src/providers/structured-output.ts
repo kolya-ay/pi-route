@@ -11,6 +11,7 @@ import type {
 
 import { STRUCTURED_OUTPUT_TOOL, type StructuredOutput } from '../structured-output'
 import type { FormatTranslationMode } from '../types'
+import { toStrictToolSchema } from './strict-schema'
 
 // What dispatch needs to enforce a schema on one candidate: the context it must
 // stream, the extra stream options, and whether the public response has to be
@@ -19,18 +20,37 @@ export type StructuredOutputPlan = {
   context: Context
   options: Record<string, unknown>
   normalizeEvents: boolean
+  // Keywords the backend cannot accept, dropped from the schema on this route. Non-empty
+  // means the enforced schema is weaker than the one requested, and the dispatch site
+  // records it so that is visible rather than silent.
+  droppedKeywords: string[]
 }
 
 // Native enforcement is only claimed for adapters whose wire body pi-route knows
 // AND which actually forward `samplingParams` (openai-completions / -responses do;
 // the Codex adapter builds its body by hand and drops them).
+//
+// OpenRouter picks an upstream per request. One that ignores `response_format` would
+// reproduce the silent drop this whole route exists to prevent, so constrain the
+// selection to upstreams that honour the request's parameters. OpenRouter-specific
+// body key — it must not reach anyone else. Only verified against the chat-completions
+// endpoint, so it is added only on the openai-completions branch, not Responses.
+//
+// `model.provider` is the pi-route CONFIG KEY, not the vendor: models/build.ts
+// `reident` stamps it so two accounts of one type stay distinct, which means a
+// provider the operator happened to name `openrouter-2` would lose this protection
+// and go out natively with no enforcement guarantee and no refusal. Match the
+// baseUrl too — the same test pi-ai itself uses (openai-completions.js:1227).
+const isOpenRouter = (model: Model<Api>): boolean =>
+  model.provider === 'openrouter' || model.baseUrl.includes('openrouter.ai')
+
 const nativeParams = (
-  api: Api,
+  model: Model<Api>,
   constraint: StructuredOutput
 ): Record<string, unknown> | undefined => {
   const described =
     constraint.description !== undefined ? { description: constraint.description } : {}
-  if (api === 'openai-completions') {
+  if (model.api === 'openai-completions') {
     return {
       response_format: {
         type: 'json_schema',
@@ -40,10 +60,11 @@ const nativeParams = (
           strict: true,
           schema: constraint.schema
         }
-      }
+      },
+      ...(isOpenRouter(model) ? { provider: { require_parameters: true } } : {})
     }
   }
-  if (api === 'openai-responses') {
+  if (model.api === 'openai-responses') {
     return {
       text: {
         format: {
@@ -88,6 +109,10 @@ const constrainedPlan = (
   if (context.tools !== undefined && context.tools.length > 0) {
     throw new Error('structured output cannot be combined with tools')
   }
+  // The strict gate refuses `$defs` outright, and Anthropic refuses the numeric
+  // range keywords; normalize here, on the only route that goes through either.
+  // Native routes keep the schema verbatim.
+  const { schema: parameters, dropped } = toStrictToolSchema(constraint.schema)
   return {
     context: {
       ...context,
@@ -95,13 +120,14 @@ const constrainedPlan = (
         {
           name: STRUCTURED_OUTPUT_TOOL,
           description: constraint.description ?? `Return ${constraint.name}`,
-          parameters: constraint.schema,
+          parameters,
           constrainedSampling: { type: 'json_schema', strict: 'require' }
         }
       ]
     },
     options: { toolChoice },
-    normalizeEvents: true
+    normalizeEvents: true,
+    droppedKeywords: dropped
   }
 }
 
@@ -114,8 +140,10 @@ export const prepareStructuredOutput = (
   const api = model.api
   if (mode === 'constrained-tool') return constrainedPlan(api, context, constraint, mode)
 
-  const samplingParams = nativeParams(api, constraint)
-  if (samplingParams) return { context, options: { samplingParams }, normalizeEvents: false }
+  const samplingParams = nativeParams(model, constraint)
+  if (samplingParams) {
+    return { context, options: { samplingParams }, normalizeEvents: false, droppedKeywords: [] }
+  }
   if (mode === 'native') unsupported(mode, api)
   return constrainedPlan(api, context, constraint, mode)
 }
