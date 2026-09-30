@@ -100,6 +100,50 @@ const drainStream = async (stream: ReadableStream<Uint8Array>): Promise<string> 
   return chunks.join('')
 }
 
+type WireEvent = {
+  type?: string
+  index?: number
+  content_block?: { type: string; id?: string; name?: string }
+  delta?: { text?: string; thinking?: string; partial_json?: string }
+}
+
+/**
+ * Anthropic streams are strictly sequential: each block index opens once, carries
+ * only deltas, stops once, and indices run 0, 1, 2… never going back. Nothing follows message_stop.
+ * Takes parsed `data:` payloads (each carries its own `type`).
+ */
+const assertWellFormed = (data: unknown[]): void => {
+  const events = data as WireEvent[]
+  const stopAt = events.findIndex((e) => e.type === 'message_stop')
+  if (stopAt !== -1) expect(stopAt).toBe(events.length - 1)
+  const blocks = events.filter((e) => e.index !== undefined)
+  const order = blocks.map((e) => e.index as number)
+  expect(order).toEqual([...order].sort((a, b) => a - b))
+  const indices = [...new Set(order)]
+  expect(indices).toEqual(indices.map((_, i) => i))
+  indices.forEach((i) => {
+    const shape = blocks.filter((e) => e.index === i).map((e) => e.type)
+    expect(shape[0]).toBe('content_block_start')
+    expect(shape.at(-1)).toBe('content_block_stop')
+    expect(shape.slice(1, -1).every((t) => t === 'content_block_delta')).toBe(true)
+  })
+}
+
+// Each wire block as its type (plus id/name for tool_use) and its deltas joined.
+const wireBlocks = (data: unknown[]): Record<string, unknown>[] => {
+  const events = data as WireEvent[]
+  return events
+    .filter((e) => e.type === 'content_block_start')
+    .map(({ index, content_block: block }) => ({
+      type: block?.type,
+      ...(block?.type === 'tool_use' ? { id: block.id, name: block.name } : {}),
+      body: events
+        .filter((e) => e.type === 'content_block_delta' && e.index === index)
+        .map(({ delta: d }) => d?.text ?? d?.thinking ?? d?.partial_json ?? '')
+        .join('')
+    }))
+}
+
 // --- Anthropic SSE contentIndex bug-fix tests ---
 
 describe('createAnthropicSseStream - contentIndex state machine', () => {
@@ -138,6 +182,117 @@ describe('createAnthropicSseStream - contentIndex state machine', () => {
     expect((evts[4]!.data as Record<string, unknown>).index).toBe(1)
     expect((evts[4]!.data as Record<string, unknown>).content_block).toMatchObject({ type: 'text' })
     expect((evts[6]!.data as Record<string, unknown>).index).toBe(1)
+    assertWellFormed(evts.map((e) => e.data))
+  })
+
+  it('late thinking after text started: reopens as a new thinking block', async () => {
+    const partial = makePartial()
+    const events: AssistantMessageEvent[] = [
+      { type: 'start', partial },
+      { type: 'thinking_start', contentIndex: 0, partial },
+      { type: 'thinking_delta', contentIndex: 0, delta: 'hmm', partial },
+      { type: 'text_start', contentIndex: 1, partial }, // auto-closes 0
+      { type: 'text_delta', contentIndex: 1, delta: 'PONG', partial },
+      { type: 'thinking_delta', contentIndex: 0, delta: ' late', partial }, // interleaved upstream
+      { type: 'thinking_end', contentIndex: 0, content: 'hmm late', partial },
+      { type: 'text_end', contentIndex: 1, content: 'PONG', partial },
+      { type: 'done', reason: 'stop', message: makePartial() }
+    ]
+    const raw = await drainStream(createAnthropicSseStream(toAsyncIterable(events), 'r9', 'model'))
+    const data = parseSseEvents(raw).map((e) => e.data)
+    expect(wireBlocks(data)).toEqual([
+      { type: 'thinking', body: 'hmm' },
+      { type: 'text', body: 'PONG' },
+      { type: 'thinking', body: ' late' }
+    ])
+    assertWellFormed(data)
+  })
+
+  it('text then thinking then text: trailing text survives in a new block', async () => {
+    const partial = makePartial()
+    const events: AssistantMessageEvent[] = [
+      { type: 'start', partial },
+      { type: 'text_start', contentIndex: 0, partial },
+      { type: 'text_delta', contentIndex: 0, delta: 'A', partial },
+      { type: 'thinking_start', contentIndex: 1, partial },
+      { type: 'thinking_delta', contentIndex: 1, delta: 'hm', partial },
+      { type: 'text_delta', contentIndex: 0, delta: 'B', partial },
+      { type: 'thinking_end', contentIndex: 1, content: 'hm', partial },
+      { type: 'text_end', contentIndex: 0, content: 'AB', partial },
+      { type: 'done', reason: 'stop', message: makePartial() }
+    ]
+    const raw = await drainStream(createAnthropicSseStream(toAsyncIterable(events), 'r10', 'model'))
+    const data = parseSseEvents(raw).map((e) => e.data)
+    expect(wireBlocks(data)).toEqual([
+      { type: 'text', body: 'A' },
+      { type: 'thinking', body: 'hm' },
+      { type: 'text', body: 'B' }
+    ])
+    assertWellFormed(data)
+  })
+
+  it('text then tool call then text', async () => {
+    const partial = makePartial()
+    const events: AssistantMessageEvent[] = [
+      { type: 'start', partial },
+      { type: 'text_start', contentIndex: 0, partial },
+      { type: 'text_delta', contentIndex: 0, delta: 'A', partial },
+      { type: 'toolcall_start', contentIndex: 1, partial },
+      { type: 'toolcall_delta', contentIndex: 1, delta: '{"x":', partial },
+      { type: 'text_delta', contentIndex: 0, delta: 'B', partial },
+      { type: 'toolcall_delta', contentIndex: 1, delta: '1}', partial },
+      // openai-completions ends blocks in content order
+      { type: 'text_end', contentIndex: 0, content: 'AB', partial },
+      {
+        type: 'toolcall_end',
+        contentIndex: 1,
+        toolCall: { type: 'toolCall', id: 't1', name: 'f', arguments: { x: 1 } },
+        partial
+      },
+      { type: 'done', reason: 'toolUse', message: makePartial({ stopReason: 'toolUse' }) }
+    ]
+    const raw = await drainStream(createAnthropicSseStream(toAsyncIterable(events), 'r11', 'model'))
+    const data = parseSseEvents(raw).map((e) => e.data)
+    // The tool call is silent until it ends, so the text block stays open and takes 'B'.
+    expect(wireBlocks(data)).toEqual([
+      { type: 'text', body: 'AB' },
+      { type: 'tool_use', id: 't1', name: 'f', body: '{"x":1}' }
+    ])
+    assertWellFormed(data)
+  })
+
+  it('interleaved parallel tool calls are each emitted whole', async () => {
+    const partial = makePartial()
+    const events: AssistantMessageEvent[] = [
+      { type: 'start', partial },
+      { type: 'toolcall_start', contentIndex: 0, partial },
+      { type: 'toolcall_start', contentIndex: 1, partial },
+      { type: 'toolcall_delta', contentIndex: 0, delta: '{"a":', partial },
+      { type: 'toolcall_delta', contentIndex: 1, delta: '{"b":', partial },
+      { type: 'toolcall_delta', contentIndex: 1, delta: '2}', partial },
+      { type: 'toolcall_delta', contentIndex: 0, delta: '1}', partial },
+      {
+        type: 'toolcall_end',
+        contentIndex: 0,
+        toolCall: { type: 'toolCall', id: 'c0', name: 'f', arguments: { a: 1 } },
+        partial
+      },
+      {
+        type: 'toolcall_end',
+        contentIndex: 1,
+        toolCall: { type: 'toolCall', id: 'c1', name: 'g', arguments: { b: 2 } },
+        partial
+      },
+      { type: 'done', reason: 'toolUse', message: makePartial({ stopReason: 'toolUse' }) }
+    ]
+    const raw = await drainStream(createAnthropicSseStream(toAsyncIterable(events), 'r12', 'model'))
+    const data = parseSseEvents(raw).map((e) => e.data)
+    expect(wireBlocks(data)).toEqual([
+      { type: 'tool_use', id: 'c0', name: 'f', body: '{"a":1}' },
+      { type: 'tool_use', id: 'c1', name: 'g', body: '{"b":2}' }
+    ])
+    expect((data as WireEvent[]).filter((e) => e.type === 'content_block_delta')).toHaveLength(2)
+    assertWellFormed(data)
   })
 
   it('done while block open: emits content_block_stop before message_delta', async () => {
@@ -161,6 +316,7 @@ describe('createAnthropicSseStream - contentIndex state machine', () => {
       'message_stop'
     ])
     expect((evts[3]!.data as Record<string, unknown>).index).toBe(0)
+    assertWellFormed(evts.map((e) => e.data))
   })
 
   it('error mid-stream while block open: emits content_block_stop then error', async () => {
@@ -187,6 +343,7 @@ describe('createAnthropicSseStream - contentIndex state machine', () => {
     ])
     expect((evts[3]!.data as Record<string, unknown>).index).toBe(0)
     expect((evts[4]!.data as Record<string, unknown>).type).toBe('error')
+    assertWellFormed(evts.map((e) => e.data))
   })
 })
 
@@ -261,6 +418,7 @@ describe('createAnthropicSseStream', () => {
       (l) => l.startsWith('data: ') && l.includes('"message_stop"')
     )
     expect(messageStopLine).toBeDefined()
+    assertWellFormed(parseDataLines(lines))
   })
 
   it('streams thinking blocks', async () => {
@@ -304,6 +462,7 @@ describe('createAnthropicSseStream', () => {
     const textStart = JSON.parse(requireLine(blockStarts[1]).slice(6))
     expect(textStart.index).toBe(1)
     expect(textStart.content_block.type).toBe('text')
+    assertWellFormed(parseDataLines(lines))
   })
 
   it('streams tool calls', async () => {
@@ -350,14 +509,18 @@ describe('createAnthropicSseStream', () => {
     const inputDeltas = lines.filter(
       (l) => l.startsWith('data: ') && l.includes('"input_json_delta"')
     )
-    expect(inputDeltas).toHaveLength(2)
+    expect(inputDeltas).toHaveLength(1)
     const id1 = JSON.parse(requireLine(inputDeltas[0]).slice(6))
-    expect(id1.delta.partial_json).toBe('{"loc')
+    expect(id1.delta.partial_json).toBe('{"location":"NYC"}')
+
+    // one keep-alive ping per toolcall_delta
+    expect(lines.filter((l) => l === 'event: ping')).toHaveLength(2)
 
     // stop reason should be tool_use
     const messageDelta = lines.find((l) => l.startsWith('data: ') && l.includes('"message_delta"'))
     const messageDeltaData = JSON.parse(requireLine(messageDelta).slice(6))
     expect(messageDeltaData.delta.stop_reason).toBe('tool_use')
+    assertWellFormed(parseDataLines(lines))
   })
 
   it('maps stop reasons correctly', async () => {
@@ -373,6 +536,7 @@ describe('createAnthropicSseStream', () => {
       )
       const data = JSON.parse(requireLine(messageDelta).slice(6))
       expect(data.delta.stop_reason).toBe(expected)
+      assertWellFormed(parseDataLines(lines))
     }
 
     await testStopReason('stop', 'end_turn')
@@ -399,6 +563,7 @@ describe('createAnthropicSseStream', () => {
     expect(errorData.type).toBe('error')
     expect(errorData.error.type).toBe('api_error')
     expect(errorData.error.message).toBe('Something went wrong')
+    assertWellFormed(parseDataLines(lines))
   })
 
   it('tracks block index across multiple content blocks', async () => {
@@ -430,6 +595,7 @@ describe('createAnthropicSseStream', () => {
     expect(blockStops).toHaveLength(2)
     expect(JSON.parse(requireLine(blockStops[0]).slice(6)).index).toBe(0)
     expect(JSON.parse(requireLine(blockStops[1]).slice(6)).index).toBe(1)
+    assertWellFormed(parseDataLines(lines))
   })
 })
 

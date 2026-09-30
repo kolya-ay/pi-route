@@ -51,10 +51,41 @@ const sseDone = (): string => 'data: [DONE]\n\n'
 
 // --- Anthropic SSE streaming ---
 
-type SseState = { openBlockIndex: number | undefined }
+// Anthropic blocks are strictly sequential, but pi-ai interleaves: one text and one
+// thinking block per message, parallel tool calls by upstream index. So wire indices
+// are the encoder's own — a block that resurfaces opens anew — and tool calls, whose
+// deltas would interleave, are sent whole on toolcall_end, with a ping per delta to
+// keep the line warm. Tool input is JSON.stringify of pi-ai's parsed arguments, so
+// truncated JSON arrives repaired or as {}.
+// `open` is the pi-ai contentIndex of the open wire block, whose index is next - 1.
+type SseState = { open: number | undefined; next: number }
 
-const closeBlockSse = (index: number): string =>
-  sseEvent('content_block_stop', { type: 'content_block_stop', index })
+const closeOpen = (state: SseState): string => {
+  if (state.open === undefined) return ''
+  state.open = undefined
+  return sseEvent('content_block_stop', { type: 'content_block_stop', index: state.next - 1 })
+}
+
+const openBlock = (state: SseState, source: number, contentBlock: object): string => {
+  const out =
+    closeOpen(state) +
+    sseEvent('content_block_start', {
+      type: 'content_block_start',
+      index: state.next++,
+      content_block: contentBlock
+    })
+  state.open = source
+  return out
+}
+
+const ensureOpen = (state: SseState, source: number, contentBlock: object): string =>
+  state.open === source ? '' : openBlock(state, source, contentBlock)
+
+const blockDelta = (state: SseState, delta: object): string =>
+  sseEvent('content_block_delta', { type: 'content_block_delta', index: state.next - 1, delta })
+
+const TEXT = { type: 'text', text: '' }
+const THINKING = { type: 'thinking', thinking: '' }
 
 const anthropicEventToSse = (
   event: AssistantMessageEvent,
@@ -83,130 +114,62 @@ const anthropicEventToSse = (
         }
       })
 
-    case 'text_start': {
-      const out: string[] = []
-      if (state.openBlockIndex !== undefined && state.openBlockIndex !== event.contentIndex) {
-        out.push(closeBlockSse(state.openBlockIndex))
-      }
-      state.openBlockIndex = event.contentIndex
-      out.push(
-        sseEvent('content_block_start', {
-          type: 'content_block_start',
-          index: event.contentIndex,
-          content_block: { type: 'text', text: '' }
-        })
-      )
-      return out.join('')
-    }
+    case 'text_start':
+      return ensureOpen(state, event.contentIndex, TEXT)
 
     case 'text_delta':
-      return sseEvent('content_block_delta', {
-        type: 'content_block_delta',
-        index: event.contentIndex,
-        delta: { type: 'text_delta', text: event.delta }
-      })
-
-    case 'text_end': {
-      const out = closeBlockSse(event.contentIndex)
-      if (state.openBlockIndex === event.contentIndex) state.openBlockIndex = undefined
-      return out
-    }
-
-    case 'thinking_start': {
-      const out: string[] = []
-      if (state.openBlockIndex !== undefined && state.openBlockIndex !== event.contentIndex) {
-        out.push(closeBlockSse(state.openBlockIndex))
-      }
-      state.openBlockIndex = event.contentIndex
-      out.push(
-        sseEvent('content_block_start', {
-          type: 'content_block_start',
-          index: event.contentIndex,
-          content_block: { type: 'thinking', thinking: '' }
-        })
+      return (
+        ensureOpen(state, event.contentIndex, TEXT) +
+        blockDelta(state, { type: 'text_delta', text: event.delta })
       )
-      return out.join('')
-    }
+
+    case 'thinking_start':
+      return ensureOpen(state, event.contentIndex, THINKING)
 
     case 'thinking_delta':
-      return sseEvent('content_block_delta', {
-        type: 'content_block_delta',
-        index: event.contentIndex,
-        delta: { type: 'thinking_delta', thinking: event.delta }
-      })
-
-    case 'thinking_end': {
-      const out = closeBlockSse(event.contentIndex)
-      if (state.openBlockIndex === event.contentIndex) state.openBlockIndex = undefined
-      return out
-    }
-
-    case 'toolcall_start': {
-      const out: string[] = []
-      if (state.openBlockIndex !== undefined && state.openBlockIndex !== event.contentIndex) {
-        out.push(closeBlockSse(state.openBlockIndex))
-      }
-      state.openBlockIndex = event.contentIndex
-      const toolCallContent = event.partial.content[event.contentIndex] as ToolCall | undefined
-      out.push(
-        sseEvent('content_block_start', {
-          type: 'content_block_start',
-          index: event.contentIndex,
-          content_block: {
-            type: 'tool_use',
-            id: toolCallContent?.id ?? '',
-            name: toolCallContent?.name ?? '',
-            input: {}
-          }
-        })
+      return (
+        ensureOpen(state, event.contentIndex, THINKING) +
+        blockDelta(state, { type: 'thinking_delta', thinking: event.delta })
       )
-      return out.join('')
-    }
+
+    case 'text_end':
+    case 'thinking_end':
+      return state.open === event.contentIndex ? closeOpen(state) : ''
+
+    case 'toolcall_start':
+      return ''
 
     case 'toolcall_delta':
-      return sseEvent('content_block_delta', {
-        type: 'content_block_delta',
-        index: event.contentIndex,
-        delta: { type: 'input_json_delta', partial_json: event.delta }
-      })
+      return sseEvent('ping', { type: 'ping' })
 
     case 'toolcall_end': {
-      const out = closeBlockSse(event.contentIndex)
-      if (state.openBlockIndex === event.contentIndex) state.openBlockIndex = undefined
-      return out
+      const { id, name, arguments: input } = event.toolCall
+      return (
+        openBlock(state, event.contentIndex, { type: 'tool_use', id, name, input: {} }) +
+        blockDelta(state, { type: 'input_json_delta', partial_json: JSON.stringify(input) }) +
+        closeOpen(state)
+      )
     }
 
-    case 'done': {
-      const tail: string[] = []
-      if (state.openBlockIndex !== undefined) {
-        tail.push(closeBlockSse(state.openBlockIndex))
-        state.openBlockIndex = undefined
-      }
-      tail.push(
+    case 'done':
+      return (
+        closeOpen(state) +
         sseEvent('message_delta', {
           type: 'message_delta',
           delta: { stop_reason: mapAnthropicStopReason(event.reason), stop_sequence: null },
           usage: { output_tokens: event.message.usage.output }
-        })
+        }) +
+        sseEvent('message_stop', { type: 'message_stop' })
       )
-      tail.push(sseEvent('message_stop', { type: 'message_stop' }))
-      return tail.join('')
-    }
 
-    case 'error': {
-      const tail: string[] = []
-      if (state.openBlockIndex !== undefined) {
-        tail.push(closeBlockSse(state.openBlockIndex))
-        state.openBlockIndex = undefined
-      }
-      tail.push(
+    case 'error':
+      return (
+        closeOpen(state) +
         sseEvent('error', {
           type: 'error',
           error: { type: 'api_error', message: describeStreamError(event.error) }
         })
       )
-      return tail.join('')
-    }
   }
 }
 
@@ -216,7 +179,7 @@ export const createAnthropicSseStream = (
   model: string
 ): ReadableStream<Uint8Array> => {
   const encoder = new TextEncoder()
-  const state: SseState = { openBlockIndex: undefined }
+  const state: SseState = { open: undefined, next: 0 }
   const iterator = events[Symbol.asyncIterator]()
 
   return new ReadableStream({
