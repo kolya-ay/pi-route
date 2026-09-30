@@ -26,6 +26,16 @@ import { toContext } from './to-context'
 
 export class DispatchAuthError extends Error {}
 
+// The catalog is refreshed from each upstream's own /v1/models, so a miss almost
+// always means the provider dropped the model — not a typo in the operator's config.
+export class ModelNotOfferedError extends Error {
+  constructor(provider: string, model: string) {
+    super(
+      `${provider} does not offer "${model}" (absent from its model list; check the provider's /v1/models)`
+    )
+  }
+}
+
 // OAuth-refresh failures surface two ways: a synchronous throw of ModelsError
 // code "oauth", or (the common path) an in-stream error event whose message pi-ai
 // stamps as "OAuth refresh failed…". Both map to a login-hint 401 at the route.
@@ -124,7 +134,7 @@ export const createModelsDispatch = (
     const catalogModel =
       models.getModel(providerName, request.model) ??
       (construct ? constructModel(models, providerName, request.model) : undefined)
-    if (!catalogModel) throw new Error(`model not found: ${providerName}/${request.model}`)
+    if (!catalogModel) throw new ModelNotOfferedError(providerName, request.model)
     const routed =
       request.structuredOutput && structuredOutputApi
         ? forStructuredOutput(models, providerName, catalogModel, structuredOutputApi)

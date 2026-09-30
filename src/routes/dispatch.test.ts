@@ -9,7 +9,7 @@ import { createAssistantMessageEventStream } from '@earendil-works/pi-ai'
 import { Hono } from 'hono'
 import { timing } from 'hono/timing'
 import { buildCatalog } from '../pipeline/catalog'
-import { createModelsDispatch } from '../providers/models-dispatch'
+import { createModelsDispatch, ModelNotOfferedError } from '../providers/models-dispatch'
 import { createState } from '../state'
 import { STRUCTURED_OUTPUT_TOOL } from '../structured-output'
 import type { Env } from '../telemetry/hono-env'
@@ -172,6 +172,36 @@ describe('dispatch failover', () => {
     expect(String(finalErr?.attributes?.['error.message'] ?? '')).toContain('second-fail')
     const hops = root?.events.filter((e) => e.name === 'provider_fallback') ?? []
     expect(hops).toHaveLength(1)
+  })
+
+  test('a model the upstream does not offer answers 404, not 502', async () => {
+    const gone: Provider = {
+      name: 'a',
+      type: 'openai-compatible',
+      dispatch: async () => {
+        throw new ModelNotOfferedError('a', 'x')
+      }
+    }
+    const options: RouterOptions = {
+      providers: {
+        a: { type: 'openai-compatible', account: keyAccount, formatTranslation: 'auto' }
+      },
+      pipeline: [{ kind: 'pool', name: 'gpt', to: ['a/x'], strategy: 'failover' }],
+      expose: []
+    }
+    const registry = new Map<string, ProviderEntry>([
+      ['a', { provider: gone, account: keyAccount }]
+    ])
+
+    const res = await mkApp(options, registry).request('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'gpt/x', messages: [{ role: 'user', content: 'hi' }] })
+    })
+
+    expect(res.status).toBe(404)
+    const body = (await res.json()) as { error: string }
+    expect(body.error).toContain('a does not offer "x"')
   })
 
   test('an unauthenticated provider is gated with a login hint', async () => {

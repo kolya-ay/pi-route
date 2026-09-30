@@ -52,8 +52,12 @@ providers:
 
 # Routing pipeline. Each entry's YAML value shape declares its semantics:
 #   key: target           → alias (rewrite bare name to target)
-#   key: [m1, m2, ...]    → pool (balance across members; default round-robin)
-#   key: {to, strategy?, when?}  → full entry
+#   key: [m1, m2, ...]    → pool (balance across members; default round-robin).
+#                           A bare list matches `key/**`, NOT the bare name `key`.
+#   key: {to, strategy?, when?, match?}  → full entry
+#
+# A named fallback chain (bare `model: key`, try members in order) needs the full form:
+#   default: {match: exact, strategy: failover, to: [provA/m1, provB/m2]}
 pipeline:
   # Aliases — convenient short names for common Claude models.
   opus:    claude-max/claude-opus-4-7

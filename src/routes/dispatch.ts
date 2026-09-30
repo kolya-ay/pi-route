@@ -7,7 +7,7 @@ import { endTime, startTime } from 'hono/timing'
 
 import { readEnvConfig } from '../config/env'
 import { resolveCandidates } from '../pipeline/resolve'
-import { DispatchAuthError } from '../providers/models-dispatch'
+import { DispatchAuthError, ModelNotOfferedError } from '../providers/models-dispatch'
 import {
   parseStructuredOutput,
   type StructuredOutput,
@@ -267,8 +267,8 @@ export const createDispatchHandler = (deps: DispatchDeps) => {
       'pi.provider': lastProvider,
       'error.message': message
     })
-    // A model the backend doesn't know is a 404, not an upstream 502.
-    const status: 404 | 502 = message.startsWith('model not found:') ? 404 : 502
+    // A model the backend doesn't offer is a 404, not an upstream 502.
+    const status: 404 | 502 = lastErr instanceof ModelNotOfferedError ? 404 : 502
     return c.json({ error: message }, status)
   }
 }

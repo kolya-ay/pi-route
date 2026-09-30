@@ -16,7 +16,12 @@ import { STRUCTURED_OUTPUT_TOOL, type StructuredOutput } from '../structured-out
 import { createTel } from '../telemetry/tel'
 import { useTestExporter } from '../telemetry/test-fixture'
 import type { FormatTranslationMode, IncomingRequest } from '../types'
-import { createModelsDispatch, DispatchAuthError, mapAuthError } from './models-dispatch'
+import {
+  createModelsDispatch,
+  DispatchAuthError,
+  ModelNotOfferedError,
+  mapAuthError
+} from './models-dispatch'
 
 const mkRequest = (overrides: Partial<IncomingRequest> = {}): IncomingRequest => ({
   id: 'req-1',
@@ -106,11 +111,11 @@ const toolCallStream = (args: JsonObject) => {
 }
 
 describe('createModelsDispatch', () => {
-  it('throws "model not found" for an unknown model', async () => {
+  it('names a model absent from the provider catalog as not offered', async () => {
     const provider = createModelsDispatch(mkModels({ getModel: () => undefined }), 'prov')
-    await expect(
-      provider.dispatch(mkRequest(), { credential: 'key', key: 'k' }, 'k')
-    ).rejects.toThrow(/model not found/)
+    const attempt = provider.dispatch(mkRequest(), { credential: 'key', key: 'k' }, 'k')
+    await expect(attempt).rejects.toBeInstanceOf(ModelNotOfferedError)
+    await expect(attempt).rejects.toThrow(/^prov does not offer ".+" \(absent from its model list/)
   })
 
   it('returns a 200 JSON ProviderResponse on the happy non-streaming path', async () => {
