@@ -8,6 +8,21 @@ import type {
   ProviderResponse
 } from '../types'
 
+import { UpstreamError } from './models-dispatch'
+
+// Upstream error bodies vary (OpenAI JSON, gateway HTML); name the message when
+// the body carries one, else show the body itself.
+const errorDetail = (text: string): string => {
+  try {
+    const error = (JSON.parse(text) as { error?: { message?: unknown } | string }).error
+    const message = typeof error === 'string' ? error : error?.message
+    if (typeof message === 'string') return message
+  } catch {
+    // Not JSON — fall through to the raw body.
+  }
+  return text.trim() || '(no body)'
+}
+
 export const createPassthroughProvider = (
   name: string,
   type: Provider['type'],
@@ -67,11 +82,18 @@ export const createPassthroughProvider = (
       method: request.rawRequest.method,
       headers,
       body: request.rawRequest.body,
-      duplex: 'half'
+      duplex: 'half',
+      signal: request.rawRequest.signal
     } as RequestInit)
 
     const response = await fetchFn(upstream)
     const latencyMs = Date.now() - start
+
+    // A non-2xx has reached no client yet: throwing lets dispatch fail over.
+    if (!response.ok) {
+      const detail = errorDetail(await response.text()).slice(0, 200)
+      throw new UpstreamError(`${response.status} ${detail}`, response.status)
+    }
 
     const contentType = response.headers.get('content-type') ?? ''
     let body: ProviderResponse['body']

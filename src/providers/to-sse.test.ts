@@ -1069,6 +1069,37 @@ describe('createResponsesSseStream', () => {
     const text = await readStream(stream)
     expect(text.trim().endsWith('data: [DONE]')).toBe(true)
   })
+
+  it('ends with response.failed when the upstream errors after content', async () => {
+    const partial = makePartial()
+    const events: AssistantMessageEvent[] = [
+      { type: 'start', partial },
+      { type: 'text_start', contentIndex: 0, partial },
+      { type: 'text_delta', contentIndex: 0, delta: 'Hel', partial },
+      {
+        type: 'error',
+        reason: 'error',
+        error: makePartial({ stopReason: 'error', errorMessage: 'connection reset' })
+      }
+    ]
+    const text = await readStream(
+      createResponsesSseStream(toAsyncIterable(events), 'req-4', 'gpt-4')
+    )
+    expect(text).toContain('event: response.failed')
+    expect(text).toContain('"status":"failed"')
+    expect(text).toContain('"message":"connection reset"')
+    expect(text).not.toContain('response.completed')
+  })
+
+  it('ends with response.failed when the event source throws', async () => {
+    const events = (async function* (): AsyncIterable<AssistantMessageEvent> {
+      yield { type: 'start', partial: makePartial() }
+      throw new Error('socket hang up')
+    })()
+    const text = await readStream(createResponsesSseStream(events, 'req-5', 'gpt-4'))
+    expect(text).toContain('event: response.failed')
+    expect(text).toContain('"message":"socket hang up"')
+  })
 })
 
 // --- Responses non-streaming JSON tests ---

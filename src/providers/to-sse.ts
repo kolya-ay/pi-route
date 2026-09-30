@@ -459,6 +459,22 @@ export const createResponsesSseStream = (
         controller.enqueue(encoder.encode(`event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`))
       }
 
+      // In-band failure: the client already holds a 200, so the error must travel as
+      // an event. After a cancel the controller is closed and enqueue throws; there is
+      // nobody left to tell.
+      const fail = (message: string) => {
+        try {
+          enq('response.failed', {
+            type: 'response.failed',
+            response: {
+              ...respEnvelope(respId, requestedModel, 'failed', []),
+              error: { code: 'server_error', message }
+            }
+          })
+          controller.close()
+        } catch {}
+      }
+
       let outputIndex = 0
       let textItemId: string | null = null
       let textContentIndex = 0
@@ -636,7 +652,7 @@ export const createResponsesSseStream = (
               return
 
             case 'error':
-              controller.error(new Error(ev.error.errorMessage ?? 'pi-ai stream error'))
+              fail(describeStreamError(ev.error))
               return
 
             // thinking events — no Responses equivalent in v1
@@ -650,7 +666,7 @@ export const createResponsesSseStream = (
         controller.enqueue(encoder.encode('data: [DONE]\n\n'))
         controller.close()
       } catch (err) {
-        controller.error(err)
+        fail(err instanceof Error ? err.message : String(err))
       }
     }
   })

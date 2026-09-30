@@ -5,6 +5,7 @@ import { Hono } from 'hono'
 
 import type { Account, IncomingRequest } from '../types'
 
+import { UpstreamError } from './models-dispatch'
 import { createPassthroughProvider } from './passthrough'
 
 const makeRequest = (url: string, headers: Record<string, string> = {}): IncomingRequest => ({
@@ -259,5 +260,55 @@ describe('createPassthroughProvider: structured output', () => {
     )
     await provider.dispatch(makeRequest('http://router.internal/v1/messages'), makeAccount(), 'sk')
     expect(seen.body).toEqual({})
+  })
+})
+
+describe('createPassthroughProvider: upstream errors', () => {
+  const failing = (status: number, body: string, contentType = 'application/json') =>
+    createPassthroughProvider(
+      'oa',
+      'openai',
+      'https://api.openai.com/v1',
+      'auto',
+      async () => new Response(body, { status, headers: { 'content-type': contentType } })
+    )
+
+  it('throws an UpstreamError naming the status and the upstream message', async () => {
+    const err = await failing(402, '{"error":{"message":"quota exhausted"}}')
+      .dispatch(makeRequest('http://router.internal/v1/chat/completions'), makeAccount(), 'sk')
+      .catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(UpstreamError)
+    expect((err as UpstreamError).status).toBe(402)
+    expect((err as UpstreamError).message).toBe('402 quota exhausted')
+  })
+
+  it('falls back to the raw body when the error is not JSON', async () => {
+    const err = await failing(503, '<html>bad gateway</html>', 'text/html')
+      .dispatch(makeRequest('http://router.internal/v1/chat/completions'), makeAccount(), 'sk')
+      .catch((e: unknown) => e)
+    expect((err as UpstreamError).message).toBe('503 <html>bad gateway</html>')
+  })
+
+  it('forwards the client abort signal upstream', async () => {
+    const seen: { signal?: AbortSignal } = {}
+    const ac = new AbortController()
+    const provider = createPassthroughProvider(
+      'oa',
+      'openai',
+      'https://x/v1',
+      'auto',
+      async (req) => {
+        seen.signal = req.signal
+        return new Response('{}', { headers: { 'content-type': 'application/json' } })
+      }
+    )
+    const raw = new Request('http://router.internal/v1/chat/completions', {
+      method: 'POST',
+      body: '{}',
+      signal: ac.signal
+    })
+    await provider.dispatch({ ...makeRequest(raw.url), rawRequest: raw }, makeAccount(), 'sk')
+    ac.abort()
+    expect(seen.signal?.aborted).toBe(true)
   })
 })

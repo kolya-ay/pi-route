@@ -36,6 +36,24 @@ export class ModelNotOfferedError extends Error {
   }
 }
 
+// A failure the upstream reported. `status` is the HTTP status when one is known;
+// dispatch forwards it to the client only when every failover candidate agrees.
+export class UpstreamError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number
+  ) {
+    super(message)
+  }
+}
+
+// pi-ai renders an HTTP failure as "<status> status code (…)" and keeps no numeric
+// field, so the message is the only place the status survives.
+export const upstreamError = (message: string): UpstreamError => {
+  const status = /^(\d{3}) status code/.exec(message)?.[1]
+  return new UpstreamError(message, status === undefined ? undefined : Number(status))
+}
+
 // OAuth-refresh failures surface two ways: a synchronous throw of ModelsError
 // code "oauth", or (the common path) an in-stream error event whose message pi-ai
 // stamps as "OAuth refresh failed…". Both map to a login-hint 401 at the route.
