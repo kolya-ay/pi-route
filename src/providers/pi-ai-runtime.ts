@@ -10,7 +10,7 @@ import type { PerTokenUsd } from '../pipeline/money'
 import { wrapStreamForMetrics } from '../telemetry/stream-metrics'
 import type { IncomingRequest, ProviderResponse } from '../types'
 
-import { mapAuthError } from './models-dispatch'
+import { mapAuthError, UpstreamError, upstreamError } from './models-dispatch'
 import { describeStreamError, formatJson, formatSse } from './to-sse'
 
 // Self-heal transient 429/5xx via pi-ai's SDK-level retry. 3 attempts caps
@@ -70,30 +70,60 @@ const prepareEvents = (
   return transform ? transform(measured) : measured
 }
 
-export const streamingResponse = (
+type Events = AsyncIterator<AssistantMessageEvent>
+
+// Reads until the first event the client would see. `start` and `text_start` carry
+// no content, so they are held: an error behind them has reached nobody yet and the
+// dispatch loop can still move to the next candidate.
+const readUntilContent = async (
+  iterator: Events,
+  provider: string,
+  held: AssistantMessageEvent[] = []
+): Promise<AssistantMessageEvent[]> => {
+  const next = await iterator.next()
+  if (next.done) throw new UpstreamError('No response from pi-ai stream')
+  const event = next.value
+  if (event.type === 'error') {
+    throw mapAuthError(upstreamError(describeStreamError(event.error)), provider)
+  }
+  return event.type === 'start' || event.type === 'text_start'
+    ? readUntilContent(iterator, provider, [...held, event])
+    : [...held, event]
+}
+
+const resume = async function* (
+  held: AssistantMessageEvent[],
+  iterator: Events
+): AsyncIterable<AssistantMessageEvent> {
+  yield* held
+  yield* { [Symbol.asyncIterator]: () => iterator }
+}
+
+// Commits only once content starts, so a failure before it throws like jsonResponse
+// does and the dispatch loop fails over; after it, errors stay in-band.
+export const streamingResponse = async (
   eventStream: AssistantMessageEventStream,
   request: IncomingRequest,
   metadata: ProviderResponse['metadata'],
   ctx: StreamMetricsCtx,
   transform?: EventTransform
-): ProviderResponse => ({
-  status: 200,
-  headers: new Headers({
-    'content-type': 'text/event-stream',
-    'cache-control': 'no-cache',
-    connection: 'keep-alive'
-  }),
-  body: formatSse(
-    request.format,
-    prepareEvents(eventStream, request, ctx, transform),
-    request.id,
-    request.model
-  ),
-  metadata
-})
+): Promise<ProviderResponse> => {
+  const iterator = prepareEvents(eventStream, request, ctx, transform)[Symbol.asyncIterator]()
+  const held = await readUntilContent(iterator, metadata.provider)
+  return {
+    status: 200,
+    headers: new Headers({
+      'content-type': 'text/event-stream',
+      'cache-control': 'no-cache',
+      connection: 'keep-alive'
+    }),
+    body: formatSse(request.format, resume(held, iterator), request.id, request.model),
+    metadata
+  }
+}
 
-// Collect-and-serialize for non-streaming. Throws on mid-stream error so the
-// dispatch.ts catch-wrapper can surface a 502 + provider_error telemetry.
+// Collect-and-serialize for non-streaming. Throws on an in-stream error so
+// dispatch fails over.
 export const jsonResponse = async (
   eventStream: AssistantMessageEventStream,
   request: IncomingRequest,
@@ -109,10 +139,10 @@ export const jsonResponse = async (
       // Route through mapAuthError so an in-stream OAuth-refresh failure becomes a
       // DispatchAuthError (→ 401) instead of a generic 502. metadata.provider names
       // the backing provider for the login hint.
-      throw mapAuthError(new Error(describeStreamError(event.error)), metadata.provider)
+      throw mapAuthError(upstreamError(describeStreamError(event.error)), metadata.provider)
     }
   }
-  if (!message) throw new Error('No response from pi-ai stream')
+  if (!message) throw new UpstreamError('No response from pi-ai stream')
   return {
     status: 200,
     headers: new Headers({ 'content-type': 'application/json' }),

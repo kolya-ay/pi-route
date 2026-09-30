@@ -22,6 +22,7 @@ let enabled = false
 
 export type Tel = {
   withSpan<T>(name: string, attrs: Attributes, fn: (span: Span) => Promise<T>): Promise<T>
+  startSpan(name: string, attrs: Attributes): Span
   event(name: string, attrs: Attributes): void
   recordTTFT(span: Span, ms: number): void
   recordCompletion(
@@ -129,6 +130,11 @@ export const createTel = (): Tel => {
           span.end()
         }
       })
+    },
+    // For spans that outlive the call that starts them — a streamed attempt ends
+    // when its body settles, not when the handler returns. The caller ends it.
+    startSpan(name: string, attrs: Attributes): Span {
+      return tracer.startSpan(name, { attributes: attrs })
     },
     event(name: string, attrs: Attributes): void {
       if (!enabled) return

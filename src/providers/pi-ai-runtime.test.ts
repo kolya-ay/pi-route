@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'bun:test'
+import type { AssistantMessage } from '@earendil-works/pi-ai'
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai'
 import type { PerTokenUsd } from '../pipeline/money'
 import type { IncomingRequest } from '../types'
+import { DispatchAuthError, UpstreamError } from './models-dispatch'
 import { capMaxTokens, jsonResponse, makeMetadata, streamingResponse } from './pi-ai-runtime'
 
 describe('capMaxTokens', () => {
@@ -88,7 +90,10 @@ const pushDone = (stream: ReturnType<typeof createAssistantMessageEventStream>, 
     })
   })
 
-const pushError = (stream: ReturnType<typeof createAssistantMessageEventStream>, model: string) =>
+const pushError = (
+  stream: ReturnType<typeof createAssistantMessageEventStream>,
+  errorMessage = 'upstream blew up'
+) =>
   queueMicrotask(() => {
     stream.push({
       type: 'error',
@@ -98,7 +103,7 @@ const pushError = (stream: ReturnType<typeof createAssistantMessageEventStream>,
         content: [],
         api: 'openai-completions',
         provider: 'test',
-        model,
+        model: 'm-1',
         usage: {
           input: 0,
           output: 0,
@@ -108,7 +113,7 @@ const pushError = (stream: ReturnType<typeof createAssistantMessageEventStream>,
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
         },
         stopReason: 'error',
-        errorMessage: 'upstream blew up',
+        errorMessage,
         timestamp: Date.now()
       }
     })
@@ -132,19 +137,117 @@ const makeReq = (format: 'anthropic' | 'openai' | 'responses'): IncomingRequest 
 const ctx = { costs: { inputCost: 0 as PerTokenUsd, outputCost: 0 as PerTokenUsd } }
 
 describe('streamingResponse', () => {
-  it('returns SSE headers + ReadableStream body for both formats', () => {
+  const partial: AssistantMessage = {
+    role: 'assistant',
+    content: [],
+    api: 'openai-completions',
+    provider: 'test',
+    model: 'm-1',
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+    },
+    stopReason: 'stop',
+    timestamp: 1
+  }
+
+  it('returns SSE headers + ReadableStream body for both formats', async () => {
     const evA = createAssistantMessageEventStream()
     pushDone(evA, 'm-1')
-    const rA = streamingResponse(evA, makeReq('anthropic'), meta, ctx)
+    const rA = await streamingResponse(evA, makeReq('anthropic'), meta, ctx)
     expect(rA.status).toBe(200)
     expect(rA.headers.get('content-type')).toBe('text/event-stream')
     expect(rA.body instanceof ReadableStream).toBe(true)
 
     const evO = createAssistantMessageEventStream()
     pushDone(evO, 'm-1')
-    const rO = streamingResponse(evO, makeReq('openai'), meta, ctx)
+    const rO = await streamingResponse(evO, makeReq('openai'), meta, ctx)
     expect(rO.headers.get('content-type')).toBe('text/event-stream')
     expect(rO.body instanceof ReadableStream).toBe(true)
+  })
+
+  const readAll = async (body: unknown): Promise<string> =>
+    new Response(body as ReadableStream).text()
+
+  it('throws before committing when the stream opens with an error', async () => {
+    const ev = createAssistantMessageEventStream()
+    pushError(ev, '402 status code (no body)')
+    const err = await streamingResponse(ev, makeReq('openai'), meta, ctx).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(UpstreamError)
+    expect((err as UpstreamError).status).toBe(402)
+  })
+
+  it('throws when an error follows start but precedes content', async () => {
+    const ev = createAssistantMessageEventStream()
+    queueMicrotask(() => ev.push({ type: 'start', partial }))
+    pushError(ev, '429 status code (no body)')
+    const err = await streamingResponse(ev, makeReq('openai'), meta, ctx).catch((e: unknown) => e)
+    expect((err as UpstreamError).status).toBe(429)
+  })
+
+  it('throws when an error follows start and text_start', async () => {
+    const ev = createAssistantMessageEventStream()
+    queueMicrotask(() => {
+      ev.push({ type: 'start', partial })
+      ev.push({ type: 'text_start', contentIndex: 0, partial })
+    })
+    pushError(ev, '503 status code (no body)')
+    const err = await streamingResponse(ev, makeReq('openai'), meta, ctx).catch((e: unknown) => e)
+    expect((err as UpstreamError).status).toBe(503)
+  })
+
+  it('commits when the stream opens with done', async () => {
+    const ev = createAssistantMessageEventStream()
+    pushDone(ev, 'm-1')
+    const r = await streamingResponse(ev, makeReq('responses'), meta, ctx)
+    const text = await readAll(r.body)
+    expect(text).toContain('event: response.completed')
+    expect(text).toContain('"text":"hello"')
+  })
+
+  it('commits on toolcall_start, leaving a later error in-band', async () => {
+    const ev = createAssistantMessageEventStream()
+    const withCall: AssistantMessage = {
+      ...partial,
+      content: [{ type: 'toolCall', id: 'call-1', name: 'lookup', arguments: {} }]
+    }
+    queueMicrotask(() => ev.push({ type: 'toolcall_start', contentIndex: 0, partial: withCall }))
+    pushError(ev)
+    const r = await streamingResponse(ev, makeReq('openai'), meta, ctx)
+    expect(await readAll(r.body)).toContain('"name":"lookup"')
+  })
+
+  it('maps an OAuth refresh failure before content to DispatchAuthError', async () => {
+    const ev = createAssistantMessageEventStream()
+    pushError(ev, 'OAuth refresh failed: token revoked')
+    const err = await streamingResponse(ev, makeReq('openai'), meta, ctx).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(DispatchAuthError)
+  })
+
+  it('replays held events in order once content starts', async () => {
+    const ev = createAssistantMessageEventStream()
+    queueMicrotask(() => {
+      ev.push({ type: 'start', partial })
+      ev.push({ type: 'text_start', contentIndex: 0, partial })
+      ev.push({ type: 'text_delta', contentIndex: 0, delta: 'PO', partial })
+      ev.push({ type: 'text_delta', contentIndex: 0, delta: 'NG', partial })
+    })
+    pushDone(ev, 'm-1')
+    const r = await streamingResponse(ev, makeReq('openai'), meta, ctx)
+    const text = await readAll(r.body)
+    expect(text).toContain('"role":"assistant"')
+    expect(text.indexOf('"role":"assistant"')).toBeLessThan(text.indexOf('"content":"PO"'))
+    expect(text.indexOf('"content":"PO"')).toBeLessThan(text.indexOf('"content":"NG"'))
+  })
+
+  it('throws when the stream ends with no event at all', async () => {
+    const ev = createAssistantMessageEventStream()
+    queueMicrotask(() => ev.end())
+    await expect(streamingResponse(ev, makeReq('openai'), meta, ctx)).rejects.toThrow('No response')
   })
 })
 
@@ -171,7 +274,7 @@ describe('jsonResponse', () => {
 
   it('throws with errorMessage on error event', async () => {
     const ev = createAssistantMessageEventStream()
-    pushError(ev, 'm-1')
+    pushError(ev)
     await expect(jsonResponse(ev, makeReq('openai'), meta, ctx)).rejects.toThrow('upstream blew up')
   })
 
@@ -179,5 +282,22 @@ describe('jsonResponse', () => {
     const ev = createAssistantMessageEventStream()
     queueMicrotask(() => ev.end())
     await expect(jsonResponse(ev, makeReq('openai'), meta, ctx)).rejects.toThrow('No response')
+  })
+
+  it('throws an UpstreamError carrying the status pi-ai put in the message', async () => {
+    const ev = createAssistantMessageEventStream()
+    pushError(ev, '402 status code (no body)')
+    const err = await jsonResponse(ev, makeReq('openai'), meta, ctx).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(UpstreamError)
+    expect((err as UpstreamError).status).toBe(402)
+    expect((err as UpstreamError).message).toBe('402 status code (no body)')
+  })
+
+  it('leaves the status undefined when the message names none', async () => {
+    const ev = createAssistantMessageEventStream()
+    pushError(ev)
+    const err = await jsonResponse(ev, makeReq('openai'), meta, ctx).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(UpstreamError)
+    expect((err as UpstreamError).status).toBeUndefined()
   })
 })
