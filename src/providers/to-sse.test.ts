@@ -185,7 +185,9 @@ describe('createAnthropicSseStream - contentIndex state machine', () => {
     assertWellFormed(evts.map((e) => e.data))
   })
 
-  it('late thinking after text started: reopens as a new thinking block', async () => {
+  // Claude Code reads the reply from the message's last block, so a stray reasoning
+  // tail reopened after the answer would blank the result: late thinking is dropped.
+  it('late thinking after text started: dropped, the answer stays last', async () => {
     const partial = makePartial()
     const events: AssistantMessageEvent[] = [
       { type: 'start', partial },
@@ -202,8 +204,7 @@ describe('createAnthropicSseStream - contentIndex state machine', () => {
     const data = parseSseEvents(raw).map((e) => e.data)
     expect(wireBlocks(data)).toEqual([
       { type: 'thinking', body: 'hmm' },
-      { type: 'text', body: 'PONG' },
-      { type: 'thinking', body: ' late' }
+      { type: 'text', body: 'PONG' }
     ])
     assertWellFormed(data)
   })

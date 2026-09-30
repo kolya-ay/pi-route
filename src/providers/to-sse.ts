@@ -53,15 +53,18 @@ const sseDone = (): string => 'data: [DONE]\n\n'
 
 // Anthropic blocks are strictly sequential, but pi-ai interleaves: one text and one
 // thinking block per message, parallel tool calls by upstream index. So wire indices
-// are the encoder's own — a block that resurfaces opens anew — and tool calls, whose
+// are the encoder's own — text that resurfaces opens anew — and tool calls, whose
 // deltas would interleave, are sent whole on toolcall_end, with a ping per delta to
 // keep the line warm. Tool input is JSON.stringify of pi-ai's parsed arguments, so
-// truncated JSON arrives repaired or as {}.
-// `open` is the pi-ai contentIndex of the open wire block, whose index is next - 1.
-type SseState = { open: number | undefined; next: number }
+// truncated JSON arrives repaired or as {}. Thinking that resurfaces is a stray
+// reasoning tail and is dropped: Claude Code reads the reply from the last block.
+// `open` is the pi-ai contentIndex of the open wire block, whose index is next - 1;
+// `closed` holds the contentIndexes whose blocks have stopped.
+type SseState = { open: number | undefined; next: number; closed: Set<number> }
 
 const closeOpen = (state: SseState): string => {
   if (state.open === undefined) return ''
+  state.closed.add(state.open)
   state.open = undefined
   return sseEvent('content_block_stop', { type: 'content_block_stop', index: state.next - 1 })
 }
@@ -124,9 +127,12 @@ const anthropicEventToSse = (
       )
 
     case 'thinking_start':
-      return ensureOpen(state, event.contentIndex, THINKING)
+      return state.closed.has(event.contentIndex)
+        ? ''
+        : ensureOpen(state, event.contentIndex, THINKING)
 
     case 'thinking_delta':
+      if (state.closed.has(event.contentIndex)) return ''
       return (
         ensureOpen(state, event.contentIndex, THINKING) +
         blockDelta(state, { type: 'thinking_delta', thinking: event.delta })
@@ -179,7 +185,7 @@ export const createAnthropicSseStream = (
   model: string
 ): ReadableStream<Uint8Array> => {
   const encoder = new TextEncoder()
-  const state: SseState = { open: undefined, next: 0 }
+  const state: SseState = { open: undefined, next: 0, closed: new Set() }
   const iterator = events[Symbol.asyncIterator]()
 
   return new ReadableStream({
