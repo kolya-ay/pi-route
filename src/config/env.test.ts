@@ -215,3 +215,10 @@ describe('readEnvConfig — maxBodyBytes', () => {
     expect(() => readEnvConfig()).toThrow(/PI_ROUTE_MAX_BODY_BYTES/)
   })
 })
+
+// envrc exports PI_ROUTE_OTLP_PORT into every dev shell. The test preload strips it,
+// so no test exports spans to a live collector — or, when it is down, turns each
+// batch flush into an unhandled ECONNREFUSED pinned on whichever test is running.
+test('the test process inherits no telemetry target', () => {
+  expect(readEnvConfig().otlpUrl).toBe('')
+})
