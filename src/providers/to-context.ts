@@ -50,6 +50,17 @@ const makeToolResult = (toolCallId: string, text: string): ToolResultMessage => 
   timestamp: Date.now()
 })
 
+// OpenAI chat and Responses allow content as a string or an array of `{type, text}` parts.
+const joinText = (content: unknown): string =>
+  typeof content === 'string'
+    ? content
+    : Array.isArray(content)
+      ? content
+          .filter((p): p is { text: string } => typeof p?.text === 'string')
+          .map((p) => p.text)
+          .join('')
+      : ''
+
 // --- Anthropic → Context ---
 
 const extractAnthropicSystem = (system: unknown): string | undefined => {
@@ -202,14 +213,14 @@ const convertOpenAiMessage = (m: Record<string, unknown>): Message | null => {
 
   if (role === 'tool') {
     const toolCallId = typeof m.tool_call_id === 'string' ? m.tool_call_id : ''
-    const text = typeof m.content === 'string' ? m.content : ''
-    return makeToolResult(toolCallId, text)
+    return makeToolResult(toolCallId, joinText(m.content))
   }
 
   if (role === 'assistant') {
+    const text = joinText(m.content)
     const toolCalls = m.tool_calls
     if (Array.isArray(toolCalls) && toolCalls.length > 0) {
-      const parts: ToolCall[] = toolCalls
+      const calls: ToolCall[] = toolCalls
         .filter((tc): tc is Record<string, unknown> => typeof tc === 'object' && tc !== null)
         .map((tc) => {
           const fn =
@@ -231,13 +242,10 @@ const convertOpenAiMessage = (m: Record<string, unknown>): Message | null => {
             arguments: args
           }
         })
-      return makeAssistantMessage(parts)
+      return makeAssistantMessage([...(text ? [{ type: 'text' as const, text }] : []), ...calls])
     }
 
-    const content = m.content
-    return makeAssistantMessage([
-      { type: 'text', text: typeof content === 'string' ? content : '' }
-    ])
+    return makeAssistantMessage([{ type: 'text', text }])
   }
 
   // user message
@@ -246,10 +254,10 @@ const convertOpenAiMessage = (m: Record<string, unknown>): Message | null => {
     return makeUserMessage(content)
   }
   if (Array.isArray(content)) {
-    const parts: TextContent[] = (content as Record<string, unknown>[])
-      .filter((b): b is Record<string, unknown> => typeof b === 'object' && b !== null)
-      .map((b) => ({ type: 'text' as const, text: String(b.text ?? '') }))
-    return makeUserMessage(parts)
+    const parts: TextContent[] = content
+      .filter((b): b is { text: string } => typeof b?.text === 'string')
+      .map((b) => ({ type: 'text' as const, text: b.text }))
+    return makeUserMessage(parts.length > 0 ? parts : '')
   }
   return makeUserMessage('')
 }
@@ -284,18 +292,6 @@ const extractResponsesOutputContent = (content: unknown): string => {
     if (!part || typeof part !== 'object') continue
     const p = part as Record<string, unknown>
     if (p.type === 'output_text' && typeof p.text === 'string') parts.push(p.text)
-  }
-  return parts.join('')
-}
-
-const flattenFunctionOutput = (output: unknown): string => {
-  if (typeof output === 'string') return output
-  if (!Array.isArray(output)) return ''
-  const parts: string[] = []
-  for (const part of output) {
-    if (!part || typeof part !== 'object') continue
-    const p = part as Record<string, unknown>
-    if (typeof p.text === 'string') parts.push(p.text)
   }
   return parts.join('')
 }
@@ -361,7 +357,7 @@ export const responsesToContext = (body: Record<string, unknown>): Context => {
         }
       } else if (it.type === 'function_call_output') {
         const callId = typeof it.call_id === 'string' ? it.call_id : ''
-        const text = flattenFunctionOutput(it.output)
+        const text = joinText(it.output)
         messages.push(makeToolResult(callId, text))
       }
       // 'reasoning' items ignored in v1
@@ -410,8 +406,7 @@ export const openaiToContext = (body: Record<string, unknown>): Context => {
   )
 
   const systemMsg = typedMessages.find((m) => m.role === 'system')
-  const systemPrompt =
-    systemMsg !== undefined && typeof systemMsg.content === 'string' ? systemMsg.content : undefined
+  const systemPrompt = joinText(systemMsg?.content) || undefined
 
   const messages: Message[] = typedMessages
     .map(convertOpenAiMessage)

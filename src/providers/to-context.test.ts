@@ -202,6 +202,117 @@ describe('openaiToContext', () => {
     expect(ctx.tools?.[0]?.description).toBe('Search the web')
     expect(ctx.tools?.[0]?.parameters).toMatchObject({ type: 'object' })
   })
+
+  it('joins text parts of array tool content, dropping the rest', () => {
+    const body = {
+      messages: [
+        {
+          role: 'tool',
+          tool_call_id: 'call_1',
+          content: [
+            { type: 'text', text: 'a' },
+            { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } },
+            { type: 'text', text: 'b' }
+          ]
+        }
+      ]
+    }
+    const toolMsg = openaiToContext(body).messages[0] as ToolResultMessage
+    expect(toolMsg.content).toEqual([{ type: 'text', text: 'ab' }])
+  })
+
+  it('reads array system content as the system prompt', () => {
+    const body = {
+      messages: [
+        { role: 'system', content: [{ type: 'text', text: 'Be brief.' }] },
+        { role: 'user', content: 'Hi' }
+      ]
+    }
+    expect(openaiToContext(body).systemPrompt).toBe('Be brief.')
+  })
+
+  it('joins array content in assistant messages', () => {
+    const body = {
+      messages: [
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'Hello, ' },
+            { type: 'text', text: 'world' }
+          ]
+        }
+      ]
+    }
+    const msg = openaiToContext(body).messages[0] as AssistantMessage
+    expect(msg.content).toEqual([{ type: 'text', text: 'Hello, world' }])
+  })
+
+  it('keeps assistant text before its tool calls', () => {
+    const body = {
+      messages: [
+        {
+          role: 'assistant',
+          content: "I'll read the file.",
+          tool_calls: [
+            {
+              id: 'call_1',
+              type: 'function',
+              function: { name: 'read_file', arguments: JSON.stringify({ path: 'note.txt' }) }
+            }
+          ]
+        }
+      ]
+    }
+    const msg = openaiToContext(body).messages[0] as AssistantMessage
+    expect(msg.content).toEqual([
+      { type: 'text', text: "I'll read the file." },
+      { type: 'toolCall', id: 'call_1', name: 'read_file', arguments: { path: 'note.txt' } }
+    ])
+  })
+
+  it('adds no empty text part when tool calls come without content', () => {
+    const body = {
+      messages: [
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            { id: 'call_1', type: 'function', function: { name: 'ls', arguments: '{}' } }
+          ]
+        }
+      ]
+    }
+    const msg = openaiToContext(body).messages[0] as AssistantMessage
+    expect(msg.content).toEqual([{ type: 'toolCall', id: 'call_1', name: 'ls', arguments: {} }])
+  })
+
+  it('drops non-text parts from user arrays', () => {
+    const body = {
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'What is this?' },
+            { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }
+          ]
+        }
+      ]
+    }
+    const msg = openaiToContext(body).messages[0]
+    expect(msg?.content).toEqual([{ type: 'text', text: 'What is this?' }])
+  })
+
+  it('sends an empty user message when an array has no text', () => {
+    const body = {
+      messages: [
+        {
+          role: 'user',
+          content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }]
+        }
+      ]
+    }
+    expect(openaiToContext(body).messages[0]?.content).toBe('')
+  })
 })
 
 describe('responsesToContext', () => {
