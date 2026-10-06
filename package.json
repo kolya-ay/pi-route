@@ -1,6 +1,6 @@
 {
   "name": "pi-route",
-  "version": "0.6.3",
+  "version": "0.7.0",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
@@ -27,8 +27,8 @@
     "*.{ts,json}": "biome check --write --no-errors-on-unmatched"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "^0.87.1",
-    "@hono/otel": "^1.1.2",
+    "@earendil-works/pi-ai": "^1.0.0",
+    "@hono/otel": "^1.2.0",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/exporter-trace-otlp-http": "^0.222.0",
     "@opentelemetry/resources": "^2.11.0",
@@ -36,18 +36,18 @@
     "@opentelemetry/sdk-trace-base": "^2.11.0",
     "@opentelemetry/semantic-conventions": "^1.43.0",
     "cac": "^7.0.0",
-    "hono": "^4.13.9",
+    "hono": "^4.13.12",
     "jsonc-parser": "^3.3.1",
     "smol-toml": "^1.9.0",
     "yaml": "^2.9.1",
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.14",
+    "@biomejs/biome": "^2.5.15",
     "@modelcontextprotocol/server-everything": "^2026.8.31",
     "@types/bun": "latest",
-    "lint-staged": "^17.5.1",
+    "lint-staged": "^17.6.0",
     "simple-git-hooks": "^2.14.0",
-    "typescript": "7"
+    "typescript": "^7.0.2"
   }
 }
