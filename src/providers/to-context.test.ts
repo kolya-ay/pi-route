@@ -3,12 +3,20 @@
 import { describe, expect, it } from 'bun:test'
 import type {
   AssistantMessage,
+  ImageContent,
   TextContent,
   ToolCall,
   ToolResultMessage
 } from '@earendil-works/pi-ai'
 
-import { anthropicToContext, openaiToContext, responsesToContext } from './to-context'
+import {
+  anthropicToContext,
+  openaiToContext,
+  responsesToContext,
+  UnsupportedMediaError
+} from './to-context'
+
+const png: ImageContent = { type: 'image', mimeType: 'image/png', data: 'AAAA' }
 
 describe('anthropicToContext', () => {
   it('converts basic anthropic message to systemPrompt and user message', () => {
@@ -114,6 +122,52 @@ describe('anthropicToContext', () => {
       properties: { location: { type: 'string' } }
     })
   })
+
+  const base64Image = {
+    type: 'image',
+    source: { type: 'base64', media_type: 'image/png', data: 'AAAA' }
+  }
+
+  it('keeps a base64 image block next to its text', () => {
+    const body = {
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'What is this?' }, base64Image] }]
+    }
+    expect(anthropicToContext(body).messages[0]?.content).toEqual([
+      { type: 'text', text: 'What is this?' },
+      png
+    ])
+  })
+
+  it('keeps images returned inside a tool_result', () => {
+    const body = {
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'call_1',
+              content: [{ type: 'text', text: 'screenshot' }, base64Image]
+            }
+          ]
+        }
+      ]
+    }
+    const toolMsg = anthropicToContext(body).messages[0] as ToolResultMessage
+    expect(toolMsg.content).toEqual([{ type: 'text', text: 'screenshot' }, png])
+  })
+
+  it('refuses a url image source', () => {
+    const body = {
+      messages: [
+        {
+          role: 'user',
+          content: [{ type: 'image', source: { type: 'url', url: 'https://x.test/a.png' } }]
+        }
+      ]
+    }
+    expect(() => anthropicToContext(body)).toThrow(UnsupportedMediaError)
+  })
 })
 
 describe('openaiToContext', () => {
@@ -203,7 +257,7 @@ describe('openaiToContext', () => {
     expect(ctx.tools?.[0]?.parameters).toMatchObject({ type: 'object' })
   })
 
-  it('joins text parts of array tool content, dropping the rest', () => {
+  it('joins text parts of array tool content and keeps its images', () => {
     const body = {
       messages: [
         {
@@ -218,7 +272,7 @@ describe('openaiToContext', () => {
       ]
     }
     const toolMsg = openaiToContext(body).messages[0] as ToolResultMessage
-    expect(toolMsg.content).toEqual([{ type: 'text', text: 'ab' }])
+    expect(toolMsg.content).toEqual([{ type: 'text', text: 'ab' }, png])
   })
 
   it('reads array system content as the system prompt', () => {
@@ -286,7 +340,7 @@ describe('openaiToContext', () => {
     expect(msg.content).toEqual([{ type: 'toolCall', id: 'call_1', name: 'ls', arguments: {} }])
   })
 
-  it('drops non-text parts from user arrays', () => {
+  it('keeps data-URL images in user arrays, in order', () => {
     const body = {
       messages: [
         {
@@ -299,10 +353,10 @@ describe('openaiToContext', () => {
       ]
     }
     const msg = openaiToContext(body).messages[0]
-    expect(msg?.content).toEqual([{ type: 'text', text: 'What is this?' }])
+    expect(msg?.content).toEqual([{ type: 'text', text: 'What is this?' }, png])
   })
 
-  it('sends an empty user message when an array has no text', () => {
+  it('an image-only user message keeps the image', () => {
     const body = {
       messages: [
         {
@@ -311,7 +365,29 @@ describe('openaiToContext', () => {
         }
       ]
     }
-    expect(openaiToContext(body).messages[0]?.content).toBe('')
+    expect(openaiToContext(body).messages[0]?.content).toEqual([png])
+  })
+
+  it('accepts the bare-string image_url form', () => {
+    const body = {
+      messages: [
+        { role: 'user', content: [{ type: 'image_url', image_url: 'data:image/png;base64,AAAA' }] }
+      ]
+    }
+    expect(openaiToContext(body).messages[0]?.content).toEqual([png])
+  })
+
+  it('refuses a remote image URL instead of dropping it', () => {
+    const body = {
+      messages: [
+        {
+          role: 'user',
+          content: [{ type: 'image_url', image_url: { url: 'https://x.test/a.png' } }]
+        }
+      ]
+    }
+    expect(() => openaiToContext(body)).toThrow(UnsupportedMediaError)
+    expect(() => openaiToContext(body)).toThrow(/remote image URLs are not fetched/)
   })
 })
 
@@ -335,6 +411,30 @@ describe('responsesToContext', () => {
     const ctx = responsesToContext({ model: 'gpt-4' })
     expect(ctx.messages).toHaveLength(0)
     expect(ctx.systemPrompt).toBeUndefined()
+  })
+
+  it('keeps an input_image data URL alongside input_text', () => {
+    const ctx = responsesToContext({
+      model: 'gpt-4',
+      input: [
+        {
+          role: 'user',
+          content: [
+            { type: 'input_text', text: 'What is this?' },
+            { type: 'input_image', image_url: 'data:image/png;base64,AAAA' }
+          ]
+        }
+      ]
+    })
+    expect(ctx.messages[0]?.content).toEqual([{ type: 'text', text: 'What is this?' }, png])
+  })
+
+  it('refuses an input_image given by file_id', () => {
+    const body = {
+      model: 'gpt-4',
+      input: [{ role: 'user', content: [{ type: 'input_image', file_id: 'file-1' }] }]
+    }
+    expect(() => responsesToContext(body)).toThrow(/file_id is not supported/)
   })
 
   it('parses multi-part user input with input_text blocks', () => {

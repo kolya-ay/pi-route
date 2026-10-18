@@ -13,6 +13,7 @@ import {
   ModelNotOfferedError,
   UpstreamError
 } from '../providers/models-dispatch'
+import { toContext, UnsupportedMediaError } from '../providers/to-context'
 import {
   parseStructuredOutput,
   type StructuredOutput,
@@ -169,6 +170,15 @@ export const createDispatchHandler = (deps: DispatchDeps) => {
       structuredOutput = parseStructuredOutput(deps.format, parsed)
     } catch (err) {
       if (err instanceof StructuredOutputRequestError) return fail(400, err.message)
+      throw err
+    }
+    // Same reasoning for media: an image the router cannot forward (a remote URL, a
+    // file_id) is refused by every translating candidate alike. This also refuses it for
+    // raw passthrough members — the policy is per request, decided before routing.
+    try {
+      toContext(deps.format, parsed)
+    } catch (err) {
+      if (err instanceof UnsupportedMediaError) return fail(400, err.message)
       throw err
     }
     // Built once per request; spread into every dispatch_attempt span so retries

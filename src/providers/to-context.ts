@@ -4,6 +4,7 @@ import type {
   Api,
   AssistantMessage,
   Context,
+  ImageContent,
   JsonObject,
   Message,
   TextContent,
@@ -13,7 +14,72 @@ import type {
   UserMessage
 } from '@earendil-works/pi-ai'
 
+import { asRecord } from '../structured-output'
 import type { IncomingRequest } from '../types'
+
+// A client sent media the router cannot forward. A request error (400), not an
+// upstream failure: every candidate would refuse it the same way.
+export class UnsupportedMediaError extends Error {}
+
+// Inline base64 images in any of the three wire shapes. Remote http(s) URLs are not
+// fetched: pi-ai's ImageContent is base64-only, and fetching client-supplied URLs from
+// the router is an SSRF surface — so they are refused, not dropped silently.
+const DATA_URL = /^data:([^;,]+);base64,(.+)$/s
+const REMOTE_URL = 'remote image URLs are not fetched; send the image inline as base64'
+
+const fromDataUrl = (url: unknown): ImageContent | undefined => {
+  if (typeof url !== 'string') return undefined
+  const match = DATA_URL.exec(url)
+  if (!match)
+    throw new UnsupportedMediaError(`only base64 data: image URLs are supported; ${REMOTE_URL}`)
+  return { type: 'image', mimeType: match[1] as string, data: match[2] as string }
+}
+
+export const toImage = (part: Record<string, unknown>): ImageContent | undefined => {
+  // Anthropic: { type: 'image', source: { type: 'base64', media_type, data } | { type: 'url', url } }
+  if (part.type === 'image') {
+    const source = asRecord(part.source)
+    if (
+      source?.type === 'base64' &&
+      typeof source.media_type === 'string' &&
+      typeof source.data === 'string'
+    ) {
+      return { type: 'image', mimeType: source.media_type, data: source.data }
+    }
+    if (source?.type === 'url') throw new UnsupportedMediaError(REMOTE_URL)
+    return undefined
+  }
+  // OpenAI chat: { type: 'image_url', image_url: { url } } (some clients send the bare string)
+  if (part.type === 'image_url') {
+    const imageUrl = part.image_url
+    return fromDataUrl(typeof imageUrl === 'string' ? imageUrl : asRecord(imageUrl)?.url)
+  }
+  // Responses: { type: 'input_image', image_url } — the file_id form needs an upload store
+  if (part.type === 'input_image') {
+    if (part.image_url === undefined) {
+      throw new UnsupportedMediaError('input_image requires image_url; file_id is not supported')
+    }
+    return fromDataUrl(part.image_url)
+  }
+  return undefined
+}
+
+type UserPart = TextContent | ImageContent
+
+// Text and images in wire order. A lone text part collapses to a plain string, as
+// before; an image never does.
+const userContent = (parts: UserPart[]): string | UserPart[] =>
+  parts.length === 1 && parts[0]?.type === 'text' ? parts[0].text : parts
+
+// Images carried by an array content field, in order; non-arrays carry none.
+const imagesIn = (content: unknown): ImageContent[] =>
+  Array.isArray(content)
+    ? content.flatMap((part) => {
+        const record = asRecord(part)
+        const image = record ? toImage(record) : undefined
+        return image ? [image] : []
+      })
+    : []
 
 const defaultUsage = () => ({
   input: 0,
@@ -24,7 +90,7 @@ const defaultUsage = () => ({
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
 })
 
-const makeUserMessage = (content: string | TextContent[]): UserMessage => ({
+const makeUserMessage = (content: string | UserPart[]): UserMessage => ({
   role: 'user',
   content,
   timestamp: Date.now()
@@ -41,11 +107,15 @@ const makeAssistantMessage = (content: Array<TextContent | ToolCall>): Assistant
   timestamp: Date.now()
 })
 
-const makeToolResult = (toolCallId: string, text: string): ToolResultMessage => ({
+const makeToolResult = (
+  toolCallId: string,
+  text: string,
+  images: ImageContent[] = []
+): ToolResultMessage => ({
   role: 'toolResult',
   toolCallId,
   toolName: '',
-  content: [{ type: 'text', text }],
+  content: [{ type: 'text', text }, ...images],
   isError: false,
   timestamp: Date.now()
 })
@@ -99,17 +169,12 @@ const extractAnthropicMessageContent = (
 
   if (otherBlocks.length > 0) {
     if (role === 'user') {
-      const parts: TextContent[] = otherBlocks.map((b) => ({
-        type: 'text',
-        text: String(b.text ?? '')
-      }))
-      // If single text block, simplify to string
-      if (parts.length === 1) {
-        // biome-ignore lint/style/noNonNullAssertion: length checked above
-        messages.push(makeUserMessage(parts[0]!.text))
-      } else {
-        messages.push(makeUserMessage(parts))
-      }
+      const parts: UserPart[] = otherBlocks.flatMap((b): UserPart[] => {
+        if (b.type !== 'image') return [{ type: 'text', text: String(b.text ?? '') }]
+        const image = toImage(b)
+        return image ? [image] : []
+      })
+      messages.push(makeUserMessage(userContent(parts)))
     } else {
       const parts: Array<TextContent | ToolCall> = otherBlocks.map((b) => {
         if (b.type === 'tool_use') {
@@ -144,7 +209,7 @@ const extractAnthropicMessageContent = (
               .map((b) => String(b.text ?? ''))
               .join('\n')
           : ''
-    messages.push(makeToolResult(toolUseId, resultContent))
+    messages.push(makeToolResult(toolUseId, resultContent, imagesIn(tr.content)))
   })
 
   return messages
@@ -213,7 +278,7 @@ const convertOpenAiMessage = (m: Record<string, unknown>): Message | null => {
 
   if (role === 'tool') {
     const toolCallId = typeof m.tool_call_id === 'string' ? m.tool_call_id : ''
-    return makeToolResult(toolCallId, joinText(m.content))
+    return makeToolResult(toolCallId, joinText(m.content), imagesIn(m.content))
   }
 
   if (role === 'assistant') {
@@ -254,34 +319,34 @@ const convertOpenAiMessage = (m: Record<string, unknown>): Message | null => {
     return makeUserMessage(content)
   }
   if (Array.isArray(content)) {
-    const parts: TextContent[] = content
-      .filter((b): b is { text: string } => typeof b?.text === 'string')
-      .map((b) => ({ type: 'text' as const, text: b.text }))
-    return makeUserMessage(parts.length > 0 ? parts : '')
+    const parts = content.flatMap((b): UserPart[] => {
+      const part = asRecord(b)
+      if (!part) return []
+      if (typeof part.text === 'string') return [{ type: 'text', text: part.text }]
+      const image = toImage(part)
+      return image ? [image] : []
+    })
+    return makeUserMessage(parts.length > 0 ? userContent(parts) : '')
   }
   return makeUserMessage('')
 }
 
 // --- Responses → Context ---
 
-const extractResponsesInputContent = (content: unknown): string | TextContent[] => {
+const extractResponsesInputContent = (content: unknown): string | UserPart[] => {
   if (typeof content === 'string') return content
   if (!Array.isArray(content)) return ''
-  const parts: TextContent[] = []
-  for (const part of content) {
-    if (!part || typeof part !== 'object') continue
-    const p = part as Record<string, unknown>
+  const parts = content.flatMap((part): UserPart[] => {
+    const p = asRecord(part)
+    if (!p) return []
     // Accept 'input_text' (Responses API) and 'text' (some clients send this synonym).
     if ((p.type === 'input_text' || p.type === 'text') && typeof p.text === 'string') {
-      parts.push({ type: 'text', text: p.text })
+      return [{ type: 'text', text: p.text }]
     }
-    // input_image dropped silently in v1
-  }
-  if (parts.length === 0) return ''
-  const firstPart = parts[0]
-  if (!firstPart) return ''
-  if (parts.length === 1) return firstPart.text
-  return parts
+    const image = toImage(p)
+    return image ? [image] : []
+  })
+  return parts.length > 0 ? userContent(parts) : ''
 }
 
 const extractResponsesOutputContent = (content: unknown): string => {
