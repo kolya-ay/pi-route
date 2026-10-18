@@ -4,7 +4,6 @@ import type { Api, Model, Models } from '@earendil-works/pi-ai'
 import { ModelsError } from '@earendil-works/pi-ai'
 import { trace } from '@opentelemetry/api'
 
-import { perTokenUsd } from '../pipeline/money'
 import type {
   FormatTranslationMode,
   IncomingRequest,
@@ -201,17 +200,8 @@ export const createModelsDispatch = (
     }
 
     const metadata = makeMetadata(request, providerName, start)
-    // Model.cost is USD per MILLION; perTokenUsd scales it (×1e-6) to the per-token
-    // rate the metrics consumer (PerTokenUsd) requires — a dropped conversion is a
-    // compile error.
-    const ctx = {
-      costs: {
-        inputCost: perTokenUsd(model.cost.input),
-        outputCost: perTokenUsd(model.cost.output)
-      }
-    }
     return request.stream
-      ? streamingResponse(eventStream, request, metadata, ctx, transform)
-      : jsonResponse(eventStream, request, metadata, ctx, transform)
+      ? streamingResponse(eventStream, request, metadata, transform)
+      : jsonResponse(eventStream, request, metadata, transform)
   }
 })

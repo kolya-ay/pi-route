@@ -2,8 +2,6 @@ import { describe, expect, it } from 'bun:test'
 
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai'
 
-import type { PerTokenUsd } from '../pipeline/money'
-
 import { wrapStreamForMetrics } from './stream-metrics'
 import { createTel } from './tel'
 import { useTestExporter } from './test-fixture'
@@ -14,7 +12,7 @@ const drain = async (stream: AsyncIterable<unknown>): Promise<unknown[]> => {
   return out
 }
 
-const makeDoneEvent = (input: number, output: number) => ({
+const makeDoneEvent = (input: number, output: number, costTotal = 0) => ({
   type: 'done' as const,
   reason: 'stop' as const,
   message: {
@@ -29,7 +27,7 @@ const makeDoneEvent = (input: number, output: number) => ({
       cacheRead: 0,
       cacheWrite: 0,
       totalTokens: input + output,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: costTotal }
     },
     stopReason: 'stop' as const,
     timestamp: Date.now()
@@ -43,13 +41,10 @@ describe('wrapStreamForMetrics', () => {
     const tel = createTel()
     await tel.withSpan('outer', {}, async (span) => {
       const upstream = createAssistantMessageEventStream()
-      const wrapped = wrapStreamForMetrics(upstream, span, tel, {
-        inputCost: 0.000001 as PerTokenUsd,
-        outputCost: 0.000002 as PerTokenUsd
-      })
+      const wrapped = wrapStreamForMetrics(upstream, span, tel)
       queueMicrotask(() => {
         upstream.push({ type: 'text_delta', delta: 'h' } as never)
-        upstream.push(makeDoneEvent(100, 50) as never)
+        upstream.push(makeDoneEvent(100, 50, 0.0042) as never)
       })
       await drain(wrapped)
     })
@@ -58,7 +53,7 @@ describe('wrapStreamForMetrics', () => {
     expect(attrs['pi.time_to_first_token_ms']).toBeGreaterThanOrEqual(0)
     expect(attrs?.['gen_ai.usage.input_tokens']).toBe(100)
     expect(attrs?.['gen_ai.usage.output_tokens']).toBe(50)
-    expect(attrs?.['gen_ai.usage.cost_usd']).toBeCloseTo(100 * 0.000001 + 50 * 0.000002)
+    expect(attrs?.['gen_ai.usage.cost_usd']).toBe(0.0042)
     expect(typeof attrs?.['pi.output_tokens_per_second']).toBe('number')
   })
 
@@ -66,10 +61,7 @@ describe('wrapStreamForMetrics', () => {
     const tel = createTel()
     await tel.withSpan('outer', {}, async (span) => {
       const upstream = createAssistantMessageEventStream()
-      const wrapped = wrapStreamForMetrics(upstream, span, tel, {
-        inputCost: 0 as PerTokenUsd,
-        outputCost: 0 as PerTokenUsd
-      })
+      const wrapped = wrapStreamForMetrics(upstream, span, tel)
       queueMicrotask(() => {
         upstream.push({ type: 'text_delta', delta: 'a' } as never)
         upstream.push({ type: 'text_delta', delta: 'b' } as never)
@@ -86,10 +78,7 @@ describe('wrapStreamForMetrics', () => {
     const tel = createTel()
     await tel.withSpan('outer', {}, async (span) => {
       const upstream = createAssistantMessageEventStream()
-      const wrapped = wrapStreamForMetrics(upstream, span, tel, {
-        inputCost: 0 as PerTokenUsd,
-        outputCost: 0 as PerTokenUsd
-      })
+      const wrapped = wrapStreamForMetrics(upstream, span, tel)
       queueMicrotask(() => {
         upstream.push({ type: 'text_start' } as never)
         upstream.push({ type: 'text_delta', delta: 'x' } as never)
@@ -105,10 +94,7 @@ describe('wrapStreamForMetrics', () => {
     const tel = createTel()
     await tel.withSpan('outer', {}, async (span) => {
       const upstream = createAssistantMessageEventStream()
-      const wrapped = wrapStreamForMetrics(upstream, span, tel, {
-        inputCost: 0 as PerTokenUsd,
-        outputCost: 0 as PerTokenUsd
-      })
+      const wrapped = wrapStreamForMetrics(upstream, span, tel)
       queueMicrotask(() => {
         upstream.push(makeDoneEvent(10, 0) as never)
       })
@@ -125,10 +111,7 @@ describe('wrapStreamForMetrics', () => {
     const tel = createTel()
     await tel.withSpan('outer', {}, async (span) => {
       const upstream = createAssistantMessageEventStream()
-      const wrapped = wrapStreamForMetrics(upstream, span, tel, {
-        inputCost: 0 as PerTokenUsd,
-        outputCost: 0 as PerTokenUsd
-      })
+      const wrapped = wrapStreamForMetrics(upstream, span, tel)
       queueMicrotask(async () => {
         upstream.push({ type: 'thinking_delta', delta: 'one' } as never)
         // Sleep so the elapsed window between firstChunk and lastChunk is non-trivial.

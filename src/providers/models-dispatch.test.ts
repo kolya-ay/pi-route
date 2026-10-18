@@ -48,7 +48,11 @@ const mkModel = (): Model<Api> => ({
   maxTokens: 500
 })
 
-const mkMessage = (input = 1, output = 1): AssistantMessage => ({
+const mkMessage = (
+  input = 1,
+  output = 1,
+  usage: Partial<AssistantMessage['usage']> = {}
+): AssistantMessage => ({
   role: 'assistant',
   content: [{ type: 'text', text: 'hello' }],
   api: 'anthropic-messages',
@@ -60,7 +64,8 @@ const mkMessage = (input = 1, output = 1): AssistantMessage => ({
     cacheRead: 0,
     cacheWrite: 0,
     totalTokens: input + output,
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    ...usage
   },
   stopReason: 'stop',
   timestamp: Date.now()
@@ -75,9 +80,9 @@ const mkModels = (over: Partial<Pick<Models, 'getModel' | 'getProvider' | 'strea
     ...over
   }) as unknown as Models
 
-const cannedStream = (input = 1, output = 1) => {
+const cannedStream = (input = 1, output = 1, usage: Partial<AssistantMessage['usage']> = {}) => {
   const stream = createAssistantMessageEventStream()
-  const message = mkMessage(input, output)
+  const message = mkMessage(input, output, usage)
   stream.push({ type: 'done', reason: 'stop', message })
   stream.end(message)
   return stream
@@ -356,22 +361,18 @@ describe('createModelsDispatch structured output dropped-keyword telemetry', () 
   })
 })
 
-// The unit boundary this suite exists to guard: Model.cost is USD per MILLION
-// tokens (see model-projection.ts perTokenString, metadata.ts parseLitellmModelInfo),
-// but wrapStreamForMetrics multiplies raw token counts by its `costs`. Dispatch
-// owns the conversion; without it every priced provider reports 1e6x too much.
-describe('createModelsDispatch cost units', () => {
+// pi-ai computes usage.cost (cache tokens and tiered rates included) on every chat
+// API; the span must carry that figure, not a re-derivation from input/output alone.
+describe('createModelsDispatch cost', () => {
   const exporter = useTestExporter()
 
-  it('records $0.001 for 10k input tokens at $0.10 per million, not $1000', async () => {
-    const priced: Model<Api> = {
-      ...mkModel(),
-      cost: { input: 0.1, output: 0.4, cacheRead: 0, cacheWrite: 0 }
+  it('reports the cost pi-ai computed, including cache tokens', async () => {
+    const usage = {
+      cacheRead: 5_000,
+      totalTokens: 16_000,
+      cost: { input: 0.001, output: 0.0004, cacheRead: 0.0005, cacheWrite: 0, total: 0.0019 }
     }
-    const models = mkModels({
-      getModel: () => priced,
-      stream: () => cannedStream(10_000, 1_000)
-    })
+    const models = mkModels({ stream: () => cannedStream(10_000, 1_000, usage) })
     const tel = createTel()
     await tel.withSpan('outer', {}, async (span) => {
       const provider = createModelsDispatch(models, 'prov')
@@ -386,8 +387,8 @@ describe('createModelsDispatch cost units', () => {
     })
     const attrs = exporter.getFinishedSpans()[0]?.attributes
     if (!attrs) throw new Error('missing finished span attributes')
-    // 10_000 * $0.10/1e6 + 1_000 * $0.40/1e6 = 0.001 + 0.0004
-    expect(attrs['gen_ai.usage.cost_usd']).toBeCloseTo(0.0014, 10)
+    // A per-token re-computation from input/output alone would report 0.0014 here.
+    expect(attrs['gen_ai.usage.cost_usd']).toBeCloseTo(0.0019, 10)
   })
 })
 

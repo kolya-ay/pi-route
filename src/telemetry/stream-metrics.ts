@@ -1,20 +1,18 @@
 import type { AssistantMessageEvent, AssistantMessageEventStream } from '@earendil-works/pi-ai'
 import type { Span } from '@opentelemetry/api'
 
-import type { PerTokenUsd } from '../pipeline/money'
-
 import { buildResponseCaptureAttr, type CaptureOpts } from './capture'
 import type { Tel } from './tel'
 
 // Re-emits every event from `upstream` while recording TTFT on first text chunk
-// and completion attrs on done. Costs are per-token rates supplied by the caller.
+// and completion attrs on done. Cost is pi-ai's computed usage.cost.total, which
+// already counts cache reads/writes and tiered rates.
 // If `capture` is provided AND `capture.capturePrompts` is true, the done event's
 // message content is serialized onto the span as `gen_ai.output.messages`.
 export const wrapStreamForMetrics = async function* (
   upstream: AssistantMessageEventStream,
   span: Span,
   tel: Tel,
-  costs: { inputCost: PerTokenUsd; outputCost: PerTokenUsd },
   capture?: CaptureOpts
 ): AsyncIterable<AssistantMessageEvent> {
   const start = Date.now()
@@ -42,7 +40,7 @@ export const wrapStreamForMetrics = async function* (
         const startChunk = firstChunk ?? endChunk
         const elapsedSec = Math.max(0.001, (endChunk - startChunk) / 1000)
         const usage = event.message.usage
-        const cost = usage.input * costs.inputCost + usage.output * costs.outputCost
+        const cost = usage.cost.total
         const tps = usage.output === 0 ? 0 : usage.output / elapsedSec
         tel.recordCompletion(span, usage, cost, tps)
         if (capture !== undefined) {

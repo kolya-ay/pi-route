@@ -6,7 +6,6 @@ import type {
   AssistantMessageEventStream
 } from '@earendil-works/pi-ai'
 
-import type { PerTokenUsd } from '../pipeline/money'
 import { wrapStreamForMetrics } from '../telemetry/stream-metrics'
 import type { IncomingRequest, ProviderResponse } from '../types'
 
@@ -38,13 +37,6 @@ export const makeMetadata = (
   latencyMs: Date.now() - startMs
 })
 
-// Costs are per-TOKEN rates (PerTokenUsd). The pi-ai catalog Model prices per
-// million, so the dispatch site converts via perTokenUsd(perMillionUsd(...)) —
-// the brand makes a dropped conversion a compile error.
-export type StreamMetricsCtx = {
-  costs: { inputCost: PerTokenUsd; outputCost: PerTokenUsd }
-}
-
 // Applied after telemetry wrapping so metrics still observe the real upstream
 // events while the public serializers see the rewritten ones.
 export type EventTransform = (
@@ -54,7 +46,6 @@ export type EventTransform = (
 const prepareEvents = (
   eventStream: AssistantMessageEventStream,
   request: IncomingRequest,
-  ctx: StreamMetricsCtx,
   transform?: EventTransform
 ): AsyncIterable<AssistantMessageEvent> => {
   const measured =
@@ -64,7 +55,6 @@ const prepareEvents = (
           eventStream,
           request.telHooks.span,
           request.telHooks.tel,
-          ctx.costs,
           request.telHooks.capture
         )
   return transform ? transform(measured) : measured
@@ -105,10 +95,9 @@ export const streamingResponse = async (
   eventStream: AssistantMessageEventStream,
   request: IncomingRequest,
   metadata: ProviderResponse['metadata'],
-  ctx: StreamMetricsCtx,
   transform?: EventTransform
 ): Promise<ProviderResponse> => {
-  const iterator = prepareEvents(eventStream, request, ctx, transform)[Symbol.asyncIterator]()
+  const iterator = prepareEvents(eventStream, request, transform)[Symbol.asyncIterator]()
   const held = await readUntilContent(iterator, metadata.provider)
   return {
     status: 200,
@@ -128,10 +117,9 @@ export const jsonResponse = async (
   eventStream: AssistantMessageEventStream,
   request: IncomingRequest,
   metadata: ProviderResponse['metadata'],
-  ctx: StreamMetricsCtx,
   transform?: EventTransform
 ): Promise<ProviderResponse> => {
-  const events = prepareEvents(eventStream, request, ctx, transform)
+  const events = prepareEvents(eventStream, request, transform)
   let message: AssistantMessage | undefined
   for await (const event of events) {
     if (event.type === 'done') message = event.message
