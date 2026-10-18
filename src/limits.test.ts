@@ -913,3 +913,116 @@ describe('collectLimitsSnapshot', () => {
     expect(seen.every((s) => s instanceof AbortSignal)).toBe(true)
   })
 })
+
+describe('OpenCode Go limits', () => {
+  const state = () =>
+    mkState(
+      {
+        providers: {
+          go: {
+            type: 'opencode-go',
+            account: { credential: 'key', key: '$GO_KEY' },
+            formatTranslation: 'auto'
+          }
+        },
+        pipeline: [],
+        expose: []
+      },
+      { go: 'resolved-go-key' }
+    )
+
+  it('preserves three allowances and explicit blocking below 100 percent', async () => {
+    const snapshot = await collectLimitsSnapshot(state(), async () =>
+      Response.json({
+        usage: {
+          rolling: { status: 'ok', percent: 15, resetsAt: '2030-01-01T00:00:00Z' },
+          weekly: { status: 'rate-limited', percent: 99.4, resetsAt: null },
+          monthly: { status: 'ok', percent: 25, resetsAt: null }
+        }
+      })
+    )
+    const provider = snapshot.providers[0]
+    expect(provider?.status).toBe('ok')
+    expect(provider?.plan).toBeNull()
+    expect(provider?.session).toEqual({ used_percent: 15, resets_at: '2030-01-01T00:00:00Z' })
+    expect(provider?.weekly).toEqual({ used_percent: 99.4, resets_at: null })
+    expect(provider?.windows).toEqual([
+      {
+        kind: 'session',
+        used_percent: 15,
+        resets_at: '2030-01-01T00:00:00Z',
+        window_seconds: 18000,
+        active: true,
+        scope: null,
+        rate_limited: false
+      },
+      {
+        kind: 'weekly',
+        used_percent: 99.4,
+        resets_at: null,
+        window_seconds: 604800,
+        active: true,
+        scope: null,
+        rate_limited: true
+      },
+      {
+        kind: 'monthly',
+        used_percent: 25,
+        resets_at: null,
+        window_seconds: null,
+        active: true,
+        scope: null,
+        rate_limited: false
+      }
+    ])
+  })
+
+  it('keeps a monthly-only response without inventing other allowances', async () => {
+    const snapshot = await collectLimitsSnapshot(state(), async () =>
+      Response.json({ usage: { monthly: { status: 'ok', percent: 120, resetsAt: null } } })
+    )
+    expect(snapshot.providers[0]?.session).toBeNull()
+    expect(snapshot.providers[0]?.weekly).toBeNull()
+    expect(snapshot.providers[0]?.windows[0]).toMatchObject({
+      kind: 'monthly',
+      used_percent: 120,
+      rate_limited: true
+    })
+  })
+
+  it('reports missing resolved credentials without requesting usage', async () => {
+    const s = state()
+    s.models = stubModels({})
+    const snapshot = await collectLimitsSnapshot(s, async () => {
+      throw new Error('must not request usage')
+    })
+    expect(snapshot.providers[0]?.status).toBe('unauthenticated')
+  })
+
+  it.each([401, 403, 429, 500])(
+    'isolates HTTP %s without exposing upstream secrets',
+    async (status) => {
+      const snapshot = await collectLimitsSnapshot(
+        state(),
+        async () => new Response('secret-key', { status })
+      )
+      expect(snapshot.providers[0]?.status).toBe('error')
+      expect(snapshot.providers[0]?.error_message).not.toContain('secret-key')
+    }
+  )
+
+  it.each([
+    {},
+    { usage: {} },
+    { usage: { rolling: { status: 'unknown', percent: 20 } } },
+    { usage: { rolling: { status: 'ok', percent: -1 } } },
+    { usage: { rolling: { status: 'ok', percent: '20' } } }
+  ])(
+    'rejects malformed usage instead of presenting a healthy empty snapshot: %j',
+    async (payload) => {
+      const snapshot = await collectLimitsSnapshot(state(), async () => Response.json(payload))
+      expect(snapshot.providers[0]?.status).toBe('error')
+      expect(snapshot.providers[0]?.windows).toEqual([])
+    }
+  )
+})

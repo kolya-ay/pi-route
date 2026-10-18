@@ -17,6 +17,17 @@ providers:
     type: antigravity
     account: user@gmail.com
 
+  # OpenCode Go subscription: the same key is used for requests and usage limits.
+  # go:
+  #   type: opencode-go
+  #   apiKey: $OPENCODE_GO_API_KEY
+  # Usage: pi-route provider limits; pi-route provider limits go [--json]
+  # Also available at GET /v1/limits. Go reports session (5h), weekly and monthly
+  # windows. MONTHLY appears in the summary; detail/JSON preserve rate-limited
+  # windows even below 100%. The usage API does not identify Go vs Go Plus.
+  # Endpoint reference:
+  # https://github.com/jefonseca/plasma-agents-usage/blob/main/agents-usage/contents/ui/providers/OpenCode.js
+
   # A key-credential provider. `apiKey` is first-class — a literal, or a $VAR
   # read from the environment. Register it without hand-editing via:
   #   pi-route provider chutes set --url https://llm.chutes.ai/v1 --key-env CHUTES_API_KEY

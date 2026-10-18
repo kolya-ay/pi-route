@@ -22,21 +22,25 @@ const credits = (c: LimitCredits | null): string =>
 export const formatLimits = (snapshot: LimitsSnapshot): string => {
   const providers = snapshot.providers
   if (providers.length === 0) return '(no providers)'
-  const rows = providers.map((p) => [
-    p.name,
-    p.plan ?? EM_DASH,
-    p.status,
-    win(p.session),
-    win(p.weekly),
-    credits(p.credits)
-  ])
+  const rows = providers.map((p) => {
+    const monthly = p.windows.find((w) => w.kind === 'monthly')
+    return [
+      p.name,
+      p.plan ?? EM_DASH,
+      p.status,
+      `${win(p.session)}${p.windows.some((w) => w.kind === 'session' && w.rate_limited) ? ' [rate-limited]' : ''}`,
+      `${win(p.weekly)}${p.windows.some((w) => w.kind === 'weekly' && w.rate_limited) ? ' [rate-limited]' : ''}`,
+      `${win(monthly ?? null)}${monthly?.rate_limited ? ' [rate-limited]' : ''}`,
+      credits(p.credits)
+    ]
+  })
   const colorize: Colorize = (_ri, ci, cell) => {
     if (ci !== 2) return cell
     const s = cell.trim()
     return s === 'ok' ? green(cell) : s === 'error' ? red(cell) : dim(cell)
   }
   const table = renderTable(
-    ['PROVIDER', 'PLAN', 'STATUS', 'SESSION', 'WEEKLY', 'CREDITS'],
+    ['PROVIDER', 'PLAN', 'STATUS', 'SESSION', 'WEEKLY', 'MONTHLY', 'CREDITS'],
     rows,
     colorize
   )
@@ -72,14 +76,14 @@ const spendLine = (s: LimitSpend): string => {
 }
 
 // One provider, everything known about it. `provider limits` keeps the table;
-// `provider limits <name>` trades the six lean columns for this full picture.
+// `provider limits <name>` shows every window and account detail.
 export const formatLimitsDetail = (snapshot: LimitsSnapshot, name: string): string => {
   const p = findProviderSnapshot(snapshot, name)
   const rows = p.windows.map((w) => [
     w.scope ? `${w.kind} (${w.scope})` : w.kind,
     `${Math.round(w.used_percent)}%`,
     untilShort(w.resets_at),
-    w.active ? 'active' : 'inactive'
+    w.rate_limited ? 'rate-limited' : w.active ? 'active' : 'inactive'
   ])
   // Cells stay plain here so renderTable measures true widths; color is applied
   // after padding via `colorize`, same as formatLimits' STATUS column.

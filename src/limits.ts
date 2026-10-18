@@ -20,6 +20,7 @@ export type LimitScopedWindow = LimitWindow & {
   window_seconds: number | null
   active: boolean
   scope: string | null // e.g. a per-model weekly cap: "Fable"
+  rate_limited?: boolean
 }
 
 export type LimitSpend = {
@@ -37,7 +38,7 @@ export type LimitAccount = {
 
 export type ProviderLimitSnapshot = {
   name: string
-  type: 'anthropic' | 'openai-codex'
+  type: 'anthropic' | 'openai-codex' | 'opencode-go'
   display_name: string
   status: 'ok' | 'unauthenticated' | 'error'
   plan: string | null
@@ -98,12 +99,12 @@ const toWindow = (
 
 // display_name is a pure function of type — no call site ever supplies a
 // different name for the same type.
-const displayName = (type: 'anthropic' | 'openai-codex'): string =>
-  type === 'anthropic' ? 'Claude Code' : 'Codex'
+const displayName = (type: ProviderLimitSnapshot['type']): string =>
+  ({ anthropic: 'Claude Code', 'openai-codex': 'Codex', 'opencode-go': 'OpenCode Go' })[type]
 
 const stub = (
   name: string,
-  type: 'anthropic' | 'openai-codex',
+  type: ProviderLimitSnapshot['type'],
   status: 'unauthenticated' | 'error',
   message: string
 ): ProviderLimitSnapshot => ({
@@ -388,8 +389,84 @@ const collectCodexLimits = async (
   }
 }
 
-const isLimitsProvider = (type: ProviderConfig['type']): type is 'anthropic' | 'openai-codex' =>
-  type === 'anthropic' || type === 'openai-codex'
+// Endpoint and field names verified against plasma-agents-usage's OpenCode adapter:
+// https://github.com/jefonseca/plasma-agents-usage/blob/main/agents-usage/contents/ui/providers/OpenCode.js
+const collectOpenCodeGoLimits = async (
+  name: string,
+  account: Account,
+  state: RouterState,
+  fetchFn: FetchFn
+): Promise<ProviderLimitSnapshot> => {
+  const token =
+    account.credential === 'key' ? (await state.models.getAuth(name))?.auth.apiKey : null
+  if (!token) {
+    return stub(name, 'opencode-go', 'unauthenticated', 'API key required for OpenCode Go usage.')
+  }
+  const response = await fetchFn('https://opencode.ai/zen/go/v1/usage', {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }
+  })
+  if (response.status === 401 || response.status === 403) {
+    return stub(name, 'opencode-go', 'error', 'Check the OpenCode Go subscription API key.')
+  }
+  if (!response.ok) {
+    return stub(name, 'opencode-go', 'error', `Usage request failed (${response.status}).`)
+  }
+  const payload = await parseJson(response)
+  const usage = asRecord(payload?.usage)
+  const definitions = [
+    ['rolling', 'session', 18000],
+    ['weekly', 'weekly', WEEK_SECONDS],
+    ['monthly', 'monthly', null]
+  ] as const
+  const windows: LimitScopedWindow[] = definitions.flatMap(([key, kind, seconds]) => {
+    const value = usage?.[key]
+    if (value === undefined || value === null) return []
+    const record = asRecord(value)
+    const percent = asNumber(record?.percent)
+    if (
+      !record ||
+      percent === null ||
+      !Number.isFinite(percent) ||
+      percent < 0 ||
+      (record.status !== 'ok' && record.status !== 'rate-limited')
+    )
+      throw new Error('Invalid OpenCode Go usage window')
+    return [
+      {
+        kind,
+        used_percent: percent,
+        resets_at: toIso(record.resetsAt),
+        window_seconds: seconds,
+        active: true,
+        scope: null,
+        rate_limited: record.status === 'rate-limited' || percent >= 100
+      }
+    ]
+  })
+  if (windows.length === 0) {
+    return stub(name, 'opencode-go', 'error', "Couldn't read usage.")
+  }
+  const session = windows.find((w) => w.kind === 'session')
+  const weekly = windows.find((w) => w.kind === 'weekly')
+  return {
+    name,
+    type: 'opencode-go',
+    display_name: displayName('opencode-go'),
+    status: 'ok',
+    plan: null,
+    session: session ? { used_percent: session.used_percent, resets_at: session.resets_at } : null,
+    weekly: weekly ? { used_percent: weekly.used_percent, resets_at: weekly.resets_at } : null,
+    credits: null,
+    windows,
+    spend: null,
+    account: null,
+    error_message: null,
+    last_updated: new Date().toISOString()
+  }
+}
+
+const isLimitsProvider = (type: ProviderConfig['type']): type is ProviderLimitSnapshot['type'] =>
+  type === 'anthropic' || type === 'openai-codex' || type === 'opencode-go'
 
 const collectProviderLimits = async (
   name: string,
@@ -400,6 +477,9 @@ const collectProviderLimits = async (
   if (!isLimitsProvider(config.type)) return null
 
   try {
+    if (config.type === 'opencode-go') {
+      return await collectOpenCodeGoLimits(name, config.account, state, fetchFn)
+    }
     return config.type === 'anthropic'
       ? await collectAnthropicLimits(name, config.account, state, fetchFn)
       : await collectCodexLimits(name, config.account, state, fetchFn)
