@@ -353,10 +353,41 @@ describe('stripUnsupported', () => {
       required: ['n', 'f']
     })
     expect(schema.properties).toEqual({
-      n: { type: 'integer', format: 'uint32' },
-      f: { type: 'number', format: 'double' }
+      n: { type: 'integer' },
+      f: { type: 'number' }
     })
-    expect([...dropped].sort()).toEqual(['exclusiveMinimum', 'maximum', 'minimum', 'multipleOf'])
+    expect([...dropped].sort()).toEqual([
+      'exclusiveMinimum',
+      'format',
+      'maximum',
+      'minimum',
+      'multipleOf'
+    ])
+  })
+
+  it('keeps whitelisted string formats and drops the rest by value', () => {
+    const { schema, dropped } = stripUnsupported({
+      type: 'object',
+      properties: {
+        id: { type: 'string', format: 'uuid' },
+        at: { type: 'string', format: 'date-time' },
+        tags: { type: 'array', items: { type: 'string' }, minItems: 1 },
+        pair: {
+          type: 'array',
+          items: { type: 'string' },
+          minItems: 2,
+          maxItems: 2,
+          uniqueItems: true
+        }
+      }
+    })
+    expect(schema.properties).toEqual({
+      id: { type: 'string', format: 'uuid' },
+      at: { type: 'string', format: 'date-time' },
+      tags: { type: 'array', items: { type: 'string' }, minItems: 1 },
+      pair: { type: 'array', items: { type: 'string' } }
+    })
+    expect([...dropped].sort()).toEqual(['maxItems', 'minItems', 'uniqueItems'])
   })
 
   it('keeps everything Anthropic accepts', () => {

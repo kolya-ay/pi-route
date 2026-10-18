@@ -156,18 +156,40 @@ const refuseNullableItems = (items: Record<string, unknown>): Record<string, unk
   )
 }
 
-// Anthropic's tool `input_schema` validator refuses the numeric range/step family
-// one keyword at a time ("For 'integer' type, property 'minimum' is not
-// supported"). Verified individually against cc/claude-haiku-4-5; `format`,
-// `minLength` and `pattern` are accepted and stay. schemars 1 emits `minimum: 0`
-// for every unsigned integer, so this is not an edge case.
+// Mirrors pi-ai's isAnthropicStrictUnsupportedKeyword (anthropic-messages.js). Its gate is
+// stricter than Anthropic's own input_schema validator: it also refuses the array/object size
+// keywords, any minItems other than 0 or 1, and every `format` outside the string whitelist,
+// which includes schemars' integer formats (uint32, int64, double, ...). schemars 1 emits
+// `minimum: 0` and `format: uint32` for every unsigned integer, so this is not an edge case.
+const STRICT_STRING_FORMATS = new Set([
+  'date-time',
+  'time',
+  'date',
+  'duration',
+  'email',
+  'hostname',
+  'uri',
+  'ipv4',
+  'ipv6',
+  'uuid'
+])
 const UNSUPPORTED_KEYWORDS = new Set([
   'minimum',
   'maximum',
   'exclusiveMinimum',
   'exclusiveMaximum',
-  'multipleOf'
+  'multipleOf',
+  'maxItems',
+  'uniqueItems',
+  'minContains',
+  'maxContains',
+  'minProperties',
+  'maxProperties'
 ])
+const isUnsupported = (key: string, value: unknown): boolean =>
+  UNSUPPORTED_KEYWORDS.has(key) ||
+  (key === 'minItems' && value !== 0 && value !== 1) ||
+  (key === 'format' && (typeof value !== 'string' || !STRICT_STRING_FORMATS.has(value)))
 
 // `seen` accumulates across the whole walk and is the one thing written here; the
 // keyword test stays a plain lookup.
@@ -175,8 +197,8 @@ const stripNode = (node: unknown, seen: Set<string>): unknown => {
   const schema = asRecord(node)
   if (!schema) return node
 
-  const kept = Object.entries(schema).filter(([key]) => {
-    if (!UNSUPPORTED_KEYWORDS.has(key)) return true
+  const kept = Object.entries(schema).filter(([key, value]) => {
+    if (!isUnsupported(key, value)) return true
     seen.add(key)
     return false
   })

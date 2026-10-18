@@ -9,6 +9,8 @@ import type {
   JsonObject,
   Model
 } from '@earendil-works/pi-ai'
+import { normalizeContext } from '@earendil-works/pi-ai'
+import { anthropicMessagesApi } from '@earendil-works/pi-ai/api/anthropic-messages.lazy'
 
 import { STRUCTURED_OUTPUT_TOOL, type StructuredOutput } from '../structured-output'
 
@@ -177,6 +179,71 @@ describe('prepareStructuredOutput constrained-tool translation', () => {
       expect(prepared.options.toolChoice).toEqual(toolChoice)
       expect(prepared.normalizeEvents).toBe(true)
     }
+  })
+
+  // pi-ai's Anthropic strict gate (isAnthropicStrictUnsupportedKeyword) is module-private,
+  // so probe it through the real api: `strict: true` on the emitted tool means the gate
+  // accepted the schema; a rejected schema yields no payload and an errorMessage naming
+  // the keyword. onPayload throws to stop before any network call.
+  const strictToolOf = async (probed: Context): Promise<{ strict: unknown; error?: string }> => {
+    const model = {
+      ...mkModel('anthropic-messages'),
+      provider: 'anthropic',
+      baseUrl: 'https://api.anthropic.com',
+      compat: { supportsStrictTools: true }
+    } as Model<Api>
+    let payload: { tools?: { strict?: unknown }[] } | undefined
+    const result = await anthropicMessagesApi()
+      .stream(model, normalizeContext(probed), {
+        apiKey: 'k',
+        onPayload: (p) => {
+          payload = p as typeof payload
+          throw new Error('probe')
+        }
+      })
+      .result()
+    return {
+      strict: payload?.tools?.[0]?.strict,
+      ...(result.errorMessage !== 'probe' ? { error: result.errorMessage } : {})
+    }
+  }
+
+  const schemarsSchema = {
+    type: 'object',
+    properties: {
+      count: { type: 'integer', format: 'uint32', minimum: 0 },
+      items: { type: 'array', items: { type: 'string' }, minItems: 2, maxItems: 5 }
+    },
+    required: ['count', 'items'],
+    additionalProperties: false
+  }
+
+  it('yields a schema pi-ai strict anthropic gate accepts for schemars output', async () => {
+    const prepared = prepareStructuredOutput(
+      mkModel('anthropic-messages'),
+      context,
+      { name: 'summary', schema: schemarsSchema },
+      'constrained-tool'
+    )
+    expect(await strictToolOf(prepared.context)).toEqual({ strict: true })
+    expect(prepared.droppedKeywords).toEqual(
+      expect.arrayContaining(['format', 'minimum', 'minItems', 'maxItems'])
+    )
+  })
+
+  it('the probe fails for an unstripped schemars schema', async () => {
+    const probe = await strictToolOf({
+      ...context,
+      tools: [
+        {
+          name: STRUCTURED_OUTPUT_TOOL,
+          description: 'd',
+          parameters: schemarsSchema as never,
+          constrainedSampling: { type: 'json_schema', strict: 'require' }
+        }
+      ]
+    })
+    expect(probe.error).toMatch(/is unsupported/)
   })
 
   it('describes the tool by schema name when the request omits a description', () => {
