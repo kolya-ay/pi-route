@@ -8,6 +8,8 @@ let stop: (() => void) | undefined
 afterEach(() => {
   stop?.()
   process.removeAllListeners('SIGHUP')
+  process.removeAllListeners('SIGTERM')
+  process.removeAllListeners('SIGINT')
 })
 
 test('SIGHUP reloads the config in place', async () => {

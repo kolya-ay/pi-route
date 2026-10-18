@@ -3,6 +3,7 @@
 import { createApp } from './app'
 import { type EnvPathOverrides, readEnvConfig } from './config/env'
 import { watchConfig } from './config/watch'
+import { shutdownOtel } from './telemetry/tel'
 
 export const startServer = async (
   overrides: EnvPathOverrides = {},
@@ -53,6 +54,26 @@ export const startServer = async (
 
   // SIGHUP is the production reload trigger (systemd ExecReload); always on.
   process.on('SIGHUP', () => void reload())
+
+  // systemd stop sends SIGTERM; Ctrl-C sends SIGINT. Flush the span batch before exit,
+  // or the last BatchSpanProcessor interval of traces is lost. A collector that is down
+  // fails the flush; that loses those spans but must not turn a clean stop into a crash.
+  // A second signal while shutting down is ignored.
+  let stopping = false
+  const shutdown = async (): Promise<void> => {
+    if (stopping) return
+    stopping = true
+    current.stop()
+    await server.stop()
+    await shutdownOtel().catch((err) =>
+      console.error(
+        `[otel] flush on shutdown failed: ${err instanceof Error ? err.message : String(err)}`
+      )
+    )
+    process.exit(0)
+  }
+  process.on('SIGTERM', () => void shutdown())
+  process.on('SIGINT', () => void shutdown())
 
   // File-watch is a dev/opt-in convenience.
   const watchEnabled = opts.watch === true || process.env.PI_ROUTE_WATCH === '1'
