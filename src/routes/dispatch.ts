@@ -281,6 +281,7 @@ export const createDispatchHandler = (deps: DispatchDeps) => {
               rawRequest: outgoingRequest,
               model: finalModel,
               stream,
+              ...(sessionId !== 'anon' ? { sessionId } : {}),
               ...(structuredOutput !== undefined ? { structuredOutput } : {}),
               telHooks: { tel, span, capture: captureOpts }
             },

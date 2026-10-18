@@ -44,6 +44,9 @@ export type IncomingRequest = {
   rawRequest: Request
   model: string
   stream: boolean
+  // The client's conversation id (x-session-id, metadata.user_id, …); providers that
+  // route or cache per conversation (OpenCode Go's x-opencode-session) receive it.
+  sessionId?: string
   telHooks?: TelHooks
   // Normalized json_schema constraint, parsed once at the route before routing so
   // an invalid request fails as a 400 instead of entering provider failover.

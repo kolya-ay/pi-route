@@ -5,6 +5,7 @@ import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completio
 import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic'
 import { cerebrasProvider } from '@earendil-works/pi-ai/providers/cerebras'
 import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex'
+import { opencodeGoProvider } from '@earendil-works/pi-ai/providers/opencode-go'
 import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter'
 import { fileCredentialStore } from '../auth/credential-store'
 import type { ModelMeta } from '../pipeline/catalog'
@@ -30,6 +31,7 @@ const FACTORIES: Partial<Record<string, () => Provider>> = {
   anthropic: anthropicProvider as () => Provider,
   'openai-codex': openaiCodexProvider as () => Provider,
   cerebras: cerebrasProvider as () => Provider,
+  'opencode-go': opencodeGoProvider as () => Provider,
   openrouter: openrouterProvider as () => Provider
 }
 

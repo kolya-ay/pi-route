@@ -193,6 +193,7 @@ export const createModelsDispatch = (
         ...RETRY_OPTIONS,
         maxTokens: model.maxTokens,
         signal: request.rawRequest.signal,
+        ...(request.sessionId !== undefined ? { sessionId: request.sessionId } : {}),
         ...plan?.options
       })
     } catch (err) {
