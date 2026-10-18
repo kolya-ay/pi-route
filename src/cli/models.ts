@@ -141,13 +141,12 @@ const roleModels = (
     // the leaf provides metadata.
     const leaf = catalog.leafFor.get(target) ?? target
     const { provider, model } = resolveModel(options, catalog, models, leaf)
-    // Prefix the bare name (not `leaf`, which already carries the provider) so the
-    // metadata-miss fallback doesn't double it: `Cerebras/gpt-oss-120b`.
-    const bare = model?.name ?? leaf.slice(leaf.indexOf('/') + 1)
+    // The exact address a client sends, provider capitalized: `Cerebras/qwen-3.8-27b`,
+    // `Openrouter/google/gemini-3.8-flash` (a pretty model name hides which backend it is).
     const input = model?.input
     return {
       id: target,
-      name: displayName(provider, bare),
+      name: displayName(provider, target.slice(target.indexOf('/') + 1)),
       ...(model?.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
       ...(model?.maxTokens !== undefined ? { maxTokens: model.maxTokens } : {}),
       ...(model?.reasoning !== undefined ? { reasoning: model.reasoning } : {}),
@@ -252,20 +251,52 @@ export const renderPlannedWrites = (writes: PlannedWrite[]): string =>
     )
     .join('\n\n')
 
+// An exposed role pipeline installs under its own name, so agents keep its failover; the
+// members still fill the model lists. A failover may land on any member, so the alias states
+// only what every member states, at the tightest value (cost varies by member: left out).
+export const aliasModel = (name: string, members: RoleModel[]): RoleModel => {
+  const tightest = (pick: (m: RoleModel) => number | undefined): number | undefined => {
+    const values = members.map(pick)
+    return values.every((v) => v !== undefined) ? Math.min(...(values as number[])) : undefined
+  }
+  const contextWindow = tightest((m) => m.contextWindow)
+  const maxTokens = tightest((m) => m.maxTokens)
+  const inputs = members.map((m) => m.input)
+  const input = inputs.every((i) => i !== undefined)
+    ? inputs.reduce((shared, i) => shared.filter((mod) => i.includes(mod)))
+    : undefined
+  return {
+    id: name,
+    name: name.charAt(0).toUpperCase() + name.slice(1),
+    ...(contextWindow !== undefined ? { contextWindow } : {}),
+    ...(maxTokens !== undefined ? { maxTokens } : {}),
+    ...(members.every((m) => m.reasoning === true) ? { reasoning: true } : {}),
+    ...(input !== undefined ? { input } : {})
+  }
+}
+
 export const setupModels = async (
   options: RouterOptions,
   catalog: Catalog,
   models: Models,
   agentName: string,
-  opts: { homeDir?: string; dry?: boolean; url: string }
+  opts: { homeDir?: string; dry?: boolean; roles?: boolean; url: string }
 ): Promise<PlannedWrite[]> => {
   const agent = AGENTS.find((a) => a.name === agentName)
   if (!agent) throw new Error(`unknown agent: ${agentName}`)
   const home = opts.homeDir ?? homedir()
-  const defaults = roleModels(options, catalog, models, 'default')
+  // `roles`: the role's pipeline name first when it is exposed, then its members.
+  const role = (name: 'default' | 'fast'): RoleModel[] => {
+    const members = roleModels(options, catalog, models, name)
+    const exposed = exposeIncludes(options.expose, name) && catalog.addresses.has(name)
+    return opts.roles && members.length > 0 && exposed
+      ? [aliasModel(name, members), ...members]
+      : members
+  }
+  const defaults = role('default')
   const main = defaults[0]
   if (!main) throw new Error('Missing pipeline.default exact-match role')
-  const fasts = roleModels(options, catalog, models, 'fast')
+  const fasts = role('fast')
   const all = dedupById([...defaults, ...fasts])
   const writes = await agent.write({
     url: opts.url,

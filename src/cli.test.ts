@@ -723,6 +723,35 @@ test('models install dedups a model that is in both default and fast groups', as
   expect(settings.env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('cerebras/shared-model')
 })
 
+test('models install claude --roles installs an exposed role pipeline under its name', async () => {
+  const dir = tmp()
+  const cfg = setupConfig(dir)
+  const home = join(dir, 'home')
+  await run([
+    'models',
+    'install',
+    'claude',
+    '--roles',
+    '-c',
+    cfg,
+    '--state-dir',
+    join(dir, 'auth'),
+    '--home-dir',
+    home
+  ])
+  const settings = JSON.parse(await Bun.file(join(home, '.claude', 'settings.json')).text())
+  // `default` is exposed: agents get the pipeline (its failover); `fast` is not: its member.
+  expect(settings.model).toBe('default')
+  expect(settings.env.ANTHROPIC_MODEL).toBe('default')
+  expect(settings.availableModels).toEqual([
+    'default',
+    'cerebras/llama3.1-8b',
+    'cerebras/llama-3.3-70b',
+    'cerebras/qwen-3-32b'
+  ])
+  expect(settings.env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('cerebras/qwen-3-32b')
+})
+
 test('models install claude (non-dry) writes availableModels + real main + haiku fast', async () => {
   const dir = tmp()
   const cfg = setupConfig(dir)

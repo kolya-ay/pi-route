@@ -5,6 +5,7 @@ import { toModelMeta } from '../pipeline/metadata'
 import type { RouterOptions } from '../types'
 import type { PlannedWrite } from './agent'
 import {
+  aliasModel,
   completeness,
   type ModelRow,
   renderModelDetail,
@@ -193,5 +194,45 @@ describe('renderPlannedWrites', () => {
     expect(out).toContain('update  /tmp/a.json')
     expect(out).toContain('- two')
     expect(out).toContain('+ TWO')
+  })
+})
+
+describe('aliasModel', () => {
+  test('names the role and keeps the tightest limits every member shares', () => {
+    const alias = aliasModel('default', [
+      {
+        id: 'a/x',
+        name: 'A/x',
+        contextWindow: 131072,
+        maxTokens: 40960,
+        reasoning: true,
+        input: ['text', 'image'],
+        cost: { input: 1 }
+      },
+      {
+        id: 'b/y',
+        name: 'B/y',
+        contextWindow: 1000000,
+        maxTokens: 8192,
+        reasoning: true,
+        input: ['text']
+      }
+    ])
+    expect(alias).toEqual({
+      id: 'default',
+      name: 'Default',
+      contextWindow: 131072,
+      maxTokens: 8192,
+      reasoning: true,
+      input: ['text']
+    })
+  })
+
+  test('drops a limit some member does not state and reasoning some member lacks', () => {
+    const alias = aliasModel('fast', [
+      { id: 'a/x', name: 'A/x', contextWindow: 131072, reasoning: true },
+      { id: 'b/y', name: 'B/y', maxTokens: 4096 }
+    ])
+    expect(alias).toEqual({ id: 'fast', name: 'Fast' })
   })
 })

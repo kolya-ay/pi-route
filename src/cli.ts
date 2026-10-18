@@ -301,6 +301,7 @@ type ModelsOpts = {
   stateDir?: string
   homeDir?: string
   dry?: boolean
+  roles?: boolean
   json?: boolean
 }
 
@@ -355,7 +356,7 @@ const printModelShow = async (env: EnvConfig, id: string, json: boolean): Promis
 const installModels = async (
   env: EnvConfig,
   agentName: string | undefined,
-  opts: { homeDir?: string; dry?: boolean }
+  opts: { homeDir?: string; dry?: boolean; roles?: boolean }
 ): Promise<void> => {
   const { routerOptions, models, catalog } = await modelsAndOptions(env)
   if (!agentName) {
@@ -372,8 +373,9 @@ const installModels = async (
   // expand shell vars). The token is a secret — it stays in the client's
   // PI_ROUTE_API_KEY / ANTHROPIC_AUTH_TOKEN env var, never written to a file.
   const host = env.host === '0.0.0.0' || env.host === '::' ? '127.0.0.1' : env.host
-  const setupOpts: { dry: boolean; url: string; homeDir?: string } = {
+  const setupOpts: { dry: boolean; roles: boolean; url: string; homeDir?: string } = {
     dry: Boolean(opts.dry),
+    roles: Boolean(opts.roles),
     url: `http://${host}:${env.port}`
   }
   if (opts.homeDir) setupOpts.homeDir = opts.homeDir
@@ -408,11 +410,12 @@ const MODELS_VERBS: Verb<ModelsOpts, EnvConfig>[] = [
     name: 'install',
     arg: '[agent]',
     description: `Install agent configs (agents: ${agentNames})`,
-    flags: ['--home-dir', '--dry'],
+    flags: ['--home-dir', '--dry', '--roles'],
     run: async (env, arg, opts) =>
       installModels(env, arg, {
         ...(opts.homeDir ? { homeDir: opts.homeDir } : {}),
-        ...(opts.dry !== undefined ? { dry: opts.dry } : {})
+        ...(opts.dry !== undefined ? { dry: opts.dry } : {}),
+        ...(opts.roles !== undefined ? { roles: opts.roles } : {})
       })
   },
   {
@@ -430,6 +433,10 @@ cli
   )
   .option('--home-dir <dir>', 'Home directory for install (default: $HOME)')
   .option('--dry', 'Print planned writes without changing files')
+  .option(
+    '--roles',
+    'Install exposed default/fast pipelines under their names, keeping failover (install)'
+  )
   .option('--json', 'Print raw JSON (models show)')
   .action(async (args: string[], opts: ModelsOpts) => {
     const env = readEnvConfig(toOverrides(opts))
