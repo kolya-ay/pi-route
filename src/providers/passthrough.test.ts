@@ -3,6 +3,8 @@
 import { describe, expect, it } from 'bun:test'
 import { Hono } from 'hono'
 
+import { createTel } from '../telemetry/tel'
+import { useTestExporter } from '../telemetry/test-fixture'
 import type { Account, IncomingRequest } from '../types'
 
 import { UpstreamError } from './models-dispatch'
@@ -51,6 +53,8 @@ describe('createPassthroughProvider: anthropic', () => {
       expect(response.status).toBe(200)
       expect(capturedHeaders?.get('x-api-key')).toBe('sk-ant-test-key')
       expect(capturedHeaders?.get('authorization')).toBeNull()
+      // OTel is off in this test: no trace context leaks upstream.
+      expect(capturedHeaders?.get('traceparent')).toBeNull()
       expect(response.metadata.provider).toBe('test-anthropic')
       expect(response.metadata.requestId).toBe('req-test')
       expect(response.metadata.model).toBe('claude-3-5-sonnet')
@@ -82,6 +86,36 @@ describe('createPassthroughProvider: anthropic', () => {
       const response = await provider.dispatch(request, account, 'sk-ant-key')
 
       expect(response.body).toBeInstanceOf(ReadableStream)
+    } finally {
+      close()
+    }
+  })
+})
+
+describe('createPassthroughProvider: trace context', () => {
+  useTestExporter()
+
+  it("carries the active attempt span's traceparent upstream, replacing the client's", async () => {
+    const mock = new Hono()
+    let traceparent: string | null | undefined
+    mock.post('/v1/messages', (c) => {
+      traceparent = c.req.header('traceparent') ?? null
+      return c.json({ id: 'msg_1', type: 'message' })
+    })
+    const { baseUrl, close } = startMockServer(mock)
+    try {
+      const provider = createPassthroughProvider('test-anthropic', 'anthropic', baseUrl)
+      const client = '00-11111111111111111111111111111111-2222222222222222-01'
+      const traceId = await createTel().withSpan('attempt', {}, async (span) => {
+        await provider.dispatch(
+          makeRequest(`${baseUrl}/v1/messages`, { traceparent: client }),
+          makeAccount(),
+          'k'
+        )
+        return span.spanContext().traceId
+      })
+      expect(traceparent).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/)
+      expect(traceparent?.split('-')[1]).toBe(traceId)
     } finally {
       close()
     }

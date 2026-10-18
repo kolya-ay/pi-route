@@ -1,5 +1,6 @@
 // src/providers/passthrough.ts
 
+import { traceHeaders } from '../telemetry/tel'
 import type {
   Account,
   FormatTranslationMode,
@@ -7,7 +8,6 @@ import type {
   Provider,
   ProviderResponse
 } from '../types'
-
 import { UpstreamError } from './models-dispatch'
 
 // Upstream error bodies vary (OpenAI JSON, gateway HTML); name the message when
@@ -62,6 +62,8 @@ export const createPassthroughProvider = (
       headers.set('authorization', `Bearer ${apiKey}`)
       headers.delete('x-api-key')
     }
+    // The router's attempt span is the new parent, so it replaces any client traceparent.
+    for (const [key, value] of Object.entries(traceHeaders())) headers.set(key, value)
 
     const originalUrl = new URL(request.rawRequest.url)
     const base = new URL(baseUrl)

@@ -35,6 +35,7 @@ import {
 import { antigravityOAuth, PROJECT_HEADER } from '../auth/antigravity-auth'
 import type { FetchFn } from '../models/fetch-timeout'
 import { deadlined } from '../models/fetch-timeout'
+import { traceHeaders } from '../telemetry/tel'
 
 // A narrower fetch than `typeof fetch` (mirrors cached-catalog.ts): Bun's mocks
 // and bare `async () => Response` are assignable without the `preconnect` prop.
@@ -497,7 +498,8 @@ export const streamAntigravity = (
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
             Accept: 'text/event-stream',
-            'User-Agent': ANTIGRAVITY_USER_AGENT
+            'User-Agent': ANTIGRAVITY_USER_AGENT,
+            ...traceHeaders()
           },
           body: JSON.stringify(envelope),
           ...(options?.signal !== undefined ? { signal: options.signal } : {})

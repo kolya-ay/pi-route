@@ -1,4 +1,11 @@
-import { type Attributes, type Span, SpanStatusCode, trace } from '@opentelemetry/api'
+import {
+  type Attributes,
+  context,
+  propagation,
+  type Span,
+  SpanStatusCode,
+  trace
+} from '@opentelemetry/api'
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http'
 import { resourceFromAttributes } from '@opentelemetry/resources'
 import { NodeSDK } from '@opentelemetry/sdk-node'
@@ -104,6 +111,14 @@ export const _setTestExporter = (exporter: SpanExporter): void => {
   })
   testProvider.register()
   enabled = true
+}
+
+// W3C trace context (traceparent/tracestate) of the active span, for outbound
+// requests. Empty when OTel is off: the default propagator is a no-op.
+export const traceHeaders = (): Record<string, string> => {
+  const carrier: Record<string, string> = {}
+  propagation.inject(context.active(), carrier)
+  return carrier
 }
 
 export const createTel = (): Tel => {

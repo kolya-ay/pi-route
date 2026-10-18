@@ -1,9 +1,10 @@
 // src/providers/models-dispatch.ts
 
-import type { Api, Model, Models } from '@earendil-works/pi-ai'
+import type { Api, AssistantMessageEventStream, Model, Models } from '@earendil-works/pi-ai'
 import { ModelsError } from '@earendil-works/pi-ai'
 import { trace } from '@opentelemetry/api'
 
+import { traceHeaders } from '../telemetry/tel'
 import type {
   FormatTranslationMode,
   IncomingRequest,
@@ -186,13 +187,15 @@ export const createModelsDispatch = (
     // models.stream() resolves auth lazily, so an OAuth refresh failure surfaces
     // as an in-stream error event (mapped in pi-ai-runtime), NOT a sync throw.
     // This catch only covers synchronous setup errors; it stays for completeness.
-    let eventStream: ReturnType<typeof models.stream>
+    let eventStream: AssistantMessageEventStream
+    const outboundTrace = traceHeaders()
     try {
       eventStream = models.stream(model, plan?.context ?? context, {
         ...RETRY_OPTIONS,
         maxTokens: model.maxTokens,
         signal: request.rawRequest.signal,
         ...(request.sessionId !== undefined ? { sessionId: request.sessionId } : {}),
+        ...(Object.keys(outboundTrace).length > 0 ? { headers: outboundTrace } : {}),
         ...plan?.options
       })
     } catch (err) {
