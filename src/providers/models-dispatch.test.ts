@@ -466,6 +466,25 @@ describe('structuredOutputApi swap', () => {
     expect(seen[0]?.api).toBe('anthropic-messages')
   })
 
+  // pi-ai replaces images with a placeholder for a text-only model, so a config that
+  // declares vision must reach the model that is actually dispatched.
+  it('dispatches with the configured input modalities', async () => {
+    const { models, seen } = captureModel()
+    const overrides = { m: { input: ['text', 'image'] } }
+    await createModelsDispatch(models, 'p', false, 'auto', undefined, overrides).dispatch(
+      mkRequest(),
+      { credential: 'key', key: 'k' },
+      'k'
+    )
+    await createModelsDispatch(models, 'p').dispatch(
+      mkRequest(),
+      { credential: 'key', key: 'k' },
+      'k'
+    )
+    expect(seen[0]?.input).toEqual(['text', 'image'])
+    expect(seen[1]?.input).toEqual(['text'])
+  })
+
   it('does not swap when the key is unset', async () => {
     const { models, seen } = captureModel()
     const provider = createModelsDispatch(models, 'openrouter', false, 'auto')

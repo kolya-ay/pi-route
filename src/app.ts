@@ -61,7 +61,8 @@ const buildEntry = (models: MutableModels, name: string, config: ProviderConfig)
       name,
       construct,
       config.formatTranslation,
-      config.structuredOutputApi
+      config.structuredOutputApi,
+      config.modelOverrides
     ),
     account: config.account
   }

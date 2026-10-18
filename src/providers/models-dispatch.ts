@@ -8,6 +8,7 @@ import { traceHeaders } from '../telemetry/tel'
 import type {
   FormatTranslationMode,
   IncomingRequest,
+  ModelMetaOverride,
   Provider,
   ProviderResponse,
   StructuredOutputApi
@@ -102,6 +103,14 @@ const withKnownLimits = (model: Model<Api>): Model<Api> =>
         maxTokens: model.maxTokens || DEFAULT_MAX_TOKENS
       }
 
+// A config `modelOverrides.<id>.input` names modalities the catalog does not know
+// about (an openai-compatible model is constructed text-only). Only pi-ai's own
+// modalities apply; anything else is ignored.
+const withInputOverride = (model: Model<Api>, input: string[] | undefined): Model<Api> =>
+  input === undefined
+    ? model
+    : { ...model, input: input.filter((m): m is 'text' | 'image' => m === 'text' || m === 'image') }
+
 // A provider's catalog entry can name an api that cannot carry a schema — OpenRouter
 // lists anthropic/* under its anthropic-messages compat endpoint, which refuses
 // strict tools. Re-point such a request at the api the provider natively speaks.
@@ -135,12 +144,16 @@ const forStructuredOutput = (
 // inside models.stream() (OAuth refresh under the store lock); the `account`/`apiKey`
 // dispatch params are unused here, kept for route-facing Provider signature parity.
 // `construct` = true for openai-compatible providers with no catalog entry to look up.
+// `modelOverrides` is the provider's config block; only `input` is applied here, because
+// pi-ai strips images from a model whose `input` lacks "image" — the listing already
+// honors the override, and dispatch must agree with what the listing advertised.
 export const createModelsDispatch = (
   models: Models,
   providerName: string,
   construct = false,
   formatTranslation: FormatTranslationMode = 'auto',
-  structuredOutputApi?: StructuredOutputApi
+  structuredOutputApi?: StructuredOutputApi,
+  modelOverrides?: Record<string, ModelMetaOverride>
 ): Provider => ({
   name: providerName,
   type: 'models',
@@ -157,7 +170,10 @@ export const createModelsDispatch = (
       request.structuredOutput && structuredOutputApi
         ? forStructuredOutput(models, providerName, catalogModel, structuredOutputApi)
         : catalogModel
-    const model = capMaxTokens(withKnownLimits(routed), body)
+    const model = withInputOverride(
+      capMaxTokens(withKnownLimits(routed), body),
+      modelOverrides?.[request.model]?.input
+    )
 
     // Capability resolution throws before streaming, so an unenforceable schema
     // fails this candidate instead of silently producing unconstrained output.

@@ -15,6 +15,7 @@ const ompModelOverride = (m: RoleModel) => ({
   name: m.name,
   ...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
   ...(m.maxTokens ? { maxTokens: m.maxTokens } : {}),
+  ...(m.input?.includes('image') ? { input: ['text', 'image'] } : {}),
   ...(m.cost?.input !== undefined || m.cost?.output !== undefined
     ? {
         cost: {
